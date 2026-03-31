@@ -92,7 +92,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           ),
           ElevatedButton(
             onPressed: () {
-              ref.read(serverUrlProvider.notifier).state = ctrl.text.trim();
+              ref.read(serverUrlProvider.notifier).setUrl(ctrl.text.trim());
               Navigator.pop(ctx);
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Server URL updated')),

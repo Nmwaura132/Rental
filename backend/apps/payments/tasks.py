@@ -1,4 +1,5 @@
 import logging
+from datetime import timedelta
 from celery import shared_task
 from django.utils import timezone
 
@@ -13,8 +14,12 @@ def process_mpesa_payment(self, receipt_number, amount, account_ref, phone, idem
     """
     from apps.tenants.models import Lease
     from .models import Invoice, Payment
+    from apps.core.utils.phone import normalize_phone
 
     try:
+        # Normalize incoming phone
+        normalized_phone = normalize_phone(phone)
+
         # Find the active lease by unit number (account_ref)
         lease = (
             Lease.objects
@@ -46,7 +51,7 @@ def process_mpesa_payment(self, receipt_number, amount, account_ref, phone, idem
             status=Payment.Status.CONFIRMED,
             amount=amount,
             mpesa_receipt_number=receipt_number,
-            mpesa_phone=phone,
+            mpesa_phone=normalized_phone,
             mpesa_account_ref=account_ref,
             idempotency_key=idempotency_key,
             paid_at=timezone.now(),
@@ -58,7 +63,7 @@ def process_mpesa_payment(self, receipt_number, amount, account_ref, phone, idem
             invoice.status = Invoice.Status.PAID
         else:
             invoice.status = Invoice.Status.PARTIALLY_PAID
-        invoice.save(update_fields=["amount_paid", "status", "updated_at"])
+        invoice.save(update_fields=["amount_paid", "status"])
 
         # Send SMS receipt
         from apps.notifications.tasks import send_payment_receipt_sms
@@ -84,8 +89,8 @@ def generate_monthly_invoices():
 
     today = timezone.now().date()
     period_start = today.replace(day=1)
-    next_month = (today.replace(day=28) + timezone.timedelta(days=4)).replace(day=1)
-    period_end = next_month - timezone.timedelta(days=1)
+    next_month = (today.replace(day=28) + timedelta(days=4)).replace(day=1)
+    period_end = next_month - timedelta(days=1)
     due_date = period_start  # due on 1st
 
     active_leases = Lease.objects.filter(status=Lease.Status.ACTIVE).select_related("unit", "tenant")

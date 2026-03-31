@@ -35,33 +35,33 @@ class PropertyDetailScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final prop = ref.watch(propertyDetailProvider(propertyId));
 
-    return Scaffold(
-      body: prop.when(
-        loading: () => const Scaffold(body: Center(child: CircularProgressIndicator())),
-        error: (e, _) => Scaffold(
-          appBar: AppBar(),
-          body: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.cloud_off_outlined, size: 56, color: Colors.grey),
-                const SizedBox(height: 12),
-                Text(apiError(e), style: const TextStyle(color: Colors.grey)),
-                const SizedBox(height: 16),
-                ElevatedButton.icon(
-                  onPressed: () => ref.invalidate(propertyDetailProvider),
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('Retry'),
-                ),
-              ],
-            ),
+    return prop.when(
+      loading: () => const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      ),
+      error: (e, _) => Scaffold(
+        appBar: AppBar(),
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.cloud_off_outlined, size: 56, color: Colors.grey),
+              const SizedBox(height: 12),
+              Text(apiError(e), style: const TextStyle(color: Colors.grey)),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: () => ref.invalidate(propertyDetailProvider),
+                icon: const Icon(Icons.refresh),
+                label: const Text('Retry'),
+              ),
+            ],
           ),
         ),
-        data: (data) => _PropertyDetailView(
-          propertyId: propertyId,
-          data: data,
-          onRefresh: () => ref.invalidate(propertyDetailProvider(propertyId)),
-        ),
+      ),
+      data: (data) => _PropertyDetailView(
+        propertyId: propertyId,
+        data: data,
+        onRefresh: () => ref.invalidate(propertyDetailProvider(propertyId)),
       ),
     );
   }
@@ -84,7 +84,7 @@ class _PropertyDetailView extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(data['name'] ?? 'Property'),
+        title: const Text('Property Details'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -118,14 +118,33 @@ class _PropertyDetailView extends ConsumerWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Row(children: [
-                              Icon(Icons.location_on,
-                                  size: 16, color: theme.colorScheme.primary),
-                              const SizedBox(width: 4),
-                              Expanded(
-                                  child: Text(data['address'] ?? '',
-                                      style: theme.textTheme.bodyMedium)),
-                            ]),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Hero(
+                                  tag: 'property_avatar_$propertyId',
+                                  child: CircleAvatar(
+                                    backgroundColor: theme.colorScheme.primaryContainer,
+                                    child: Icon(Icons.home_work, color: theme.colorScheme.onPrimaryContainer),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(data['name'] ?? 'Property', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                                      const SizedBox(height: 4),
+                                      Row(children: [
+                                        Icon(Icons.location_on, size: 16, color: theme.colorScheme.primary),
+                                        const SizedBox(width: 4),
+                                        Expanded(child: Text(data['address'] ?? '', style: theme.textTheme.bodyMedium)),
+                                      ]),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
                             const SizedBox(height: 4),
                             Text('${data['town']}, ${data['county']}',
                                 style: theme.textTheme.bodySmall
@@ -141,7 +160,7 @@ class _PropertyDetailView extends ConsumerWidget {
                               _InfoChip(
                                 label: '${data['vacant_count']} vacant',
                                 icon: Icons.door_front_door,
-                                color: data['vacant_count'] > 0
+                                color: (data['vacant_count'] as int? ?? 0) > 0
                                     ? Colors.orange
                                     : Colors.green,
                               ),

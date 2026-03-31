@@ -26,6 +26,7 @@ DJANGO_APPS = [
 THIRD_PARTY_APPS = [
     "rest_framework",
     "rest_framework_simplejwt",
+    "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     "django_filters",
     "axes",
@@ -115,8 +116,50 @@ USE_TZ = True
 # ── Static & Media ────────────────────────────────────────────────────────────
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "mediafiles"
+
+# ── Files & Storages (MinIO/S3 Support) ───────────────────────────────────────
+USE_S3 = env.bool("USE_S3", default=False) or (
+    env("S3_ENDPOINT_URL", default=None) is not None
+)
+
+if USE_S3:
+    AWS_S3_ENDPOINT_URL = env("S3_ENDPOINT_URL")
+    AWS_ACCESS_KEY_ID = env("MINIO_ROOT_USER")
+    AWS_SECRET_ACCESS_KEY = env("MINIO_ROOT_PASSWORD")
+    AWS_STORAGE_BUCKET_NAME = env("MINIO_BUCKET_NAME")
+    AWS_S3_URL_PROTOCOL = "https" if env.bool("S3_USE_SSL", default=False) else "http"
+    AWS_S3_USE_SSL = env.bool("S3_USE_SSL", default=False)
+    AWS_S3_SIGNATURE_VERSION = "s3v4"
+    AWS_S3_FILE_OVERWRITE = False
+    
+    # Custom domain / public URL for media
+    MEDIA_URL = env("S3_PUBLIC_URL", default=f"{AWS_S3_ENDPOINT_URL}/{AWS_STORAGE_BUCKET_NAME}/public/")
+    if not MEDIA_URL.endswith("/"):
+        MEDIA_URL += "/"
+
+    STORAGES = {
+        "default": {
+            "BACKEND": "apps.core.storage_backends.PublicMediaStorage",
+        },
+        "private": {
+            "BACKEND": "apps.core.storage_backends.PrivateMediaStorage",
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        },
+    }
+else:
+    MEDIA_URL = "/media/"
+    MEDIA_ROOT = BASE_DIR / "mediafiles"
+
+    STORAGES = {
+        "default": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        },
+    }
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

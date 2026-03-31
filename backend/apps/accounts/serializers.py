@@ -20,8 +20,9 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, attrs):
-        if attrs["password"] != attrs.pop("password_confirm"):
+        if attrs.get("password") != attrs.get("password_confirm"):
             raise serializers.ValidationError({"password": "Passwords do not match."})
+        attrs.pop("password_confirm", None)
         return attrs
 
     def create(self, validated_data):
@@ -42,6 +43,11 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     """Includes user role and name in the token response."""
 
     def validate(self, attrs):
+        from apps.core.utils.phone import normalize_phone
+        phone = attrs.get("phone_number", "").strip()
+        if phone:
+            attrs["phone_number"] = normalize_phone(phone)
+
         data = super().validate(attrs)
         data["role"] = self.user.role
         data["name"] = self.user.get_full_name()

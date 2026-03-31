@@ -10,6 +10,19 @@ class LeaseViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["status", "tenant", "unit"]
 
+    def perform_create(self, serializer):
+        from apps.properties.models import Unit
+        lease = serializer.save()
+        lease.unit.status = Unit.Status.OCCUPIED
+        lease.unit.save(update_fields=["status"])
+
+    def perform_update(self, serializer):
+        from apps.properties.models import Unit
+        lease = serializer.save()
+        if lease.status in [Lease.Status.TERMINATED, Lease.Status.EXPIRED]:
+            lease.unit.status = Unit.Status.VACANT
+            lease.unit.save(update_fields=["status"])
+
     def get_queryset(self):
         user = self.request.user
         if user.is_landlord:
@@ -40,4 +53,4 @@ class MaintenanceRequestViewSet(viewsets.ModelViewSet):
             return MaintenanceRequest.objects.filter(
                 lease__unit__property__caretaker=user
             ).select_related("lease__tenant", "lease__unit")
-        return MaintenanceRequest.objects.filter(lease__tenant=user)
+        return MaintenanceRequest.objects.filter(lease__tenant=user).select_related("lease__unit__property")

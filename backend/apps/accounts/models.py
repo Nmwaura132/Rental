@@ -1,12 +1,17 @@
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models
 from django.utils import timezone
+from apps.core.utils.phone import validate_phone, normalize_phone
 
 
 class UserManager(BaseUserManager):
     def create_user(self, phone_number, password=None, **extra_fields):
         if not phone_number:
             raise ValueError("Phone number is required")
+        
+        # Normalize on creation
+        phone_number = normalize_phone(phone_number)
+        
         extra_fields.setdefault("is_active", True)
         user = self.model(phone_number=phone_number, **extra_fields)
         user.set_password(password)
@@ -27,7 +32,13 @@ class User(AbstractBaseUser, PermissionsMixin):
         CARETAKER = "caretaker", "Caretaker"
 
     # Primary identifier is phone number (critical for M-Pesa matching)
-    phone_number = models.CharField(max_length=15, unique=True, db_index=True)
+    phone_number = models.CharField(
+        max_length=15, 
+        unique=True, 
+        db_index=True,
+        validators=[validate_phone],
+        help_text="E.164 format (e.g. +254712345678)"
+    )
     email = models.EmailField(blank=True, null=True, unique=True)
     first_name = models.CharField(max_length=60)
     last_name = models.CharField(max_length=60)
@@ -40,7 +51,12 @@ class User(AbstractBaseUser, PermissionsMixin):
     # Tenant profile fields
     occupation = models.CharField(max_length=100, blank=True, null=True)
     next_of_kin_name = models.CharField(max_length=120, blank=True, null=True)
-    next_of_kin_phone = models.CharField(max_length=15, blank=True, null=True)
+    next_of_kin_phone = models.CharField(
+        max_length=15, 
+        blank=True, 
+        null=True,
+        validators=[validate_phone]
+    )
 
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
@@ -59,6 +75,14 @@ class User(AbstractBaseUser, PermissionsMixin):
         indexes = [
             models.Index(fields=["role", "is_active"]),
         ]
+
+    def save(self, *args, **kwargs):
+        # Always normalize before saving to the DB
+        if self.phone_number:
+            self.phone_number = normalize_phone(self.phone_number)
+        if self.next_of_kin_phone:
+            self.next_of_kin_phone = normalize_phone(self.next_of_kin_phone)
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.get_full_name()} ({self.phone_number})"

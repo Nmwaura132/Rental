@@ -70,6 +70,12 @@ class PasswordResetView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        from apps.core.utils.phone import normalize_phone, validate_phone
+        try:
+            phone_number = normalize_phone(phone_number)
+        except Exception:
+            return Response({"error": "Invalid phone number."}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
             user = User.objects.get(phone_number=phone_number)
         except User.DoesNotExist:

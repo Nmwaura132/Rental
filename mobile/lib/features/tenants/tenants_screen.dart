@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
 import '../../core/constants.dart';
 import '../../core/utils/api_error.dart';
+import '../../shared/widgets/shimmer_loading.dart';
 
 final leasesProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
   final dio = ref.watch(dioProvider);
@@ -23,165 +24,186 @@ class TenantsScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Tenants & Leases')),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _showOptions(context, ref),
-        child: const Icon(Icons.add),
-      ),
-      body: leases.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.cloud_off_outlined, size: 56, color: Colors.grey),
-              const SizedBox(height: 12),
-              Text(apiError(e), style: const TextStyle(color: Colors.grey)),
-              const SizedBox(height: 16),
-              ElevatedButton.icon(
-                onPressed: () => ref.invalidate(leasesProvider),
-                icon: const Icon(Icons.refresh),
-                label: const Text('Retry'),
-              ),
-            ],
-          ),
+      floatingActionButton: Padding(
+        padding: const EdgeInsets.only(bottom: 80),
+        child: FloatingActionButton(
+          onPressed: () => _showOptions(context, ref),
+          child: const Icon(Icons.add),
         ),
-        data: (list) => list.isEmpty
-            ? const Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.people_outline, size: 64, color: Colors.grey),
-                    SizedBox(height: 12),
-                    Text('No tenants yet.', style: TextStyle(color: Colors.grey)),
-                    SizedBox(height: 4),
-                    Text('Tap + to add a tenant and create a lease.',
-                        style: TextStyle(color: Colors.grey, fontSize: 12)),
-                  ],
+      ),
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 300),
+        child: leases.when(
+          loading: () => const SkeletonList(),
+          error: (e, _) => Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.cloud_off_outlined, size: 56, color: Colors.grey),
+                const SizedBox(height: 12),
+                Text(apiError(e), style: const TextStyle(color: Colors.grey)),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: () => ref.invalidate(leasesProvider),
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Retry'),
                 ),
-              )
-            : RefreshIndicator(
-                onRefresh: () => ref.refresh(leasesProvider.future),
-                  child: ListView.builder(
-                  padding: const EdgeInsets.all(12),
-                  itemCount: list.length,
-                  itemBuilder: (_, i) {
-                    final lease = list[i] as Map<String, dynamic>;
-                    final status = lease['status'] as String? ?? 'unknown';
-                    return Card(
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor:
-                              Theme.of(context).colorScheme.primaryContainer,
-                          child: Text(
-                            ((lease['tenant_name'] as String?) ?? '?')[0]
-                                .toUpperCase(),
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.onPrimaryContainer,
-                              fontWeight: FontWeight.bold,
+              ],
+            ),
+          ),
+          data: (list) => list.isEmpty
+              ? const Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.people_outline, size: 64, color: Colors.grey),
+                      SizedBox(height: 12),
+                      Text('No tenants yet.', style: TextStyle(color: Colors.grey)),
+                      SizedBox(height: 4),
+                      Text('Tap + to add a tenant and create a lease.',
+                          style: TextStyle(color: Colors.grey, fontSize: 12)),
+                    ],
+                  ),
+                )
+              : RefreshIndicator(
+                  onRefresh: () => ref.refresh(leasesProvider.future),
+                    child: ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 100),
+                    itemCount: list.length,
+                    itemBuilder: (_, i) {
+                      final lease = list[i] as Map<String, dynamic>;
+                      final status = lease['status'] as String? ?? 'unknown';
+                      return Card(
+                        child: ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor:
+                                Theme.of(context).colorScheme.primaryContainer,
+                            child: Text(
+                              ((lease['tenant_name'] as String?)?.isNotEmpty == true
+                                      ? lease['tenant_name'] as String
+                                      : '?')[0]
+                                  .toUpperCase(),
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.onPrimaryContainer,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                           ),
-                        ),
-                        title: Text(
-                          lease['tenant_name'] ?? 'Unknown',
-                          style: const TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                                '${lease['property_name'] ?? ''} · Unit ${lease['unit_number'] ?? ''}'),
-                            if (lease['tenant_phone'] != null)
-                              Text(
-                                lease['tenant_phone'],
-                                style: const TextStyle(
-                                    fontSize: 12, color: Colors.grey),
-                              ),
-                          ],
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Chip(
-                              label: Text(status.toUpperCase(),
-                                  style: const TextStyle(fontSize: 10)),
-                              backgroundColor: status == 'active'
-                                  ? Colors.green.shade100
-                                  : Colors.grey.shade200,
-                            ),
-                            if (status == 'active')
-                              PopupMenuButton<String>(
-                                onSelected: (action) async {
-                                  if (action == 'terminate') {
-                                    final confirmed = await showDialog<bool>(
-                                      context: context,
-                                      useRootNavigator: true,
-                                      builder: (ctx) => AlertDialog(
-                                        title: const Text('Terminate Lease'),
-                                        content: Text(
-                                            'Terminate the lease for ${lease['tenant_name']}? '
-                                            'The unit will be marked vacant.'),
-                                        actions: [
-                                          TextButton(
-                                            onPressed: () =>
-                                                Navigator.pop(ctx, false),
-                                            child: const Text('Cancel'),
-                                          ),
-                                          ElevatedButton(
-                                            style: ElevatedButton.styleFrom(
-                                              backgroundColor:
-                                                  Theme.of(ctx).colorScheme.error,
-                                              foregroundColor: Colors.white,
-                                            ),
-                                            onPressed: () =>
-                                                Navigator.pop(ctx, true),
-                                            child: const Text('Terminate'),
-                                          ),
-                                        ],
+                          title: Text(
+                            lease['tenant_name'] ?? 'Unknown',
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const SizedBox(height: 2),
+                              Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: status == 'active'
+                                          ? Colors.green.shade100
+                                          : Colors.grey.shade200,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      status.toUpperCase(),
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        color: status == 'active'
+                                            ? Colors.green.shade800
+                                            : Colors.grey.shade700,
                                       ),
-                                    );
-                                    if (confirmed == true && context.mounted) {
-                                      try {
-                                        await ref.read(dioProvider).patch(
-                                          '/api/v1/tenants/leases/${lease['id']}/',
-                                          data: {'status': 'terminated'},
-                                        );
-                                        ref.invalidate(leasesProvider);
-                                      } catch (e) {
-                                        if (context.mounted) {
-                                          ScaffoldMessenger.of(context)
-                                              .showSnackBar(SnackBar(
-                                            content:
-                                                Text(apiError(e)),
-                                            backgroundColor: Theme.of(context)
-                                                .colorScheme
-                                                .error,
-                                          ));
-                                        }
-                                      }
-                                    }
-                                  }
-                                },
-                                itemBuilder: (_) => const [
-                                  PopupMenuItem(
-                                    value: 'terminate',
-                                    child: ListTile(
-                                      leading: Icon(Icons.cancel_outlined,
-                                          color: Colors.red),
-                                      title: Text('Terminate',
-                                          style:
-                                              TextStyle(color: Colors.red)),
                                     ),
                                   ),
                                 ],
                               ),
-                          ],
+                              const SizedBox(height: 4),
+                              Text(
+                                  '${lease['property_name'] ?? ''} · Unit ${lease['unit_number'] ?? ''}'),
+                              if (lease['tenant_phone'] != null)
+                                Text(
+                                  lease['tenant_phone'],
+                                  style: const TextStyle(
+                                      fontSize: 12, color: Colors.grey),
+                                ),
+                            ],
+                          ),
+                          trailing: status == 'active'
+                              ? PopupMenuButton<String>(
+                                  onSelected: (action) async {
+                                    if (action == 'terminate') {
+                                      final confirmed = await showDialog<bool>(
+                                        context: context,
+                                        useRootNavigator: true,
+                                        builder: (ctx) => AlertDialog(
+                                          title: const Text('Terminate Lease'),
+                                          content: Text(
+                                              'Terminate the lease for ${lease['tenant_name']}? '
+                                              'The unit will be marked vacant.'),
+                                          actions: [
+                                            TextButton(
+                                              onPressed: () =>
+                                                  Navigator.pop(ctx, false),
+                                              child: const Text('Cancel'),
+                                            ),
+                                            ElevatedButton(
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor:
+                                                    Theme.of(ctx).colorScheme.error,
+                                                foregroundColor: Colors.white,
+                                              ),
+                                              onPressed: () =>
+                                                  Navigator.pop(ctx, true),
+                                              child: const Text('Terminate'),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                      if (confirmed == true && context.mounted) {
+                                        try {
+                                          await ref.read(dioProvider).patch(
+                                            '/api/v1/tenants/leases/${lease['id']}/',
+                                            data: {'status': 'terminated'},
+                                          );
+                                          ref.invalidate(leasesProvider);
+                                        } catch (e) {
+                                          if (context.mounted) {
+                                            ScaffoldMessenger.of(context)
+                                                .showSnackBar(SnackBar(
+                                              content: Text(apiError(e)),
+                                              backgroundColor: Theme.of(context)
+                                                  .colorScheme
+                                                  .error,
+                                            ));
+                                          }
+                                        }
+                                      }
+                                    }
+                                  },
+                                  itemBuilder: (_) => const [
+                                    PopupMenuItem(
+                                      value: 'terminate',
+                                      child: ListTile(
+                                        leading: Icon(Icons.cancel_outlined,
+                                            color: Colors.red),
+                                        title: Text('Terminate',
+                                            style: TextStyle(color: Colors.red)),
+                                      ),
+                                    ),
+                                  ],
+                                )
+                              : null,
+                          isThreeLine: true,
                         ),
-                        isThreeLine: true,
-                      ),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 ),
-              ),
+        ),
       ),
     );
   }
@@ -235,7 +257,7 @@ class TenantsScreen extends ConsumerWidget {
     if (!context.mounted) return;
 
     if (action == 'addTenant') {
-      Navigator.of(context).push(
+      Navigator.of(context, rootNavigator: true).push(
         MaterialPageRoute(
           fullscreenDialog: true,
           builder: (ctx) => Scaffold(
@@ -312,7 +334,13 @@ class _AddTenantDialogState extends ConsumerState<_AddTenantDialog> {
 
   String _normalizePhone(String phone) {
     final digits = phone.replaceAll(RegExp(r'[\s\-()]'), '');
-    if (!digits.startsWith('+')) return '+$digits';
+    if (digits.startsWith('0') && digits.length == 10) {
+      return '+254${digits.substring(1)}';
+    }
+    if (digits.startsWith('254') && !digits.startsWith('+')) {
+      return '+$digits';
+    }
+    if (!digits.startsWith('+')) return '+254$digits';
     return digits;
   }
 
@@ -377,7 +405,6 @@ class _AddTenantDialogState extends ConsumerState<_AddTenantDialog> {
 
   @override
   Widget build(BuildContext context) {
-    debugPrint('🟢 _AddTenantDialog.build() called');
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [

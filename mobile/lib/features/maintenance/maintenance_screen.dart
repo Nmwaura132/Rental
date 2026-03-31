@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:intl/intl.dart';
@@ -85,7 +86,10 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen> {
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Refresh',
-            onPressed: () => ref.invalidate(maintenanceListProvider),
+            onPressed: () {
+              HapticFeedback.lightImpact();
+              ref.invalidate(maintenanceListProvider);
+            },
           ),
         ],
       ),
@@ -167,7 +171,10 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen> {
       ),
       floatingActionButton: _isTenant
           ? FloatingActionButton(
-              onPressed: () => _showCreateDialog(context),
+              onPressed: () {
+                HapticFeedback.lightImpact();
+                _showCreateDialog(context);
+              },
               child: const Icon(Icons.add),
             )
           : null,
@@ -184,7 +191,6 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (_) => _CreateRequestSheet(
-        ref: ref,
         onCreated: () {
           ref.invalidate(maintenanceListProvider);
           Navigator.pop(context);
@@ -569,20 +575,20 @@ class _StatusUpdateDialogState extends ConsumerState<_StatusUpdateDialog> {
           Text(widget.title,
               style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
           const SizedBox(height: 14),
-          RadioGroup<String>(
-            groupValue: _status,
-            onChanged: (v) => setState(() => _status = v!),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: _statusLabels.entries.map(
-                (e) => RadioListTile<String>(
-                  title: Text(e.value),
-                  value: e.key,
-                  dense: true,
-                  visualDensity: VisualDensity.compact,
-                ),
-              ).toList(),
-            ),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: _statusLabels.entries.map(
+              (e) => RadioListTile<String>(
+                title: Text(e.value),
+                value: e.key,
+                // ignore: deprecated_member_use
+                groupValue: _status,
+                // ignore: deprecated_member_use
+                onChanged: (v) => setState(() => _status = v!),
+                dense: true,
+                visualDensity: VisualDensity.compact,
+              ),
+            ).toList(),
           ),
         ],
       ),
@@ -608,8 +614,7 @@ class _StatusUpdateDialogState extends ConsumerState<_StatusUpdateDialog> {
 // ─── Create Request Sheet (tenant) ───────────────────────────────────────────
 
 class _CreateRequestSheet extends ConsumerStatefulWidget {
-  const _CreateRequestSheet({required this.ref, required this.onCreated});
-  final WidgetRef ref;
+  const _CreateRequestSheet({required this.onCreated});
   final VoidCallback onCreated;
 
   @override

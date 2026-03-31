@@ -6,6 +6,7 @@ import '../../core/constants.dart';
 import '../../core/providers/user_role_provider.dart';
 import '../../core/utils/api_error.dart';
 import '../../core/utils/currency.dart';
+import '../../shared/widgets/shimmer_loading.dart';
 
 final _apiDate = DateFormat('yyyy-MM-dd');
 final _displayDate = DateFormat('dd MMM yyyy');
@@ -112,29 +113,32 @@ class InvoicesScreen extends ConsumerWidget {
       appBar: AppBar(title: const Text('Invoices')),
       floatingActionButton: role == 'tenant'
           ? null
-          : FloatingActionButton.extended(
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  fullscreenDialog: true,
-                  builder: (ctx) => Scaffold(
-                    appBar: AppBar(
-                      title: const Text('Create Invoice'),
-                      leading: IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () => Navigator.of(ctx).pop(),
+          : Padding(
+              padding: const EdgeInsets.only(bottom: 80),
+              child: FloatingActionButton.extended(
+                onPressed: () => Navigator.of(context, rootNavigator: true).push(
+                  MaterialPageRoute(
+                    fullscreenDialog: true,
+                    builder: (ctx) => Scaffold(
+                      appBar: AppBar(
+                        title: const Text('Create Invoice'),
+                        leading: IconButton(
+                          icon: const Icon(Icons.close),
+                          onPressed: () => Navigator.of(ctx).pop(),
+                        ),
                       ),
-                    ),
-                    body: _CreateInvoiceDialog(
-                      onDone: () => ref.invalidate(invoicesProvider),
+                      body: _CreateInvoiceDialog(
+                        onDone: () => ref.invalidate(invoicesProvider),
+                      ),
                     ),
                   ),
                 ),
+                icon: const Icon(Icons.add),
+                label: const Text('Create Invoice'),
               ),
-              icon: const Icon(Icons.add),
-              label: const Text('Create Invoice'),
             ),
       body: invoices.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => const SkeletonList(),
         error: (e, _) => Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -709,6 +713,8 @@ class _InvoiceDetailSheet extends ConsumerWidget {
                 ),
                 onPressed: () async {
                   Navigator.pop(context);
+                  await Future.delayed(const Duration(milliseconds: 350));
+                  if (!context.mounted) return;
                   final confirmed = await showDialog<bool>(
                     context: context,
                     builder: (ctx) => AlertDialog(
@@ -970,6 +976,7 @@ class _RecordPaymentDialogState extends ConsumerState<_RecordPaymentDialog> {
   static const _methods = [
     ('cash', 'Cash'),
     ('bank', 'Bank Transfer'),
+    ('mpesa', 'M-Pesa'),
     ('airtel', 'Airtel Money'),
     ('card', 'Card'),
   ];
@@ -1081,11 +1088,18 @@ class _CreateInvoiceDialog extends ConsumerStatefulWidget {
 class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
   List<Map<String, dynamic>> _leases = [];
   bool _initialLoading = true;
+  String? _loadError;
 
   int? _selectedLeaseId;
   final _notesCtrl = TextEditingController();
   DateTime _periodStart = DateTime(DateTime.now().year, DateTime.now().month, 1);
-  DateTime _periodEnd = DateTime(DateTime.now().year, DateTime.now().month + 1, 0);
+  // Day 0 of next month = last day of current month (Dart overflow handling).
+  // Explicitly guard December (month 12) by using year+1, month 1, day 0.
+  static DateTime _lastDayOfMonth(int year, int month) {
+    if (month == 12) return DateTime(year + 1, 1, 0);
+    return DateTime(year, month + 1, 0);
+  }
+  late DateTime _periodEnd = _lastDayOfMonth(DateTime.now().year, DateTime.now().month);
   DateTime _dueDate = DateTime(DateTime.now().year, DateTime.now().month, 5);
   bool _submitting = false;
 
@@ -1129,7 +1143,12 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
         _initialLoading = false;
       });
     } catch (e) {
-      if (mounted) setState(() => _initialLoading = false);
+      if (mounted) {
+        setState(() {
+          _initialLoading = false;
+          _loadError = apiError(e);
+        });
+      }
     }
   }
 
@@ -1150,8 +1169,13 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
           charges = (data['results'] as List).cast<Map<String, dynamic>>();
         }
       }
-    } catch (_) {
-      // Proceed with just rent if charge fetch fails
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Could not load charges: ${apiError(e)}'),
+          backgroundColor: Colors.orange,
+        ));
+      }
     }
     if (!mounted) return;
     for (final item in _lineItems) {
@@ -1398,7 +1422,9 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
               ? const SizedBox(
                   height: 100,
                   child: Center(child: CircularProgressIndicator()))
-              : SingleChildScrollView(
+              : _loadError != null
+                  ? Center(child: Text(_loadError!, style: const TextStyle(color: Colors.red)))
+                  : SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,

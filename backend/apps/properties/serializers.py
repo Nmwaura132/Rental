@@ -31,10 +31,10 @@ class PropertySerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "owner", "created_at"]
 
     def get_unit_count(self, obj):
-        return obj.units.count()
+        return len(obj.units.all())
 
     def get_vacant_count(self, obj):
-        return obj.units.filter(status=Unit.Status.VACANT).count()
+        return len([u for u in obj.units.all() if u.status == "vacant"])
 
     def create(self, validated_data):
         validated_data["owner"] = self.context["request"].user

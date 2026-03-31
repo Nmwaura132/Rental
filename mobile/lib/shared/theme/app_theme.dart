@@ -43,12 +43,13 @@ class AppTheme {
         ),
       ),
 
-      // Cards — elevation 0, tinted surface, 16dp radius
+      // Cards — subtle drop shadow, floating surface, 20dp radius
       cardTheme: CardThemeData(
-        elevation: 0,
-        color: cs.surfaceContainerHighest,
+        elevation: 4,
+        shadowColor: Colors.black.withValues(alpha: 0.3),
+        color: cs.surface,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(20),
         ),
         margin: EdgeInsets.zero,
       ),

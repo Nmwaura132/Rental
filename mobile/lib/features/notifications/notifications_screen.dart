@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
@@ -43,7 +44,10 @@ class NotificationsScreen extends ConsumerWidget {
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Refresh',
-            onPressed: () => ref.invalidate(notificationsProvider),
+            onPressed: () {
+              HapticFeedback.lightImpact();
+              ref.invalidate(notificationsProvider);
+            },
           ),
         ],
       ),
@@ -59,7 +63,10 @@ class NotificationsScreen extends ConsumerWidget {
                   style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 16),
               ElevatedButton.icon(
-                onPressed: () => ref.invalidate(notificationsProvider),
+                onPressed: () {
+                  HapticFeedback.mediumImpact();
+                  ref.invalidate(notificationsProvider);
+                },
                 icon: const Icon(Icons.refresh),
                 label: const Text('Retry'),
               ),
@@ -82,7 +89,10 @@ class NotificationsScreen extends ConsumerWidget {
                 ),
               )
             : RefreshIndicator(
-                onRefresh: () => ref.refresh(notificationsProvider.future),
+                onRefresh: () async {
+                  HapticFeedback.mediumImpact();
+                  await ref.refresh(notificationsProvider.future);
+                },
                 child: ListView.builder(
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   itemCount: list.length,
@@ -112,6 +122,9 @@ class _NotificationTile extends StatelessWidget {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: ListTile(
+        onTap: () {
+          HapticFeedback.selectionClick();
+        },
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         leading: CircleAvatar(
           backgroundColor: color.withValues(alpha: 0.12),

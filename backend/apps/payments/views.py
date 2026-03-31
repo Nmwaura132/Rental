@@ -1,5 +1,6 @@
 import logging
 import uuid
+from decimal import Decimal
 from django.utils import timezone
 from django.db.models import Sum, Count, Q
 from rest_framework import viewsets, permissions, status
@@ -41,9 +42,10 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         ).prefetch_related("line_items", "payments")
 
     def perform_create(self, serializer):
+        super().perform_create(serializer)
         invoice = Invoice.objects.select_related(
             "lease__tenant", "lease__unit__property"
-        ).get(pk=serializer.save().pk)
+        ).get(pk=serializer.instance.pk)
         from apps.notifications.tasks import send_sms
         from django.conf import settings
         tenant = invoice.lease.tenant
@@ -85,7 +87,7 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
         method = request.data.get("method")
         amount = request.data.get("amount")
 
-        allowed_methods = [Payment.Method.CASH, Payment.Method.BANK, Payment.Method.AIRTEL, Payment.Method.CARD]
+        allowed_methods = [Payment.Method.CASH, Payment.Method.BANK, Payment.Method.MPESA, Payment.Method.AIRTEL, Payment.Method.CARD]
         if method not in [m.value for m in allowed_methods]:
             return Response(
                 {"error": f"Method must be one of: {[m.value for m in allowed_methods]}"},
@@ -116,12 +118,12 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
             paid_at=timezone.now(),
         )
 
-        invoice.amount_paid = (invoice.amount_paid or 0) + payment.amount
+        invoice.amount_paid = (invoice.amount_paid or Decimal('0')) + Decimal(str(payment.amount))
         invoice.status = (
             Invoice.Status.PAID if invoice.amount_paid >= invoice.amount_due
             else Invoice.Status.PARTIALLY_PAID
         )
-        invoice.save(update_fields=["amount_paid", "status", "updated_at"])
+        invoice.save(update_fields=["amount_paid", "status"])
 
         return Response(PaymentSerializer(payment).data, status=status.HTTP_201_CREATED)
 
@@ -139,9 +141,10 @@ class DashboardStatsView(APIView):
             from django.conf import settings as django_settings
             # Tenant dashboard: balance, next due date, active lease/unit info
             invoices = Invoice.objects.filter(lease__tenant=user)
-            total_balance = invoices.filter(
+            _bal = invoices.filter(
                 status__in=[Invoice.Status.PENDING, Invoice.Status.OVERDUE, Invoice.Status.PARTIALLY_PAID]
-            ).aggregate(bal=Sum("amount_due") - Sum("amount_paid"))["bal"] or 0
+            ).aggregate(due=Sum("amount_due"), paid=Sum("amount_paid"))
+            total_balance = (_bal["due"] or 0) - (_bal["paid"] or 0)
             next_invoice = invoices.filter(
                 status__in=[Invoice.Status.PENDING, Invoice.Status.OVERDUE]
             ).order_by("due_date").first()
@@ -155,8 +158,8 @@ class DashboardStatsView(APIView):
                 "unit_number": lease.unit.unit_number if lease else None,
                 "property_name": lease.unit.property.name if lease else None,
                 "monthly_rent": float(lease.rent_amount) if lease else None,
-                "lease_start": lease.start_date.isoformat() if lease else None,
-                "lease_end": lease.end_date.isoformat() if lease else None,
+                "lease_start": lease.start_date.isoformat() if (lease and lease.start_date) else None,
+                "lease_end": lease.end_date.isoformat() if (lease and lease.end_date) else None,
                 "mpesa_paybill": getattr(django_settings, "MPESA_SHORTCODE", None),
             })
 

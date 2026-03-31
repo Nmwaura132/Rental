@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/api/api_client.dart';
 import '../../core/constants.dart';
 import '../../core/utils/api_error.dart';
+import '../../shared/widgets/shimmer_loading.dart';
 
 final propertiesProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
   final dio = ref.watch(dioProvider);
@@ -22,147 +23,156 @@ class PropertiesScreen extends ConsumerWidget {
     final props = ref.watch(propertiesProvider);
     return Scaffold(
       appBar: AppBar(title: const Text('Properties')),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => Navigator.of(context).push(
-          MaterialPageRoute(
-            fullscreenDialog: true,
-            builder: (ctx) => Scaffold(
-              appBar: AppBar(
-                title: const Text('Add Property'),
-                leading: IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.of(ctx).pop(),
+      floatingActionButton: Padding(
+        padding: const EdgeInsets.only(bottom: 80),
+        child: FloatingActionButton.extended(
+          onPressed: () => Navigator.of(context, rootNavigator: true).push(
+            MaterialPageRoute(
+              fullscreenDialog: true,
+              builder: (ctx) => Scaffold(
+                appBar: AppBar(
+                  title: const Text('Add Property'),
+                  leading: IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.of(ctx).pop(),
+                  ),
                 ),
-              ),
-              body: _AddPropertyPage(
-                onDone: () => ref.invalidate(propertiesProvider),
+                body: _AddPropertyPage(
+                  onDone: () => ref.invalidate(propertiesProvider),
+                ),
               ),
             ),
           ),
+          icon: const Icon(Icons.add),
+          label: const Text('Add Property'),
         ),
-        icon: const Icon(Icons.add),
-        label: const Text('Add Property'),
       ),
-      body: props.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.cloud_off_outlined, size: 56, color: Colors.grey),
-              const SizedBox(height: 12),
-              Text(apiError(e), style: const TextStyle(color: Colors.grey)),
-              const SizedBox(height: 16),
-              ElevatedButton.icon(
-                onPressed: () => ref.invalidate(propertiesProvider),
-                icon: const Icon(Icons.refresh),
-                label: const Text('Retry'),
-              ),
-            ],
-          ),
-        ),
-        data: (list) => list.isEmpty
-            ? const Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.home_work_outlined, size: 64, color: Colors.grey),
-                    SizedBox(height: 12),
-                    Text('No properties yet.', style: TextStyle(color: Colors.grey)),
-                    SizedBox(height: 4),
-                    Text('Tap "Add Property" to get started.',
-                        style: TextStyle(color: Colors.grey, fontSize: 12)),
-                  ],
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 300),
+        child: props.when(
+          loading: () => const SkeletonList(),
+          error: (e, _) => Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.cloud_off_outlined, size: 56, color: Colors.grey),
+                const SizedBox(height: 12),
+                Text(apiError(e), style: const TextStyle(color: Colors.grey)),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: () => ref.invalidate(propertiesProvider),
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Retry'),
                 ),
-              )
-            : ListView.builder(
-                padding: const EdgeInsets.fromLTRB(12, 12, 12, 100),
-                itemCount: list.length,
-                itemBuilder: (_, i) {
-                  final p = list[i] as Map<String, dynamic>;
-                  final unitCount = p['unit_count'] as int? ?? 0;
-                  final vacantCount = p['vacant_count'] as int? ?? 0;
-                  final occupiedCount = unitCount - vacantCount;
-                  return Card(
-                    child: ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor:
-                            Theme.of(context).colorScheme.primaryContainer,
-                        child: Icon(Icons.home_work,
-                            color: Theme.of(context).colorScheme.onPrimaryContainer),
-                      ),
-                      title: Text(p['name'] as String,
-                          style: const TextStyle(fontWeight: FontWeight.w600)),
-                      subtitle: Text(
-                        '$unitCount unit${unitCount == 1 ? '' : 's'}'
-                        '  ·  $occupiedCount occupied'
-                        '  ·  $vacantCount vacant',
-                      ),
-                      trailing: PopupMenuButton<String>(
-                        onSelected: (action) async {
-                          if (action == 'open') {
-                            context.go('/properties/${p['id']}');
-                          } else if (action == 'edit') {
-                            await showDialog(
-                              context: context,
-                              useRootNavigator: true,
-                              barrierDismissible: false,
-                              builder: (_) => _EditPropertyDialog(
-                                propertyId: p['id'] as int,
-                                currentName: p['name'] as String,
-                                onDone: () => ref.invalidate(propertiesProvider),
-                              ),
-                            );
-                          } else if (action == 'delete') {
-                            final confirmed = await showDialog<bool>(
-                              context: context,
-                              useRootNavigator: true,
-                              builder: (ctx) => AlertDialog(
-                                title: const Text('Delete Property'),
-                                content: Text(
-                                    'Delete "${p['name']}"? This will also delete all its units and data.'),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () => Navigator.pop(ctx, false),
-                                    child: const Text('Cancel'),
-                                  ),
-                                  ElevatedButton(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Theme.of(ctx).colorScheme.error,
-                                      foregroundColor: Colors.white,
+              ],
+            ),
+          ),
+          data: (list) => list.isEmpty
+              ? const Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.home_work_outlined, size: 64, color: Colors.grey),
+                      SizedBox(height: 12),
+                      Text('No properties yet.', style: TextStyle(color: Colors.grey)),
+                      SizedBox(height: 4),
+                      Text('Tap "Add Property" to get started.',
+                          style: TextStyle(color: Colors.grey, fontSize: 12)),
+                    ],
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 100),
+                  itemCount: list.length,
+                  itemBuilder: (_, i) {
+                    final p = list[i] as Map<String, dynamic>;
+                    final unitCount = p['unit_count'] as int? ?? 0;
+                    final vacantCount = p['vacant_count'] as int? ?? 0;
+                    final occupiedCount = unitCount - vacantCount;
+                    return Card(
+                      child: ListTile(
+                        leading: Hero(
+                          tag: 'property_avatar_${p['id']}',
+                          child: CircleAvatar(
+                            backgroundColor:
+                                Theme.of(context).colorScheme.primaryContainer,
+                            child: Icon(Icons.home_work,
+                                color: Theme.of(context).colorScheme.onPrimaryContainer),
+                          ),
+                        ),
+                        title: Text(p['name'] as String,
+                            style: const TextStyle(fontWeight: FontWeight.w600)),
+                        subtitle: Text(
+                          '$unitCount unit${unitCount == 1 ? '' : 's'}'
+                          '  ·  $occupiedCount occupied'
+                          '  ·  $vacantCount vacant',
+                        ),
+                        trailing: PopupMenuButton<String>(
+                          onSelected: (action) async {
+                            if (action == 'open') {
+                              context.go('/properties/${p['id']}');
+                            } else if (action == 'edit') {
+                              await showDialog(
+                                context: context,
+                                useRootNavigator: true,
+                                barrierDismissible: false,
+                                builder: (_) => _EditPropertyDialog(
+                                  propertyId: p['id'] as int,
+                                  currentName: p['name'] as String,
+                                  onDone: () => ref.invalidate(propertiesProvider),
+                                ),
+                              );
+                            } else if (action == 'delete') {
+                              final confirmed = await showDialog<bool>(
+                                context: context,
+                                useRootNavigator: true,
+                                builder: (ctx) => AlertDialog(
+                                  title: const Text('Delete Property'),
+                                  content: Text(
+                                      'Delete "${p['name']}"? This will also delete all its units and data.'),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(ctx, false),
+                                      child: const Text('Cancel'),
                                     ),
-                                    onPressed: () => Navigator.pop(ctx, true),
-                                    child: const Text('Delete'),
-                                  ),
-                                ],
-                              ),
-                            );
-                            if (confirmed == true && context.mounted) {
-                              try {
-                                await ref.read(dioProvider).delete('/api/v1/properties/${p['id']}/');
-                                ref.invalidate(propertiesProvider);
-                              } catch (e) {
-                                if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                                    content: Text(apiError(e)),
-                                    backgroundColor: Theme.of(context).colorScheme.error,
-                                  ));
+                                    ElevatedButton(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Theme.of(ctx).colorScheme.error,
+                                        foregroundColor: Colors.white,
+                                      ),
+                                      onPressed: () => Navigator.pop(ctx, true),
+                                      child: const Text('Delete'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              if (confirmed == true && context.mounted) {
+                                try {
+                                  await ref.read(dioProvider).delete('/api/v1/properties/${p['id']}/');
+                                  ref.invalidate(propertiesProvider);
+                                } catch (e) {
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                      content: Text(apiError(e)),
+                                      backgroundColor: Theme.of(context).colorScheme.error,
+                                    ));
+                                  }
                                 }
                               }
                             }
-                          }
-                        },
-                        itemBuilder: (_) => const [
-                          PopupMenuItem(value: 'open', child: ListTile(leading: Icon(Icons.open_in_new), title: Text('Open'))),
-                          PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Edit'))),
-                          PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline, color: Colors.red), title: Text('Delete', style: TextStyle(color: Colors.red)))),
-                        ],
+                          },
+                          itemBuilder: (_) => const [
+                            PopupMenuItem(value: 'open', child: ListTile(leading: Icon(Icons.open_in_new), title: Text('Open'))),
+                            PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Edit'))),
+                            PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline, color: Colors.red), title: Text('Delete', style: TextStyle(color: Colors.red)))),
+                          ],
+                        ),
+                        onTap: () => context.go('/properties/${p['id']}'),
                       ),
-                      onTap: () => context.go('/properties/${p['id']}'),
-                    ),
-                  );
-                },
-              ),
+                    );
+                  },
+                ),
+        ),
       ),
     );
   }

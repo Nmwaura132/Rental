@@ -11,7 +11,11 @@ class LeaseSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Lease
-        fields = "__all__"
+        fields = [
+            "id", "tenant", "unit", "start_date", "end_date", "rent_amount",
+            "deposit_amount", "deposit_paid", "status", "notes", "created_at",
+            "tenant_name", "tenant_phone", "unit_number", "property_name", "property_id",
+        ]
         read_only_fields = ["id", "created_at"]
 
 

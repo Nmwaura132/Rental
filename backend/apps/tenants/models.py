@@ -34,6 +34,8 @@ class Lease(models.Model):
         return f"{self.tenant} — {self.unit} ({self.status})"
 
 
+from apps.core.storage_backends import PublicMediaStorage
+
 class MaintenanceRequest(models.Model):
     class Priority(models.TextChoices):
         LOW = "low", "Low"
@@ -46,13 +48,17 @@ class MaintenanceRequest(models.Model):
         IN_PROGRESS = "in_progress", "In Progress"
         RESOLVED = "resolved", "Resolved"
         CLOSED = "closed", "Closed"
-
     lease = models.ForeignKey(Lease, on_delete=models.CASCADE, related_name="maintenance_requests")
     title = models.CharField(max_length=120)
     description = models.TextField()
     priority = models.CharField(max_length=10, choices=Priority.choices, default=Priority.MEDIUM)
     status = models.CharField(max_length=15, choices=Status.choices, default=Status.OPEN, db_index=True)
-    photo = models.ImageField(upload_to="maintenance/%Y/%m/", null=True, blank=True)
+    photo = models.ImageField(
+        upload_to="maintenance/%Y/%m/", 
+        null=True, 
+        blank=True,
+        storage=PublicMediaStorage() if settings.USE_S3 else None
+    )
     resolved_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -1,5 +1,11 @@
 from django.db import models
 from django.conf import settings
+import random
+import string
+
+def _generate_unit_hash(length=4):
+    """Generate a random alphanumeric suffix for global M-Pesa unit matching."""
+    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=length))
 
 
 class Property(models.Model):
@@ -56,6 +62,15 @@ class Unit(models.Model):
         indexes = [
             models.Index(fields=["property", "status"]),
         ]
+
+    def save(self, *args, **kwargs):
+        # On creation, append a random suffix to ensure global uniqueness for M-Pesa matching
+        if not self.pk and self.unit_number:
+            suffix = _generate_unit_hash()
+            # max_length is 20, we need 5 chars for "-XXXX"
+            base_number = str(self.unit_number)[:14]
+            self.unit_number = f"{base_number}-{suffix}"
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.property.name} — Unit {self.unit_number}"

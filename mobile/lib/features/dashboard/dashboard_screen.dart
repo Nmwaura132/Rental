@@ -29,12 +29,12 @@ class DashboardScreen extends ConsumerWidget {
           IconButton(
             icon: const Icon(Icons.notifications_outlined),
             tooltip: 'Notifications',
-            onPressed: () => context.go('/notifications'),
+            onPressed: () => context.push('/notifications'),
           ),
           IconButton(
             icon: const Icon(Icons.account_circle_outlined),
             tooltip: 'Profile',
-            onPressed: () => context.go('/profile'),
+            onPressed: () => context.push('/profile'),
           ),
         ],
       ),
@@ -87,11 +87,28 @@ class DashboardScreen extends ConsumerWidget {
 class _WelcomeBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
+    final today = DateFormat('EEEE, d MMMM').format(DateTime.now());
     return FutureBuilder<String?>(
       future: _storage.read(key: 'user_name'),
-      builder: (_, snap) => Text(
-        'Hello, ${snap.data ?? 'there'} 👋',
-        style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+      builder: (_, snap) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Hello, ${snap.data ?? 'there'}',
+            style: Theme.of(context)
+                .textTheme
+                .headlineSmall
+                ?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            today,
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: Colors.grey[600]),
+          ),
+        ],
       ),
     );
   }
@@ -275,16 +292,50 @@ class _BigStatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cardColor = color ?? Theme.of(context).colorScheme.primary;
     return Card(
-      child: ListTile(
+      child: InkWell(
         onTap: onTap,
-        leading: CircleAvatar(
-          backgroundColor: (color ?? Theme.of(context).colorScheme.primary).withValues(alpha: 0.15),
-          child: Icon(icon, color: color ?? Theme.of(context).colorScheme.primary),
+        borderRadius: BorderRadius.circular(20),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: cardColor.withValues(alpha: 0.12),
+                child: Icon(icon, color: cardColor),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(label,
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(color: Colors.grey[600])),
+                    const SizedBox(height: 2),
+                    Text(value,
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleLarge
+                            ?.copyWith(fontWeight: FontWeight.bold)),
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 2),
+                      Text(subtitle!,
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(color: Colors.grey[600])),
+                    ],
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right, color: Colors.grey[400]),
+            ],
+          ),
         ),
-        title: Text(value, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
-        subtitle: Text(subtitle ?? label),
-        trailing: const Icon(Icons.chevron_right),
       ),
     );
   }
