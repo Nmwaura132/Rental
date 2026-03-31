@@ -1,0 +1,53 @@
+name: rental_manager
+description: Kenya Rental Management System — mobile app
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  json_annotation: ^4.8.1
+
+  # ── HTTP & API ──────────────────────────────────────────────────────────────
+  dio: ^5.4.3
+
+  # ── State management ────────────────────────────────────────────────────────
+  flutter_riverpod: ^2.5.1
+
+  # ── Navigation ──────────────────────────────────────────────────────────────
+  go_router: ^14.2.0
+
+  # ── Local storage ───────────────────────────────────────────────────────────
+  flutter_secure_storage: ^9.2.2
+  shared_preferences: ^2.3.0
+
+  # ── UI ──────────────────────────────────────────────────────────────────────
+  google_fonts: ^6.2.1
+  cached_network_image: ^3.3.1
+  shimmer: ^3.0.0
+  intl: ^0.20.0
+
+  # ── Notifications ───────────────────────────────────────────────────────────
+  firebase_core: ^3.3.0
+  firebase_messaging: ^15.1.0
+
+  # ── Utils ───────────────────────────────────────────────────────────────────
+  logger: ^2.4.0
+  equatable: ^2.0.5
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  build_runner: ^2.4.8
+  json_serializable: ^6.7.1
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+    - assets/icons/

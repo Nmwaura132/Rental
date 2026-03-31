@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c//**)",
+      "Bash(\"C:/Users/user/AppData/Local/Android/Sdk/platform-tools/adb.exe\" -s HANZHURKKV6L9XLB install -r \"C:/Users/user/Rental Management system/mobile/build/app/outputs/flutter-apk/app-debug.apk\")",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(k\\) for k in d.keys\\(\\)]\")",
+      "Bash(docker network:*)",
+      "Bash(docker ps:*)",
+      "Bash(tasklist /FI \"PID eq 11052\")",
+      "Bash(tasklist /FI \"PID eq 20668\")",
+      "Bash(cmd /c \"tasklist /FI \"\"PID eq 11052\"\" && tasklist /FI \"\"PID eq 20668\"\"\")",
+      "Bash(cmd /c \"netstat -ano | findstr :3307\")",
+      "Bash(\"C:/Users/user/Flutter/flutter/bin/dart.bat\" analyze:*)"
+    ]
+  }
+}
