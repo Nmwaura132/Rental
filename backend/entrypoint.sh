@@ -14,7 +14,7 @@ case "$*" in
     echo "Running migrations..."
     python manage.py migrate --noinput --fake-initial
     echo "Collecting static files..."
-    python manage.py collectstatic --noinput
+    python manage.py collectstatic --noinput || echo "collectstatic had errors (non-fatal), continuing..."
     ;;
 esac
 

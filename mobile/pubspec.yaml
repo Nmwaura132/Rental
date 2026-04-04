@@ -36,6 +36,7 @@ dependencies:
   firebase_messaging: ^15.1.0
 
   # ── Utils ───────────────────────────────────────────────────────────────────
+  image_picker: ^1.1.2
   logger: ^2.4.0
   equatable: ^2.0.5
 

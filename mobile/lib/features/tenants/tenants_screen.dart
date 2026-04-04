@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:dio/dio.dart';
 import '../../core/api/api_client.dart';
 import '../../core/constants.dart';
 import '../../core/utils/api_error.dart';
@@ -135,7 +137,30 @@ class TenantsScreen extends ConsumerWidget {
                           trailing: status == 'active'
                               ? PopupMenuButton<String>(
                                   onSelected: (action) async {
-                                    if (action == 'terminate') {
+                                    if (action == 'send_lease') {
+                                      try {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(content: Text('Generating lease PDF…')),
+                                        );
+                                        final resp = await ref.read(dioProvider).post(
+                                          '/api/v1/tenants/leases/${lease['id']}/send-lease/',
+                                        );
+                                        if (context.mounted) {
+                                          final msg = resp.data['message'] ?? 'Done';
+                                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                            content: Text(msg),
+                                            backgroundColor: Colors.green,
+                                          ));
+                                        }
+                                      } catch (e) {
+                                        if (context.mounted) {
+                                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                            content: Text(apiError(e)),
+                                            backgroundColor: Theme.of(context).colorScheme.error,
+                                          ));
+                                        }
+                                      }
+                                    } else if (action == 'terminate') {
                                       final confirmed = await showDialog<bool>(
                                         context: context,
                                         useRootNavigator: true,
@@ -185,6 +210,14 @@ class TenantsScreen extends ConsumerWidget {
                                     }
                                   },
                                   itemBuilder: (_) => const [
+                                    PopupMenuItem(
+                                      value: 'send_lease',
+                                      child: ListTile(
+                                        leading: Icon(Icons.picture_as_pdf_outlined,
+                                            color: Colors.blue),
+                                        title: Text('Send Lease Agreement'),
+                                      ),
+                                    ),
                                     PopupMenuItem(
                                       value: 'terminate',
                                       child: ListTile(
@@ -310,6 +343,9 @@ class _AddTenantDialogState extends ConsumerState<_AddTenantDialog> {
   bool _loading = false;
   bool _obscure = true;
   String? _occupationType;
+  XFile? _idFrontPhoto;
+  XFile? _idBackPhoto;
+  final _picker = ImagePicker();
 
   static const _occupationTypes = [
     'Employed',
@@ -373,6 +409,35 @@ class _AddTenantDialogState extends ConsumerState<_AddTenantDialog> {
         'password': _passCtrl.text,
         'password_confirm': _passCtrl.text,
       });
+
+      // Upload ID photos if captured
+      final phone = _normalizePhone(_phoneCtrl.text.trim());
+      for (final entry in [
+        ('front', _idFrontPhoto),
+        ('back', _idBackPhoto),
+      ]) {
+        final side = entry.$1;
+        final file = entry.$2;
+        if (file != null) {
+          try {
+            await dio.post(
+              '/api/v1/auth/upload-id/',
+              data: FormData.fromMap({
+                'side': side,
+                'tenant_phone': phone,
+                'photo': await MultipartFile.fromFile(
+                  file.path,
+                  filename: 'id_$side.jpg',
+                ),
+              }),
+              options: Options(contentType: 'multipart/form-data'),
+            );
+          } catch (_) {
+            // Non-fatal — tenant is created, photo can be uploaded later
+          }
+        }
+      }
+
       widget.onDone();
       if (mounted) {
         final messenger = ScaffoldMessenger.of(context);
@@ -392,6 +457,39 @@ class _AddTenantDialogState extends ConsumerState<_AddTenantDialog> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Future<void> _pickId(String side) async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt),
+              title: const Text('Take Photo'),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library),
+              title: const Text('Choose from Gallery'),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+    final file = await _picker.pickImage(source: source, imageQuality: 85);
+    if (file == null) return;
+    setState(() {
+      if (side == 'front') {
+        _idFrontPhoto = file;
+      } else {
+        _idBackPhoto = file;
+      }
+    });
   }
 
   Widget _sectionLabel(String text) => Padding(
@@ -474,6 +572,22 @@ class _AddTenantDialogState extends ConsumerState<_AddTenantDialog> {
                           isDense: true,
                         ),
                         keyboardType: TextInputType.number,
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(child: _IdPhotoTile(
+                            label: 'ID Front',
+                            file: _idFrontPhoto,
+                            onTap: () => _pickId('front'),
+                          )),
+                          const SizedBox(width: 10),
+                          Expanded(child: _IdPhotoTile(
+                            label: 'ID Back',
+                            file: _idBackPhoto,
+                            onTap: () => _pickId('back'),
+                          )),
+                        ],
                       ),
 
                       // ── Occupation ─────────────────────────────────
@@ -953,5 +1067,73 @@ class _AddLeaseDialogState extends ConsumerState<_AddLeaseDialog> {
       'commercial': 'Commercial',
     };
     return labels[type] ?? type.toString();
+  }
+}
+
+// ─── ID Photo Tile ────────────────────────────────────────────────────────────
+
+class _IdPhotoTile extends StatelessWidget {
+  const _IdPhotoTile({
+    required this.label,
+    required this.file,
+    required this.onTap,
+  });
+  final String label;
+  final XFile? file;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final hasPhoto = file != null;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 90,
+        decoration: BoxDecoration(
+          color: hasPhoto
+              ? theme.colorScheme.primaryContainer.withValues(alpha: 0.3)
+              : theme.colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: hasPhoto
+                ? theme.colorScheme.primary
+                : theme.colorScheme.outline.withValues(alpha: 0.4),
+            width: hasPhoto ? 1.5 : 1,
+          ),
+        ),
+        child: hasPhoto
+            ? ClipRRect(
+                borderRadius: BorderRadius.circular(9),
+                child: Image.network(
+                  file!.path,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => _placeholder(theme, label, true),
+                ),
+              )
+            : _placeholder(theme, label, false),
+      ),
+    );
+  }
+
+  Widget _placeholder(ThemeData theme, String label, bool captured) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(
+          captured ? Icons.check_circle_outline : Icons.add_a_photo_outlined,
+          color: captured ? theme.colorScheme.primary : theme.colorScheme.outline,
+          size: 28,
+        ),
+        const SizedBox(height: 4),
+        Text(
+          captured ? 'Captured' : label,
+          style: TextStyle(
+            fontSize: 11,
+            color: captured ? theme.colorScheme.primary : theme.colorScheme.outline,
+          ),
+        ),
+      ],
+    );
   }
 }

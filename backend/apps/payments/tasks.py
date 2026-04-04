@@ -3,6 +3,9 @@ from datetime import timedelta
 from celery import shared_task
 from django.utils import timezone
 
+from .models import Invoice, Payment
+from .mpesa import make_idempotency_key
+
 logger = logging.getLogger(__name__)
 
 
@@ -69,11 +72,150 @@ def process_mpesa_payment(self, receipt_number, amount, account_ref, phone, idem
         from apps.notifications.tasks import send_payment_receipt_sms
         send_payment_receipt_sms.delay(payment.id)
 
+        # Invalidate dashboard cache for tenant and landlord
+        from django.core.cache import cache
+        cache.delete(f"dashboard:{lease.tenant.id}")
+        cache.delete(f"dashboard:{lease.unit.property.owner.id}")
+
         logger.info("Payment recorded: receipt=%s amount=%s invoice=%s", receipt_number, amount, invoice.invoice_number)
 
     except Exception as exc:
         logger.error("Error processing M-Pesa payment %s: %s", receipt_number, exc)
         raise self.retry(exc=exc)
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=30)
+def process_stk_callback(self, payload: dict):
+    """
+    Process an STK Push callback from Safaricom.
+    Uses select_for_update to prevent race conditions on duplicate callbacks.
+    """
+    from django.db import transaction as db_transaction
+    from .models import MpesaSTKRequest, Payment
+
+    stk = payload.get("Body", {}).get("stkCallback", {})
+    checkout_id = stk.get("CheckoutRequestID", "")
+    result_code = stk.get("ResultCode")
+
+    if not checkout_id:
+        logger.error("STK callback missing CheckoutRequestID: %s", payload)
+        return
+
+    try:
+        with db_transaction.atomic():
+            try:
+                req = MpesaSTKRequest.objects.select_for_update().get(
+                    checkout_request_id=checkout_id
+                )
+            except MpesaSTKRequest.DoesNotExist:
+                logger.warning("STK callback for unknown CheckoutRequestID: %s", checkout_id)
+                return
+
+            if req.status != MpesaSTKRequest.Status.PENDING:
+                logger.info("STK callback already processed for %s, skipping.", checkout_id)
+                return
+
+            req.result_code = result_code
+            req.result_desc = stk.get("ResultDesc", "")
+            req.raw_callback = payload
+
+            if result_code == 0:
+                items = {
+                    i["Name"]: i["Value"]
+                    for i in stk.get("CallbackMetadata", {}).get("Item", [])
+                }
+                receipt = str(items.get("MpesaReceiptNumber", ""))
+                paid_amount = items.get("Amount")
+                phone = str(items.get("PhoneNumber", req.phone))
+
+                # Deduplicate by receipt number
+                if MpesaSTKRequest.objects.filter(mpesa_receipt_number=receipt).exists():
+                    logger.warning("Duplicate STK receipt %s — skipping.", receipt)
+                    return
+
+                req.status = MpesaSTKRequest.Status.SUCCESS
+                req.mpesa_receipt_number = receipt
+                req.save()
+
+                # Record payment on linked invoice
+                if req.invoice:
+                    idempotency_key = make_idempotency_key(receipt)
+                    if not Payment.objects.filter(idempotency_key=idempotency_key).exists():
+                        from decimal import Decimal
+                        payment = Payment.objects.create(
+                            invoice=req.invoice,
+                            method=Payment.Method.MPESA,
+                            status=Payment.Status.CONFIRMED,
+                            amount=Decimal(str(paid_amount or req.amount)),
+                            mpesa_receipt_number=receipt,
+                            mpesa_phone=phone,
+                            mpesa_account_ref=req.account_ref,
+                            idempotency_key=idempotency_key,
+                            paid_at=timezone.now(),
+                        )
+                        invoice = req.invoice
+                        invoice.amount_paid += payment.amount
+                        invoice.status = (
+                            Invoice.Status.PAID if invoice.amount_paid >= invoice.amount_due
+                            else Invoice.Status.PARTIALLY_PAID
+                        )
+                        invoice.save(update_fields=["amount_paid", "status"])
+
+                        from apps.notifications.tasks import send_payment_receipt_sms
+                        send_payment_receipt_sms.delay(payment.id)
+                        # Invalidate dashboard cache for tenant and landlord
+                        from django.core.cache import cache
+                        tenant = req.invoice.lease.tenant
+                        landlord = req.invoice.lease.unit.property.owner
+                        cache.delete(f"dashboard:{tenant.id}")
+                        cache.delete(f"dashboard:{landlord.id}")
+            else:
+                # User cancelled (1032), timeout (1037), insufficient funds (1), etc.
+                req.status = MpesaSTKRequest.Status.CANCELLED if result_code == 1032 \
+                    else MpesaSTKRequest.Status.FAILED
+                req.save()
+
+    except Exception as exc:
+        logger.error("Error processing STK callback for %s: %s", checkout_id, exc)
+        raise self.retry(exc=exc)
+
+
+@shared_task
+def reconcile_pending_stk_transactions():
+    """
+    Celery Beat task — runs every 5 minutes.
+    Queries Safaricom for any STK requests still pending after 5 minutes.
+    Covers edge case where the callback was never delivered.
+    """
+    from .models import MpesaSTKRequest
+    from .mpesa import stk_query
+    import datetime
+
+    cutoff = timezone.now() - datetime.timedelta(minutes=5)
+    pending = MpesaSTKRequest.objects.filter(
+        status=MpesaSTKRequest.Status.PENDING,
+        created_at__lt=cutoff,
+    )
+
+    for req in pending:
+        try:
+            result = stk_query(req.checkout_request_id)
+            result_code = result.get("ResultCode")
+            if result_code is not None and str(result_code) != "":
+                # Build a synthetic callback payload and process it
+                synthetic = {
+                    "Body": {
+                        "stkCallback": {
+                            "MerchantRequestID": req.merchant_request_id,
+                            "CheckoutRequestID": req.checkout_request_id,
+                            "ResultCode": int(result_code),
+                            "ResultDesc": result.get("ResultDesc", "Reconciled via query"),
+                        }
+                    }
+                }
+                process_stk_callback.delay(synthetic)
+        except Exception as e:
+            logger.error("STK reconcile query failed for %s: %s", req.checkout_request_id, e)
 
 
 @shared_task

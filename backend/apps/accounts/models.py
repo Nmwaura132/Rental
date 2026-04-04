@@ -52,11 +52,15 @@ class User(AbstractBaseUser, PermissionsMixin):
     occupation = models.CharField(max_length=100, blank=True, null=True)
     next_of_kin_name = models.CharField(max_length=120, blank=True, null=True)
     next_of_kin_phone = models.CharField(
-        max_length=15, 
-        blank=True, 
+        max_length=15,
+        blank=True,
         null=True,
         validators=[validate_phone]
     )
+
+    # ID document photos (stored in MinIO)
+    id_front_photo = models.URLField(max_length=500, blank=True, null=True)
+    id_back_photo = models.URLField(max_length=500, blank=True, null=True)
 
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)

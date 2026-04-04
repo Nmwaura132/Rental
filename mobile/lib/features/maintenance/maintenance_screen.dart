@@ -1,8 +1,12 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:dio/dio.dart' show FormData, MultipartFile;
 
 import '../../core/api/api_client.dart';
 import '../../core/utils/api_error.dart';
@@ -262,6 +266,8 @@ class _RequestTile extends ConsumerWidget {
       } catch (_) {}
     }
 
+    final photoUrl = request['photo'] as String?;
+
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: InkWell(
@@ -282,6 +288,19 @@ class _RequestTile extends ConsumerWidget {
                             fontWeight: FontWeight.w600, fontSize: 15)),
                   ),
                   _PriorityBadge(priority: priority),
+                  if (photoUrl != null && photoUrl.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: Image.network(
+                        photoUrl,
+                        width: 48,
+                        height: 48,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                      ),
+                    ),
+                  ],
                 ],
               ),
               if (description.isNotEmpty) ...[
@@ -481,6 +500,45 @@ class _DetailSheet extends StatelessWidget {
                 style: const TextStyle(fontSize: 14)),
             const SizedBox(height: 14),
           ],
+          if (request['photo'] != null && (request['photo'] as String).isNotEmpty) ...[
+            Text('Photo',
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: cs.onSurface.withValues(alpha: 0.5))),
+            const SizedBox(height: 6),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Image.network(
+                request['photo'] as String,
+                height: 200,
+                width: double.infinity,
+                fit: BoxFit.cover,
+                loadingBuilder: (_, child, progress) => progress == null
+                    ? child
+                    : SizedBox(
+                        height: 200,
+                        child: Center(
+                          child: CircularProgressIndicator(
+                            value: progress.expectedTotalBytes != null
+                                ? progress.cumulativeBytesLoaded /
+                                    progress.expectedTotalBytes!
+                                : null,
+                          ),
+                        ),
+                      ),
+                errorBuilder: (_, __, ___) => Container(
+                  height: 80,
+                  color: cs.surfaceContainerHighest,
+                  child: Center(
+                    child: Icon(Icons.broken_image_outlined,
+                        color: cs.onSurface.withValues(alpha: 0.4)),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+          ],
           _InfoRow(label: 'Submitted', value: fmtDate(createdRaw)),
           _InfoRow(label: 'Last updated', value: fmtDate(updatedRaw)),
         ],
@@ -627,6 +685,8 @@ class _CreateRequestSheetState extends ConsumerState<_CreateRequestSheet> {
   final _descCtrl = TextEditingController();
   String _priority = 'medium';
   bool _loading = false;
+  XFile? _photo;
+  final _picker = ImagePicker();
   int? _leaseId;
   String? _leaseLabel;
   bool _leasesLoading = true;
@@ -675,18 +735,48 @@ class _CreateRequestSheetState extends ConsumerState<_CreateRequestSheet> {
     }
   }
 
+  Future<void> _pickPhoto() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt_outlined),
+              title: const Text('Take Photo'),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Choose from Gallery'),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+    final picked = await _picker.pickImage(source: source, imageQuality: 85);
+    if (picked != null && mounted) setState(() => _photo = picked);
+  }
+
   Future<void> _submit() async {
     if (_leaseId == null) return;
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loading = true);
     try {
       final dio = ref.read(dioProvider);
-      await dio.post('/api/v1/tenants/maintenance/', data: {
-        'lease': _leaseId,
+      final formData = FormData.fromMap({
+        'lease': _leaseId.toString(),
         'title': _titleCtrl.text.trim(),
         'description': _descCtrl.text.trim(),
         'priority': _priority,
+        if (_photo != null)
+          'photo': await MultipartFile.fromFile(_photo!.path,
+              filename: _photo!.name),
       });
+      await dio.post('/api/v1/tenants/maintenance/', data: formData);
       widget.onCreated();
     } catch (e) {
       setState(() => _loading = false);
@@ -814,6 +904,62 @@ class _CreateRequestSheetState extends ConsumerState<_CreateRequestSheet> {
                     ),
                   );
                 }).toList(),
+              ),
+              const SizedBox(height: 14),
+              Text('Photo (optional)',
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: cs.onSurface.withValues(alpha: 0.6))),
+              const SizedBox(height: 6),
+              GestureDetector(
+                onTap: _pickPhoto,
+                child: Container(
+                  height: 120,
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: cs.surfaceContainerHighest.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                        color: cs.outlineVariant, style: BorderStyle.solid),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: _photo != null
+                      ? Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            Image.file(File(_photo!.path), fit: BoxFit.cover),
+                            Positioned(
+                              top: 4,
+                              right: 4,
+                              child: GestureDetector(
+                                onTap: () => setState(() => _photo = null),
+                                child: Container(
+                                  decoration: const BoxDecoration(
+                                    color: Colors.black54,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  padding: const EdgeInsets.all(4),
+                                  child: const Icon(Icons.close,
+                                      color: Colors.white, size: 16),
+                                ),
+                              ),
+                            ),
+                          ],
+                        )
+                      : Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.add_a_photo_outlined,
+                                size: 32, color: cs.onSurface.withValues(alpha: 0.4)),
+                            const SizedBox(height: 6),
+                            Text('Tap to attach photo',
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: cs.onSurface.withValues(alpha: 0.4))),
+                          ],
+                        ),
+                ),
               ),
               const SizedBox(height: 20),
               SizedBox(

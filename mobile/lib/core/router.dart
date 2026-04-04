@@ -5,11 +5,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-import '../features/auth/login_screen.dart';
+
+import '../features/auth/dev_picker_screen.dart';
 import '../features/dashboard/dashboard_screen.dart';
 import '../features/properties/properties_screen.dart';
 import '../features/properties/property_detail_screen.dart';
 import '../features/payments/invoices_screen.dart';
+import '../features/payments/reports_screen.dart';
 import '../features/notifications/notifications_screen.dart';
 import '../features/tenants/tenants_screen.dart';
 import '../features/maintenance/maintenance_screen.dart';
@@ -37,7 +39,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       if (isLoggedIn) {
         // Use cached Riverpod future so we bypass platform channel overhead on every navigation hop
         final role = await ref.read(userRoleProvider.future);
-        const tenantRestricted = ['/properties', '/tenants'];
+        const tenantRestricted = ['/properties', '/tenants', '/reports'];
         if (role == 'tenant' &&
             tenantRestricted.any(
                 (p) => state.matchedLocation.startsWith(p))) {
@@ -47,10 +49,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       return null;
     },
     routes: [
-      GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
+      GoRoute(path: '/login', builder: (_, __) => const DevPickerScreen()),
       // Global routes without Bottom Nav
       GoRoute(path: '/notifications', builder: (_, __) => const NotificationsScreen()),
       GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
+      GoRoute(path: '/reports', builder: (_, __) => const ReportsScreen()),
         
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) => MainShell(navigationShell: navigationShell),

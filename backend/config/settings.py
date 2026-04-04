@@ -54,6 +54,7 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "axes.middleware.AxesMiddleware",              # brute-force protection
+    "apps.core.middleware.SafaricomWebhookIPMiddleware",  # webhook IP allowlist
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -187,6 +188,11 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.notifications.tasks.send_rent_reminders",
         "schedule": crontab(hour=8, minute=0),
     },
+    # Reconcile pending STK Push transactions every 5 minutes
+    "reconcile-stk-transactions": {
+        "task": "apps.payments.tasks.reconcile_pending_stk_transactions",
+        "schedule": crontab(minute="*/5"),
+    },
 }
 
 # ── Cache (Redis) ─────────────────────────────────────────────────────────────
@@ -223,6 +229,8 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "anon": "20/minute",
         "user": "100/minute",
+        "mpesa_webhook": "300/minute",   # Safaricom can burst; allow high rate
+        "stk_push": "10/minute",         # Per user — prevent STK push spam
     },
 }
 
@@ -280,11 +288,15 @@ MPESA_SHORTCODE = env("MPESA_SHORTCODE", default="")
 MPESA_PASSKEY = env("MPESA_PASSKEY", default="")
 MPESA_ENVIRONMENT = env("MPESA_ENVIRONMENT", default="sandbox")
 MPESA_CALLBACK_URL = env("MPESA_CALLBACK_URL", default="")
+MPESA_STK_CALLBACK_URL = env("MPESA_STK_CALLBACK_URL", default="")
 
 # ── Africa's Talking ──────────────────────────────────────────────────────────
 AT_USERNAME = env("AT_USERNAME", default="sandbox")
 AT_API_KEY = env("AT_API_KEY", default="")
 AT_SENDER_ID = env("AT_SENDER_ID", default="")
+# WhatsApp delivery is ~3–5x more expensive than SMS. Disabled by default.
+# Enable only for document delivery (lease PDFs, financial reports).
+WHATSAPP_ENABLED = env.bool("WHATSAPP_ENABLED", default=False)
 
 # ── API Docs ──────────────────────────────────────────────────────────────────
 SPECTACULAR_SETTINGS = {

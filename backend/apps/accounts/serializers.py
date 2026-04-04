@@ -22,6 +22,13 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         if attrs.get("password") != attrs.get("password_confirm"):
             raise serializers.ValidationError({"password": "Passwords do not match."})
+        # Self-registration is only allowed for tenants.
+        # Landlords and caretakers must be created by an admin.
+        role = attrs.get("role", "tenant")
+        if role not in ("tenant",):
+            raise serializers.ValidationError(
+                {"role": "Self-registration is only available for tenants."}
+            )
         attrs.pop("password_confirm", None)
         return attrs
 

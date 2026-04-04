@@ -91,7 +91,8 @@ class NotificationsScreen extends ConsumerWidget {
             : RefreshIndicator(
                 onRefresh: () async {
                   HapticFeedback.mediumImpact();
-                  await ref.refresh(notificationsProvider.future);
+                  ref.invalidate(notificationsProvider);
+                  await ref.read(notificationsProvider.future);
                 },
                 child: ListView.builder(
                   padding: const EdgeInsets.symmetric(vertical: 8),

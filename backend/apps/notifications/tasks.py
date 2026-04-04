@@ -1,4 +1,5 @@
 import logging
+import requests as _requests
 from celery import shared_task
 from django.conf import settings
 from django.utils import timezone
@@ -63,6 +64,63 @@ def send_payment_receipt_sms(payment_id):
         f"Balance: KES {invoice.balance:,.0f}. Thank you!"
     )
     send_sms.delay(tenant.id, message)
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=30)
+def send_whatsapp(self, recipient_id, message, media_url=None):
+    """
+    Send a WhatsApp message via Africa's Talking.
+    Only runs when WHATSAPP_ENABLED=true in settings.
+    Falls back silently if WhatsApp is disabled.
+    """
+    if not getattr(settings, "WHATSAPP_ENABLED", False):
+        logger.debug("WhatsApp disabled; skipping message for user %s", recipient_id)
+        return
+
+    from .models import Notification
+    from django.contrib.auth import get_user_model
+
+    User = get_user_model()
+
+    try:
+        user = User.objects.get(id=recipient_id)
+        phone = user.phone_number
+
+        payload = {
+            "username": settings.AT_USERNAME,
+            "to": phone,
+            "message": message,
+        }
+        if media_url:
+            payload["mediaUrl"] = media_url
+
+        resp = _requests.post(
+            "https://api.africastalking.com/version1/messaging/whatsapp/send",
+            headers={
+                "apiKey": settings.AT_API_KEY,
+                "Accept": "application/json",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            data=payload,
+            timeout=15,
+        )
+        success = resp.status_code == 201
+
+        Notification.objects.create(
+            recipient=user,
+            channel=Notification.Channel.WHATSAPP
+            if hasattr(Notification.Channel, "WHATSAPP")
+            else Notification.Channel.SMS,
+            message=message,
+            status=Notification.Status.SENT if success else Notification.Status.FAILED,
+            sent_at=timezone.now() if success else None,
+            error="" if success else resp.text,
+        )
+        logger.info("WhatsApp to %s: %s", phone, "OK" if success else f"FAILED {resp.text}")
+
+    except Exception as exc:
+        logger.error("WhatsApp failed for user %s: %s", recipient_id, exc)
+        raise self.retry(exc=exc)
 
 
 @shared_task

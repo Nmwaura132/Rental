@@ -176,6 +176,15 @@ class _LandlordStats extends StatelessWidget {
           color: Colors.red,
           onTap: () => context.go('/invoices'),
         ),
+        const SizedBox(height: 12),
+        _BigStatCard(
+          label: 'Financial Reports',
+          value: 'P&L · Aged · Roll',
+          subtitle: 'Generate PDFs for KRA and management',
+          icon: Icons.picture_as_pdf_outlined,
+          color: Colors.indigo,
+          onTap: () => context.push('/reports'),
+        ),
       ],
     );
   }

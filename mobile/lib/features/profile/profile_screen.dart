@@ -6,7 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/api/api_client.dart';
 import '../../core/utils/api_error.dart';
 import '../../core/providers/theme_provider.dart';
-import '../../core/providers/server_url_provider.dart';
+import '../../core/constants.dart';
 
 const _storage = FlutterSecureStorage();
 
@@ -67,42 +67,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       await _storage.deleteAll();
       if (mounted) context.go('/login');
     }
-  }
-
-  void _showServerUrlDialog() {
-    final currentUrl = ref.read(serverUrlProvider);
-    final ctrl = TextEditingController(text: currentUrl);
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Server URL'),
-        content: TextField(
-          controller: ctrl,
-          decoration: const InputDecoration(
-            labelText: 'API Base URL',
-            hintText: 'http://192.168.1.x:8020',
-          ),
-          keyboardType: TextInputType.url,
-          autocorrect: false,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              ref.read(serverUrlProvider.notifier).setUrl(ctrl.text.trim());
-              Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Server URL updated')),
-              );
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
   }
 
   void _showChangePasswordDialog() {
@@ -204,7 +168,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final themeMode = ref.watch(themeModeProvider);
-    final serverUrl = ref.watch(serverUrlProvider);
     final theme = Theme.of(context);
 
     return Scaffold(
@@ -314,16 +277,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
             child: Column(
               children: [
-                ListTile(
-                  leading: const Icon(Icons.dns_outlined),
-                  title: const Text('Server URL'),
+                const ListTile(
+                  leading: Icon(Icons.dns_outlined),
+                  title: Text('Server URL'),
                   subtitle: Text(
-                    serverUrl,
-                    style: const TextStyle(fontSize: 12),
+                    AppConstants.apiBaseUrl,
+                    style: TextStyle(fontSize: 12),
                     overflow: TextOverflow.ellipsis,
                   ),
-                  trailing: const Icon(Icons.edit_outlined, size: 18),
-                  onTap: _showServerUrlDialog,
                 ),
                 const Divider(height: 1, indent: 16),
                 ListTile(
@@ -337,6 +298,25 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           ),
 
           const SizedBox(height: 16),
+
+          // Switch role (dev helper)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.amber.shade800,
+                side: BorderSide(color: Colors.amber.shade400),
+                minimumSize: const Size.fromHeight(48),
+              ),
+              onPressed: () async {
+                await _storage.deleteAll();
+                if (mounted) context.go('/login');
+              },
+              icon: const Icon(Icons.swap_horiz_rounded),
+              label: const Text('Switch Role (Dev)'),
+            ),
+          ),
+          const SizedBox(height: 10),
 
           // Logout
           Padding(

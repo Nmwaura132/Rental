@@ -8,7 +8,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Invoice, Payment
+from .models import Invoice, Payment, MpesaSTKRequest
 from .serializers import InvoiceSerializer, PaymentSerializer
 from .mpesa import make_idempotency_key
 
@@ -80,14 +80,20 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
             permission_classes=[permissions.IsAuthenticated])
     def record_payment(self, request):
         """
-        Manually record a cash / bank / Airtel Money payment.
-        Body: { invoice, method, amount }
+        Manually record a cash or bank payment — landlords/caretakers only.
+        Tenants pay via STK Push. Body: { invoice, method, amount }
         """
+        if request.user.is_tenant:
+            return Response(
+                {"error": "Tenants cannot record manual payments. Use M-Pesa STK Push to pay."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         invoice_id = request.data.get("invoice")
         method = request.data.get("method")
         amount = request.data.get("amount")
 
-        allowed_methods = [Payment.Method.CASH, Payment.Method.BANK, Payment.Method.MPESA, Payment.Method.AIRTEL, Payment.Method.CARD]
+        allowed_methods = [Payment.Method.CASH, Payment.Method.BANK]
         if method not in [m.value for m in allowed_methods]:
             return Response(
                 {"error": f"Method must be one of: {[m.value for m in allowed_methods]}"},
@@ -129,10 +135,20 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class DashboardStatsView(APIView):
-    """Summary stats for the landlord / caretaker dashboard."""
+    """Summary stats for the landlord / caretaker dashboard. Cached 60s per user."""
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
+        from django.core.cache import cache
+        cache_key = f"dashboard:{request.user.id}"
+        cached = cache.get(cache_key)
+        if cached:
+            return Response(cached)
+        result = self._compute(request)
+        cache.set(cache_key, result.data, timeout=60)
+        return result
+
+    def _compute(self, request):
         from apps.properties.models import Property, Unit
         from apps.tenants.models import Lease
         user = request.user
@@ -200,6 +216,136 @@ class DashboardStatsView(APIView):
             "monthly_collected_kes": monthly_collected,
             "overdue_invoices": overdue_count,
             "overdue_amount_kes": overdue_amount,
+        })
+
+
+class MpesaSTKPushView(APIView):
+    """
+    POST /api/v1/payments/stk/push/
+    Initiate an STK Push prompt on the tenant's phone.
+    Body: { invoice_id }
+    The tenant's phone and amount are derived from the invoice/lease.
+    Landlords can also push on behalf of a tenant by passing { invoice_id, phone }.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [__import__('apps.core.throttles', fromlist=['STKPushThrottle']).STKPushThrottle]
+
+    def post(self, request):
+        from .mpesa import stk_push
+        from apps.core.utils.phone import normalize_phone
+
+        invoice_id = request.data.get("invoice_id")
+        if not invoice_id:
+            return Response({"error": "invoice_id is required."}, status=400)
+
+        try:
+            invoice = _invoice_qs_for_user(request.user).select_related(
+                "lease__tenant", "lease__unit"
+            ).get(id=invoice_id)
+        except Invoice.DoesNotExist:
+            return Response({"error": "Invoice not found."}, status=404)
+
+        if invoice.status == Invoice.Status.PAID:
+            return Response({"error": "Invoice is already fully paid."}, status=400)
+
+        # Block duplicate pushes — only one pending STK request per invoice at a time
+        existing = MpesaSTKRequest.objects.filter(
+            invoice=invoice,
+            status=MpesaSTKRequest.Status.PENDING,
+        ).first()
+        if existing:
+            return Response({
+                "error": "An STK Push is already pending for this invoice. "
+                         "Please complete or wait for it to expire before retrying.",
+                "checkout_request_id": existing.checkout_request_id,
+            }, status=400)
+
+        # Determine phone — tenant pays themselves; landlord can override
+        if request.user.is_tenant:
+            phone_e164 = request.user.phone_number
+        else:
+            phone_raw = request.data.get("phone", invoice.lease.tenant.phone_number)
+            phone_e164 = normalize_phone(str(phone_raw))
+
+        # Daraja requires 2547XXXXXXXX (no + prefix)
+        phone_daraja = phone_e164.lstrip("+")
+
+        # Amount must be integer
+        amount_int = int(invoice.balance)
+        if amount_int <= 0:
+            return Response({"error": "Invoice balance is zero."}, status=400)
+
+        account_ref = invoice.lease.unit.unit_number[:12]
+        description = "Rent"
+
+        try:
+            result = stk_push(
+                phone=phone_daraja,
+                amount=amount_int,
+                account_ref=account_ref,
+                description=description,
+            )
+        except Exception as e:
+            logger.error("STK Push failed for invoice %s: %s", invoice_id, e)
+            return Response({"error": f"STK Push failed: {e}"}, status=502)
+
+        # Persist the request for callback matching
+        MpesaSTKRequest.objects.create(
+            checkout_request_id=result["CheckoutRequestID"],
+            merchant_request_id=result["MerchantRequestID"],
+            phone=phone_daraja,
+            amount=invoice.balance,
+            account_ref=account_ref,
+            invoice=invoice,
+        )
+
+        return Response({
+            "message": "STK Push sent. Check your phone for the M-Pesa prompt.",
+            "checkout_request_id": result["CheckoutRequestID"],
+        }, status=status.HTTP_200_OK)
+
+
+class MpesaSTKCallbackView(APIView):
+    """
+    POST /api/v1/payments/stk/callback/
+    Webhook called by Safaricom after the customer completes or cancels the prompt.
+    Must return HTTP 200 immediately — all processing is done in Celery.
+    Note: URL must not contain 'mpesa' or 'safaricom' in the domain.
+    """
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = [__import__('apps.core.throttles', fromlist=['MpesaWebhookThrottle']).MpesaWebhookThrottle]
+
+    def post(self, request):
+        logger.info("STK callback received: %s", request.data)
+        from .tasks import process_stk_callback
+        process_stk_callback.delay(request.data)
+        return Response({"ResultCode": 0, "ResultDesc": "Accepted"})
+
+
+class MpesaSTKStatusView(APIView):
+    """
+    GET /api/v1/payments/stk/status/?checkout_request_id=ws_CO_xxx
+    Poll the status of a pending STK Push from the mobile app.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        checkout_id = request.query_params.get("checkout_request_id", "").strip()
+        if not checkout_id:
+            return Response({"error": "checkout_request_id is required."}, status=400)
+
+        try:
+            req = MpesaSTKRequest.objects.get(checkout_request_id=checkout_id)
+        except MpesaSTKRequest.DoesNotExist:
+            return Response({"error": "Request not found."}, status=404)
+
+        return Response({
+            "checkout_request_id": req.checkout_request_id,
+            "status": req.status,
+            "result_code": req.result_code,
+            "result_desc": req.result_desc,
+            "mpesa_receipt_number": req.mpesa_receipt_number,
+            "amount": req.amount,
         })
 
 

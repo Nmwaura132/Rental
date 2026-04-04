@@ -203,6 +203,8 @@ class _InvoiceCard extends ConsumerWidget {
     final canEdit = status == 'pending' || status == 'overdue';
     final canDelete = status == 'pending' || status == 'cancelled';
     final canVoid = status == 'paid' || status == 'partially_paid';
+    final role = ref.watch(userRoleProvider).valueOrNull;
+    final isLandlord = role == 'landlord' || role == 'caretaker';
 
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
@@ -242,12 +244,12 @@ class _InvoiceCard extends ConsumerWidget {
                     PopupMenuButton<String>(
                       icon: const Icon(Icons.more_vert, size: 20),
                       itemBuilder: (_) => [
-                        if (!isPaid)
+                        if (!isPaid && isLandlord)
                           const PopupMenuItem(
                             value: 'pay',
                             child: ListTile(
                               leading: Icon(Icons.payments_outlined),
-                              title: Text('Record Payment'),
+                              title: Text('Record Cash/Bank'),
                               contentPadding: EdgeInsets.zero,
                               dense: true,
                             ),
@@ -318,11 +320,11 @@ class _InvoiceCard extends ConsumerWidget {
                       ],
                     ),
                   ),
-                  if (!isPaid)
+                  if (!isPaid && isLandlord)
                     TextButton.icon(
                       onPressed: () => _showRecordPayment(context),
                       icon: const Icon(Icons.payments, size: 16),
-                      label: const Text('Record Payment'),
+                      label: const Text('Record Cash/Bank'),
                     ),
                 ],
               ),
@@ -480,13 +482,98 @@ class _InvoiceCard extends ConsumerWidget {
 
 // ─── Invoice Detail Bottom Sheet ──────────────────────────────────────────────
 
-class _InvoiceDetailSheet extends ConsumerWidget {
+class _InvoiceDetailSheet extends ConsumerStatefulWidget {
   const _InvoiceDetailSheet({required this.invoice, required this.onChanged});
   final Map<String, dynamic> invoice;
   final VoidCallback onChanged;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_InvoiceDetailSheet> createState() => _InvoiceDetailSheetState();
+}
+
+class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
+  bool _stkLoading = false;
+
+  Map<String, dynamic> get invoice => widget.invoice;
+  VoidCallback get onChanged => widget.onChanged;
+
+  Future<void> _stkPush(BuildContext context, WidgetRef ref) async {
+    setState(() => _stkLoading = true);
+    try {
+      final dio = ref.read(dioProvider);
+      final resp = await dio.post('/api/v1/payments/stk/push/', data: {
+        'invoice_id': invoice['id'],
+      });
+      final checkoutId = resp.data['checkout_request_id'] as String?;
+      setState(() {
+        _stkLoading = false;
+      });
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('M-Pesa prompt sent! Check your phone.'),
+          backgroundColor: Color(0xFF43A047),
+          duration: Duration(seconds: 5),
+        ));
+        // Poll for completion every 3 seconds, up to 60 seconds
+        _pollStkStatus(checkoutId!);
+      }
+    } catch (e) {
+      setState(() => _stkLoading = false);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(apiError(e)),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ));
+      }
+    }
+  }
+
+  Future<void> _pollStkStatus(String checkoutId) async {
+    for (int i = 0; i < 20; i++) {
+      await Future.delayed(const Duration(seconds: 3));
+      if (!mounted) return;
+      try {
+        final dio = ref.read(dioProvider);
+        final resp = await dio.get(
+          '/api/v1/payments/stk/status/',
+          queryParameters: {'checkout_request_id': checkoutId},
+        );
+        final stkStatus = resp.data['status'] as String?;
+        if (stkStatus == 'success') {
+          onChanged(); // refresh invoice list
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Payment confirmed! Invoice updated.'),
+              backgroundColor: Color(0xFF43A047),
+            ));
+            Navigator.of(context).pop();
+          }
+          return;
+        } else if (stkStatus == 'failed' || stkStatus == 'cancelled') {
+          final desc = resp.data['result_desc'] ?? 'Payment was not completed.';
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(desc.toString()),
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ));
+          }
+          return;
+        }
+      } catch (_) {
+        // ignore poll errors silently
+      }
+    }
+    // Timed out polling — tell user to check manually
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Payment status unknown. Refresh invoices to check.'),
+        backgroundColor: Colors.orange,
+      ));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final status = invoice['status'] as String;
     final color = _statusColor[status] ?? const Color(0xFF546E7A);
     final bgColor = _statusBgColor[status] ?? const Color(0xFFECEFF1);
@@ -495,6 +582,7 @@ class _InvoiceDetailSheet extends ConsumerWidget {
     final canDelete = status == 'pending' || status == 'cancelled';
     final canVoid = status == 'paid' || status == 'partially_paid';
     final payments = invoice['payments'] as List<dynamic>? ?? [];
+    final role = ref.watch(userRoleProvider).valueOrNull;
 
     return DraggableScrollableSheet(
       initialChildSize: 0.6,
@@ -603,26 +691,42 @@ class _InvoiceDetailSheet extends ConsumerWidget {
               );
             }),
             const SizedBox(height: 20),
-            if (!isPaid)
+            if (!isPaid) ...[
               ElevatedButton.icon(
-                onPressed: () async {
-                  Navigator.pop(context);
-                  await Future.delayed(const Duration(milliseconds: 350));
-                  if (!context.mounted) return;
-                  showDialog(
-                    context: context,
-                    useRootNavigator: true,
-                    barrierDismissible: false,
-                    builder: (_) => _RecordPaymentDialog(
-                      invoiceId: invoice['id'] as int,
-                      balance: double.tryParse((invoice['balance'] ?? '0').toString()) ?? 0,
-                      onDone: onChanged,
-                    ),
-                  );
-                },
-                icon: const Icon(Icons.payments),
-                label: const Text('Record Payment'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF43A047),
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(double.infinity, 48),
+                ),
+                onPressed: _stkLoading ? null : () => _stkPush(context, ref),
+                icon: _stkLoading
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.phone_android),
+                label: Text(_stkLoading ? 'Sending prompt…' : 'Pay with M-Pesa STK Push'),
               ),
+              if (role != 'tenant') ...[
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    Navigator.pop(context);
+                    await Future.delayed(const Duration(milliseconds: 350));
+                    if (!context.mounted) return;
+                    showDialog(
+                      context: context,
+                      useRootNavigator: true,
+                      barrierDismissible: false,
+                      builder: (_) => _RecordPaymentDialog(
+                        invoiceId: invoice['id'] as int,
+                        balance: double.tryParse((invoice['balance'] ?? '0').toString()) ?? 0,
+                        onDone: onChanged,
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.payments_outlined),
+                  label: const Text('Record Manual Payment'),
+                ),
+              ],
+            ],
             if (canEdit) ...[
               const SizedBox(height: 8),
               OutlinedButton.icon(
@@ -973,12 +1077,11 @@ class _RecordPaymentDialogState extends ConsumerState<_RecordPaymentDialog> {
   late final TextEditingController _amountCtrl;
   bool _loading = false;
 
+  // Landlord manual recording — cash and bank only.
+  // M-Pesa and Airtel are handled via STK Push / C2B webhooks automatically.
   static const _methods = [
     ('cash', 'Cash'),
     ('bank', 'Bank Transfer'),
-    ('mpesa', 'M-Pesa'),
-    ('airtel', 'Airtel Money'),
-    ('card', 'Card'),
   ];
 
   @override
