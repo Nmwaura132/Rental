@@ -104,6 +104,7 @@ services:
 
   create-buckets:
     image: minio/mc
+    restart: "no"
     depends_on:
       minio:
         condition: service_healthy
