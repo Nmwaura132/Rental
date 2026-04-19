@@ -40,8 +40,9 @@ services:
     volumes:
       - static_files:/app/staticfiles
       - media_files:/app/mediafiles
-    ports:
-      - "8020:8000"
+    # No direct port exposure — Caddy proxies to this service internally
+    expose:
+      - "8000"
     depends_on:
       db:
         condition: service_healthy
@@ -79,6 +80,22 @@ services:
       redis:
         condition: service_healthy
     command: celery -A config beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    security_opt:
+      - no-new-privileges:true
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
     security_opt:
       - no-new-privileges:true
 
@@ -121,3 +138,5 @@ volumes:
   static_files:
   media_files:
   minio_data:
+  caddy_data:
+  caddy_config:

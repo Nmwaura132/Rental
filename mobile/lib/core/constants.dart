@@ -1,7 +1,7 @@
 class AppConstants {
   AppConstants._();
 
-  static const String apiBaseUrl = 'http://rwrwarkqwn77gwu6zbky1ppo.37.221.93.219.sslip.io';
+  static const String apiBaseUrl = 'https://rwrwarkqwn77gwu6zbky1ppo.37.221.93.219.sslip.io';
 
   // Rewrites Docker-internal MinIO URLs to the public MinIO host.
   static String resolveMediaUrl(String url) {

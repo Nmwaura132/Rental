@@ -1,0 +1,3 @@
+rwrwarkqwn77gwu6zbky1ppo.37.221.93.219.sslip.io {
+    reverse_proxy api:8000
+}
