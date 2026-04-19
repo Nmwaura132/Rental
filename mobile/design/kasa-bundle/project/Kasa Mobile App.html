@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Kasa — Mobile App Design</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<style>
+  html, body { margin: 0; padding: 0; background: #2a2a2e; font-family: 'Inter', system-ui; }
+  #root { min-height: 100vh; }
+</style>
+</head>
+<body data-theme="dark">
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="src/tokens.jsx"></script>
+<script type="text/babel" src="src/logo.jsx"></script>
+<script type="text/babel" src="src/primitives.jsx"></script>
+<script type="text/babel" src="src/mock-data.jsx"></script>
+<script type="text/babel" src="src/screens-auth-home.jsx"></script>
+<script type="text/babel" src="src/screens-properties.jsx"></script>
+<script type="text/babel" src="src/screens-tenants-invoices.jsx"></script>
+<script type="text/babel" src="src/screens-misc.jsx"></script>
+
+<script type="text/babel">
+const TWEAKS = /*EDITMODE-BEGIN*/{
+  "theme": "light",
+  "role": "landlord",
+  "accent": "default",
+  "kpiSize": 60,
+  "borderWidth": 2,
+  "shadowOffset": 4,
+  "view": "prototype",
+  "frame": "ios",
+  "screen": "dashboard"
+}/*EDITMODE-END*/;
+
+const LANDLORD_TABS = [
+  { key: 'dashboard', icon: 'grid', label: 'HOME' },
+  { key: 'properties', icon: 'building', label: 'PROPS' },
+  { key: 'tenants', icon: 'users', label: 'TENANTS' },
+  { key: 'invoices', icon: 'invoice', label: 'BILLS' },
+  { key: 'maintenance', icon: 'wrench', label: 'FIX' },
+];
+const TENANT_TABS = [
+  { key: 'tenantHome', icon: 'home', label: 'HOME' },
+  { key: 'invoices', icon: 'invoice', label: 'BILLS' },
+  { key: 'maintenance', icon: 'wrench', label: 'FIX' },
+];
+
+function App() {
+  const [state, setState] = React.useState(() => {
+    try {
+      const s = JSON.parse(localStorage.getItem('kasa-state') || 'null');
+      return s || { ...TWEAKS, screen: 'login', history: [], navData: {} };
+    } catch { return { ...TWEAKS, screen: 'login', history: [], navData: {} }; }
+  });
+
+  React.useEffect(() => {
+    localStorage.setItem('kasa-state', JSON.stringify(state));
+    document.documentElement.setAttribute('data-theme', state.theme);
+    document.documentElement.setAttribute('data-accent', state.accent);
+    document.body.setAttribute('data-theme', state.theme);
+    document.documentElement.style.setProperty('--kpi-size', state.kpiSize + 'px');
+    document.documentElement.style.setProperty('--kasa-border', state.borderWidth + 'px');
+    document.documentElement.style.setProperty('--kasa-shadow-offset', state.shadowOffset + 'px');
+  }, [state]);
+
+  const update = (patch) => setState(s => ({ ...s, ...patch }));
+
+  const nav = (screen, data) => {
+    if (screen === 'back') {
+      setState(s => {
+        const h = [...s.history];
+        const prev = h.pop() || 'login';
+        return { ...s, screen: prev, history: h };
+      });
+      return;
+    }
+    setState(s => ({ ...s, screen, history: [...s.history, s.screen], navData: data || {} }));
+  };
+
+  const onLogin = (role) => {
+    setState(s => ({ ...s, role, screen: role === 'landlord' ? 'dashboard' : 'tenantHome', history: [] }));
+  };
+
+  const toggleTheme = () => update({ theme: state.theme === 'dark' ? 'light' : 'dark' });
+
+  // Edit mode wiring
+  const [tweaksOpen, setTweaksOpen] = React.useState(false);
+  React.useEffect(() => {
+    const onMsg = (e) => {
+      if (e.data?.type === '__activate_edit_mode') setTweaksOpen(true);
+      if (e.data?.type === '__deactivate_edit_mode') setTweaksOpen(false);
+    };
+    window.addEventListener('message', onMsg);
+    window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+    return () => window.removeEventListener('message', onMsg);
+  }, []);
+
+  const setTweak = (key, val) => {
+    update({ [key]: val });
+    window.parent.postMessage({ type: '__edit_mode_set_keys', edits: { [key]: val } }, '*');
+  };
+
+  const currentTabs = state.role === 'landlord' ? LANDLORD_TABS : TENANT_TABS;
+  const activeTab = (() => {
+    if (state.screen === 'dashboard') return 'dashboard';
+    if (state.screen === 'tenantHome') return 'tenantHome';
+    if (state.screen === 'properties' || state.screen === 'propertyDetail' || state.screen === 'addProperty') return 'properties';
+    if (state.screen === 'tenants' || state.screen === 'addTenant') return 'tenants';
+    if (state.screen === 'invoices' || state.screen === 'invoiceDetail') return 'invoices';
+    if (state.screen === 'maintenance' || state.screen === 'newMaintenance') return 'maintenance';
+    return null;
+  })();
+
+  const renderScreen = () => {
+    const p = { nav, role: state.role, theme: state.theme, onTheme: toggleTheme, ...state.navData };
+    switch (state.screen) {
+      case 'login': return <LoginScreen onLogin={onLogin} theme={state.theme} onTheme={toggleTheme} />;
+      case 'dashboard': return <LandlordDashboard {...p} />;
+      case 'tenantHome': return <TenantDashboard {...p} />;
+      case 'properties': return <PropertiesList {...p} />;
+      case 'propertyDetail': return <PropertyDetail {...p} />;
+      case 'addProperty': return <AddPropertyForm {...p} />;
+      case 'tenants': return <TenantsList {...p} />;
+      case 'addTenant': return <AddTenantForm {...p} />;
+      case 'invoices': return <InvoicesList {...p} />;
+      case 'invoiceDetail': return <InvoiceDetail {...p} />;
+      case 'maintenance': return <MaintenanceList {...p} />;
+      case 'newMaintenance': return <NewMaintenance {...p} />;
+      case 'mpesa': return <MpesaModal {...p} />;
+      case 'reports': return <ReportsScreen {...p} />;
+      case 'notifications': return <NotificationsScreen {...p} />;
+      case 'profile': return <ProfileScreen {...p} />;
+      default: return <LoginScreen onLogin={onLogin} theme={state.theme} onTheme={toggleTheme} />;
+    }
+  };
+
+  const showNav = activeTab !== null && state.screen !== 'mpesa';
+  const frameW = state.frame === 'ios' ? 390 : 400;
+  const frameH = state.frame === 'ios' ? 844 : 860;
+
+  return (
+    <>
+      <KasaStyles />
+      {state.view === 'prototype' ? (
+        <PrototypeView
+          state={state}
+          frameW={frameW} frameH={frameH}
+          renderScreen={renderScreen}
+          showNav={showNav}
+          tabs={currentTabs}
+          activeTab={activeTab}
+          nav={nav}
+        />
+      ) : (
+        <CanvasView state={state} update={update} />
+      )}
+      {tweaksOpen && <TweaksPanel state={state} setTweak={setTweak} />}
+    </>
+  );
+}
+
+function PrototypeView({ state, frameW, frameH, renderScreen, showNav, tabs, activeTab, nav }) {
+  return (
+    <div style={{
+      minHeight: '100vh',
+      background: state.theme === 'dark'
+        ? 'radial-gradient(ellipse at top, #1a1a22 0%, #0a0a0e 100%)'
+        : 'radial-gradient(ellipse at top, #e8e3d8 0%, #d5cfc0 100%)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 40, gap: 60,
+      position: 'relative',
+    }}>
+      <ProtoInfo state={state} />
+      <PhoneShell width={frameW} height={frameH} variant={state.frame}>
+        <div data-screen-label={state.screen} style={{ minHeight: '100%', position: 'relative' }}>
+          {renderScreen()}
+          {showNav && (
+            <BottomNav
+              tabs={tabs}
+              active={activeTab}
+              onChange={(k) => nav(k)}
+            />
+          )}
+        </div>
+      </PhoneShell>
+      <ProtoControls state={state} />
+    </div>
+  );
+}
+
+function ProtoInfo({ state }) {
+  return (
+    <div style={{
+      position: 'absolute', top: 30, left: 30,
+      fontFamily: "'Outfit', system-ui", color: state.theme === 'dark' ? '#F0EDF4' : '#1A1A1F',
+      maxWidth: 280,
+    }}>
+      <div style={{ fontSize: 36, fontWeight: 900, letterSpacing: '-0.02em' }}>
+        <span style={{ color: state.theme === 'dark' ? '#FF8E7F' : '#FF7A66' }}>K</span>ASA
+      </div>
+      <div style={{
+        fontFamily: "'Space Grotesk', system-ui", fontSize: 12, fontWeight: 700,
+        letterSpacing: '0.08em', textTransform: 'uppercase',
+        color: state.theme === 'dark' ? '#ACAAB1' : '#5A5962', marginTop: 6,
+      }}>
+        Mobile app · Neo-brutalist · Nairobi
+      </div>
+      <div style={{
+        marginTop: 24, fontFamily: "'Inter', system-ui", fontSize: 13, fontWeight: 500, lineHeight: 1.55,
+        color: state.theme === 'dark' ? '#ACAAB1' : '#5A5962',
+      }}>
+        Tap through the prototype on the right. The bottom-nav, role, theme toggle, and MPesa flow are all live.
+      </div>
+      <div style={{
+        marginTop: 20, padding: 14,
+        background: state.theme === 'dark' ? '#19191F' : '#FFFFFF',
+        border: `2px solid ${state.theme === 'dark' ? '#48474D' : '#1A1A1F'}`,
+        borderRadius: 12,
+        boxShadow: `3px 3px 0 ${state.theme === 'dark' ? '#000' : '#1A1A1F'}`,
+      }}>
+        <div style={{ fontFamily: "'Space Grotesk', system-ui", fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: state.theme === 'dark' ? '#ACAAB1' : '#5A5962' }}>CURRENT</div>
+        <div style={{ fontFamily: "'Space Grotesk', system-ui", fontSize: 16, fontWeight: 700, letterSpacing: '-0.01em', marginTop: 4, color: state.theme === 'dark' ? '#F0EDF4' : '#1A1A1F' }}>
+          {state.screen.toUpperCase()} · {state.role?.toUpperCase() || '—'}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProtoControls({ state }) {
+  const isDark = state.theme === 'dark';
+  const btn = {
+    background: isDark ? '#19191F' : '#FFFFFF',
+    color: isDark ? '#F0EDF4' : '#1A1A1F',
+    border: `2px solid ${isDark ? '#48474D' : '#1A1A1F'}`,
+    borderRadius: 10,
+    padding: '8px 12px',
+    fontFamily: "'Space Grotesk', system-ui", fontSize: 11, fontWeight: 700,
+    letterSpacing: '0.04em', textTransform: 'uppercase',
+    cursor: 'pointer',
+    boxShadow: `3px 3px 0 ${isDark ? '#000' : '#1A1A1F'}`,
+    display: 'block', width: '100%', marginBottom: 8, textAlign: 'left',
+  };
+  const go = (s) => {
+    const cur = JSON.parse(localStorage.getItem('kasa-state') || '{}');
+    localStorage.setItem('kasa-state', JSON.stringify({ ...cur, screen: s, history: [...(cur.history||[]), cur.screen] }));
+    location.reload();
+  };
+  const jumps = state.role === 'landlord'
+    ? [['dashboard','HOME'],['properties','PROPERTIES'],['propertyDetail','PROPERTY'],['addProperty','+ PROP'],['tenants','TENANTS'],['addTenant','+ TENANT'],['invoices','INVOICES'],['invoiceDetail','INVOICE'],['maintenance','TICKETS'],['reports','REPORTS'],['notifications','ALERTS'],['profile','PROFILE']]
+    : [['tenantHome','HOME'],['invoices','INVOICES'],['invoiceDetail','INVOICE'],['mpesa','MPESA'],['maintenance','TICKETS'],['newMaintenance','NEW TICKET'],['notifications','ALERTS'],['profile','PROFILE']];
+  return (
+    <div style={{
+      position: 'absolute', top: 30, right: 30, width: 180,
+    }}>
+      <div style={{
+        fontFamily: "'Space Grotesk', system-ui", fontSize: 11, fontWeight: 700,
+        letterSpacing: '0.08em', textTransform: 'uppercase',
+        color: isDark ? '#ACAAB1' : '#5A5962', marginBottom: 10,
+      }}>Jump to screen</div>
+      {jumps.map(([k, l]) => (
+        <button key={k} style={{ ...btn, background: state.screen === k ? (isDark ? '#FF8E7F' : '#FF7A66') : btn.background, color: state.screen === k ? '#2C0000' : btn.color }} onClick={() => go(k)}>
+          {l}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function CanvasView({ state, update }) {
+  // Render all screens in a grid
+  const screens = state.role === 'landlord'
+    ? ['login','dashboard','properties','propertyDetail','addProperty','tenants','addTenant','invoices','invoiceDetail','maintenance','newMaintenance','reports','notifications','profile','mpesa']
+    : ['login','tenantHome','invoices','invoiceDetail','mpesa','maintenance','newMaintenance','notifications','profile'];
+  return (
+    <div style={{
+      minHeight: '100vh', padding: '60px 40px',
+      background: state.theme === 'dark' ? '#0a0a0e' : '#e8e3d8',
+      color: state.theme === 'dark' ? '#F0EDF4' : '#1A1A1F',
+    }}>
+      <div style={{ maxWidth: 1600, margin: '0 auto' }}>
+        <div style={{ fontFamily: "'Outfit', system-ui", fontSize: 48, fontWeight: 900, letterSpacing: '-0.02em' }}>
+          <span style={{ color: state.theme === 'dark' ? '#FF8E7F' : '#FF7A66' }}>K</span>ASA · CANVAS
+        </div>
+        <div style={{ fontFamily: "'Space Grotesk', system-ui", fontSize: 13, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: 8 }}>
+          All 13 screens · {state.role?.toUpperCase()}
+        </div>
+        <div style={{ marginTop: 40, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 40, justifyItems: 'center' }}>
+          {screens.map(s => <CanvasTile key={s} screen={s} role={state.role} theme={state.theme} />)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CanvasTile({ screen, role, theme }) {
+  // shim for mini screens
+  const nav = () => {};
+  const p = { nav, role, theme, onTheme: () => {}, invoice: screen === 'invoiceDetail' ? MOCK.invoices[2] : MOCK.invoices[3] };
+  let child = null;
+  switch (screen) {
+    case 'login': child = <LoginScreen onLogin={() => {}} theme={theme} onTheme={() => {}} />; break;
+    case 'dashboard': child = <LandlordDashboard {...p} />; break;
+    case 'tenantHome': child = <TenantDashboard {...p} />; break;
+    case 'properties': child = <PropertiesList {...p} />; break;
+    case 'propertyDetail': child = <PropertyDetail {...p} />; break;
+    case 'addProperty': child = <AddPropertyForm {...p} />; break;
+    case 'tenants': child = <TenantsList {...p} />; break;
+    case 'addTenant': child = <AddTenantForm {...p} />; break;
+    case 'invoices': child = <InvoicesList {...p} />; break;
+    case 'invoiceDetail': child = <InvoiceDetail {...p} />; break;
+    case 'maintenance': child = <MaintenanceList {...p} />; break;
+    case 'newMaintenance': child = <NewMaintenance {...p} />; break;
+    case 'mpesa': child = <MpesaModal {...p} />; break;
+    case 'reports': child = <ReportsScreen {...p} />; break;
+    case 'notifications': child = <NotificationsScreen {...p} />; break;
+    case 'profile': child = <ProfileScreen {...p} />; break;
+    default: child = null;
+  }
+  const showNav = !['login', 'mpesa', 'propertyDetail', 'addProperty', 'addTenant', 'newMaintenance', 'invoiceDetail', 'notifications'].includes(screen);
+  const tabs = role === 'landlord' ? LANDLORD_TABS : TENANT_TABS;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
+      <div style={{
+        fontFamily: "'Space Grotesk', system-ui", fontSize: 11, fontWeight: 700,
+        letterSpacing: '0.08em', textTransform: 'uppercase', opacity: 0.65,
+      }}>{screen}</div>
+      <div style={{ transform: 'scale(0.72)', transformOrigin: 'top center', height: 844 * 0.72, width: 390 * 0.72 }}>
+        <PhoneShell width={390} height={844}>
+          <div style={{ position: 'relative', minHeight: '100%' }}>
+            {child}
+            {showNav && <BottomNav tabs={tabs} active={screen} onChange={() => {}} />}
+          </div>
+        </PhoneShell>
+      </div>
+    </div>
+  );
+}
+
+function TweaksPanel({ state, setTweak }) {
+  const isDark = state.theme === 'dark';
+  return (
+    <div style={{
+      position: 'fixed', bottom: 24, right: 24, width: 320, zIndex: 1000,
+      background: isDark ? '#19191F' : '#FFFFFF',
+      color: isDark ? '#F0EDF4' : '#1A1A1F',
+      border: `3px solid ${isDark ? '#48474D' : '#1A1A1F'}`,
+      borderRadius: 20, padding: 20,
+      boxShadow: `6px 6px 0 ${isDark ? '#000' : '#1A1A1F'}`,
+      fontFamily: "'Inter', system-ui",
+    }}>
+      <div style={{ fontFamily: "'Space Grotesk', system-ui", fontSize: 18, fontWeight: 700, letterSpacing: '-0.02em', textTransform: 'uppercase', marginBottom: 14 }}>TWEAKS</div>
+
+      <TwkRow label="THEME">
+        {['dark','light'].map(t => (
+          <TwkChip key={t} active={state.theme===t} onClick={() => setTweak('theme', t)}>{t}</TwkChip>
+        ))}
+      </TwkRow>
+      <TwkRow label="ROLE">
+        {['landlord','tenant'].map(r => (
+          <TwkChip key={r} active={state.role===r} onClick={() => { setTweak('role', r); setTweak('screen', r==='landlord'?'dashboard':'tenantHome'); }}>{r}</TwkChip>
+        ))}
+      </TwkRow>
+      <TwkRow label="ACCENT">
+        {['default','citrus','forest'].map(a => (
+          <TwkChip key={a} active={state.accent===a} onClick={() => setTweak('accent', a)}>{a}</TwkChip>
+        ))}
+      </TwkRow>
+      <TwkRow label="FRAME">
+        {['ios','android'].map(f => (
+          <TwkChip key={f} active={state.frame===f} onClick={() => setTweak('frame', f)}>{f}</TwkChip>
+        ))}
+      </TwkRow>
+      <TwkRow label="VIEW">
+        {['prototype','canvas'].map(v => (
+          <TwkChip key={v} active={state.view===v} onClick={() => setTweak('view', v)}>{v}</TwkChip>
+        ))}
+      </TwkRow>
+
+      <TwkSlider label={`KPI SIZE · ${state.kpiSize}PX`} min={40} max={80} step={2} value={state.kpiSize} onChange={v => setTweak('kpiSize', v)} />
+      <TwkSlider label={`BORDER · ${state.borderWidth}PX`} min={1} max={4} step={1} value={state.borderWidth} onChange={v => setTweak('borderWidth', v)} />
+      <TwkSlider label={`SHADOW · ${state.shadowOffset}PX`} min={0} max={8} step={1} value={state.shadowOffset} onChange={v => setTweak('shadowOffset', v)} />
+    </div>
+  );
+}
+
+function TwkRow({ label, children }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontFamily: "'Space Grotesk', system-ui", fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', opacity: 0.65, marginBottom: 6 }}>{label}</div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>{children}</div>
+    </div>
+  );
+}
+
+function TwkChip({ children, active, onClick }) {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  return (
+    <button onClick={onClick} style={{
+      background: active ? (isDark ? '#8496FF' : '#5868E0') : 'transparent',
+      color: active ? (isDark ? '#052496' : '#F5F2ED') : (isDark ? '#F0EDF4' : '#1A1A1F'),
+      border: `2px solid ${isDark ? '#48474D' : '#1A1A1F'}`,
+      borderRadius: 999, padding: '4px 10px',
+      fontFamily: "'Space Grotesk', system-ui", fontSize: 11, fontWeight: 700,
+      textTransform: 'uppercase', cursor: 'pointer',
+    }}>{children}</button>
+  );
+}
+
+function TwkSlider({ label, min, max, step, value, onChange }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontFamily: "'Space Grotesk', system-ui", fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', opacity: 0.65, marginBottom: 6 }}>{label}</div>
+      <input type="range" min={min} max={max} step={step} value={value} onChange={e => onChange(Number(e.target.value))} style={{ width: '100%', accentColor: '#FF8E7F' }} />
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

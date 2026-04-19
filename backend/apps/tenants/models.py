@@ -69,3 +69,21 @@ class MaintenanceRequest(models.Model):
 
     def __str__(self):
         return f"{self.title} ({self.status})"
+
+
+class MaintenanceNote(models.Model):
+    request = models.ForeignKey(
+        MaintenanceRequest, on_delete=models.CASCADE, related_name="notes"
+    )
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="maintenance_notes"
+    )
+    body = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "maintenance_notes"
+        ordering = ["created_at"]
+
+    def __str__(self):
+        return f"Note by {self.author} on {self.request_id}"

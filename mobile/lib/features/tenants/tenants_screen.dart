@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:dio/dio.dart';
 import '../../core/api/api_client.dart';
 import '../../core/constants.dart';
+import '../../core/theme/kasa_tokens.dart';
 import '../../core/utils/api_error.dart';
+import '../../core/widgets/kasa_primitives.dart';
 import '../../shared/widgets/shimmer_loading.dart';
 
 final leasesProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
-  final dio = ref.watch(dioProvider);
+  final dio = ref.read(dioProvider);
   final resp = await dio.get('/api/v1/tenants/leases/');
   final data = resp.data;
   if (data is List) return data;
@@ -17,267 +20,507 @@ final leasesProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
   return [];
 });
 
-class TenantsScreen extends ConsumerWidget {
+// Returns display status: 'active', 'ending', 'past'
+String _leaseDisplayStatus(Map<String, dynamic> lease) {
+  final status = lease['status'] as String? ?? '';
+  if (status != 'active') return 'past';
+  final endStr = lease['end_date'] as String?;
+  if (endStr != null) {
+    try {
+      final end = DateTime.parse(endStr);
+      final diff = end.difference(DateTime.now()).inDays;
+      if (diff <= 60) return 'ending';
+    } catch (_) {}
+  }
+  return 'active';
+}
+
+class TenantsScreen extends ConsumerStatefulWidget {
   const TenantsScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<TenantsScreen> createState() => _TenantsScreenState();
+}
+
+class _TenantsScreenState extends ConsumerState<TenantsScreen> {
+  String _filter = 'all';
+
+  static const _filters = [
+    ('all', 'ALL'),
+    ('active', 'ACTIVE'),
+    ('ending', 'ENDING'),
+    ('past', 'PAST'),
+  ];
+
+  List<Map<String, dynamic>> _applyFilter(List<dynamic> all) {
+    final list = all.cast<Map<String, dynamic>>();
+    if (_filter == 'all') return list;
+    return list.where((l) => _leaseDisplayStatus(l) == _filter).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final leases = ref.watch(leasesProvider);
+    final cs = Theme.of(context).colorScheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Tenants & Leases')),
-      floatingActionButton: Padding(
-        padding: const EdgeInsets.only(bottom: 80),
-        child: FloatingActionButton(
-          onPressed: () => _showOptions(context, ref),
-          child: const Icon(Icons.add),
-        ),
-      ),
-      body: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 300),
-        child: leases.when(
-          loading: () => const SkeletonList(),
-          error: (e, _) => Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.cloud_off_outlined, size: 56, color: Colors.grey),
-                const SizedBox(height: 12),
-                Text(apiError(e), style: const TextStyle(color: Colors.grey)),
-                const SizedBox(height: 16),
-                ElevatedButton.icon(
-                  onPressed: () => ref.invalidate(leasesProvider),
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('Retry'),
-                ),
-              ],
+      backgroundColor: cs.kasaBg,
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 16, 16),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'TENANTS',
+                      style: GoogleFonts.spaceGrotesk(
+                        fontSize: 32,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.96,
+                        color: cs.onSurface,
+                        height: 1,
+                      ),
+                    ),
+                  ),
+                  KasaButton(
+                    label: 'ADD',
+                    variant: KasaButtonVariant.primary,
+                    fullWidth: false,
+                    leading: Icon(Icons.add, size: 16, color: cs.onPrimary),
+                    onTap: () => _showOptions(context),
+                  ),
+                ],
+              ),
             ),
           ),
-          data: (list) => list.isEmpty
-              ? const Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.people_outline, size: 64, color: Colors.grey),
-                      SizedBox(height: 12),
-                      Text('No tenants yet.', style: TextStyle(color: Colors.grey)),
-                      SizedBox(height: 4),
-                      Text('Tap + to add a tenant and create a lease.',
-                          style: TextStyle(color: Colors.grey, fontSize: 12)),
-                    ],
+          // Filter chips row
+          SizedBox(
+            height: 40,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+              children: _filters.map((f) {
+                final isSelected = _filter == f.$1;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: GestureDetector(
+                    onTap: () => setState(() => _filter = f.$1),
+                    child: KasaChip(
+                      label: f.$2,
+                      variant: isSelected ? KasaChipVariant.secondary : KasaChipVariant.neutral,
+                    ),
                   ),
-                )
-              : RefreshIndicator(
-                  onRefresh: () => ref.refresh(leasesProvider.future),
-                    child: ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 100),
-                    itemCount: list.length,
-                    itemBuilder: (_, i) {
-                      final lease = list[i] as Map<String, dynamic>;
-                      final status = lease['status'] as String? ?? 'unknown';
-                      return Card(
-                        child: ListTile(
-                          leading: CircleAvatar(
-                            backgroundColor:
-                                Theme.of(context).colorScheme.primaryContainer,
-                            child: Text(
-                              ((lease['tenant_name'] as String?)?.isNotEmpty == true
-                                      ? lease['tenant_name'] as String
-                                      : '?')[0]
-                                  .toUpperCase(),
-                              style: TextStyle(
-                                color: Theme.of(context).colorScheme.onPrimaryContainer,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                          title: Text(
-                            lease['tenant_name'] ?? 'Unknown',
-                            style: const TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const SizedBox(height: 2),
-                              Row(
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 6, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: status == 'active'
-                                          ? Colors.green.shade100
-                                          : Colors.grey.shade200,
-                                      borderRadius: BorderRadius.circular(4),
+                );
+              }).toList(),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Expanded(
+            child: leases.when(
+              loading: () => const SkeletonList(),
+              error: (e, _) => Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.cloud_off_outlined, size: 56, color: cs.kasaTextSub),
+                    const SizedBox(height: 12),
+                    Text(apiError(e),
+                        style: GoogleFonts.inter(color: cs.kasaTextSub)),
+                    const SizedBox(height: 16),
+                    KasaButton(
+                      label: 'RETRY',
+                      variant: KasaButtonVariant.ghost,
+                      leading: Icon(Icons.refresh, size: 16, color: cs.secondary),
+                      onTap: () => ref.invalidate(leasesProvider),
+                    ),
+                  ],
+                ),
+              ),
+              data: (raw) {
+                final list = _applyFilter(raw);
+                return list.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.people_outline, size: 64, color: cs.kasaTextSub),
+                            const SizedBox(height: 12),
+                            Text(
+                              raw.isEmpty ? 'No tenants yet.' : 'No results.',
+                              style: GoogleFonts.spaceGrotesk(
+                                  fontWeight: FontWeight.w700,
+                                  color: cs.kasaTextSub)),
+                            const SizedBox(height: 4),
+                            Text(
+                              raw.isEmpty ? 'Tap ADD to register a tenant.' : 'Try a different filter.',
+                              style: GoogleFonts.inter(
+                                  fontSize: 12, color: cs.kasaTextSub)),
+                          ],
+                        ),
+                      )
+                    : RefreshIndicator(
+                        onRefresh: () => ref.refresh(leasesProvider.future),
+                        child: ListView.builder(
+                          padding: const EdgeInsets.fromLTRB(20, 4, 20, 100),
+                          itemCount: list.length,
+                          itemBuilder: (_, i) {
+                            final lease = list[i];
+                            final name =
+                                lease['tenant_name'] as String? ?? 'Unknown';
+                            final apiStatus = lease['status'] as String? ?? 'unknown';
+                            final displayStatus = _leaseDisplayStatus(lease);
+                            final property = lease['property_name'] as String? ?? '';
+                            final unit = lease['unit_number'] as String? ?? '';
+                            final phone = lease['tenant_phone'] as String?;
+                            final rent = lease['rent_amount'];
+                            final endDate = lease['end_date'] as String?;
+
+                            // Design: overdue→primary, ending→tertiary, active→secondary
+                            final chipVariant = displayStatus == 'ending'
+                                ? KasaChipVariant.tertiary
+                                : displayStatus == 'past'
+                                    ? KasaChipVariant.neutral
+                                    : KasaChipVariant.secondary;
+                            final chipLabel = displayStatus == 'ending'
+                                ? 'ENDING'
+                                : displayStatus == 'past'
+                                    ? apiStatus.toUpperCase()
+                                    : 'ACTIVE';
+
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: KasaCard(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 14, vertical: 12),
+                                onTap: null,
+                                child: Row(
+                                  children: [
+                                    KasaAvatar(
+                                      name: name,
+                                      size: 48,
+                                      accent: KasaCardAccent.secondary,
                                     ),
-                                    child: Text(
-                                      status.toUpperCase(),
-                                      style: TextStyle(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.bold,
-                                        color: status == 'active'
-                                            ? Colors.green.shade800
-                                            : Colors.grey.shade700,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                  '${lease['property_name'] ?? ''} · Unit ${lease['unit_number'] ?? ''}'),
-                              if (lease['tenant_phone'] != null)
-                                Text(
-                                  lease['tenant_phone'],
-                                  style: const TextStyle(
-                                      fontSize: 12, color: Colors.grey),
-                                ),
-                            ],
-                          ),
-                          trailing: status == 'active'
-                              ? PopupMenuButton<String>(
-                                  onSelected: (action) async {
-                                    if (action == 'send_lease') {
-                                      try {
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(content: Text('Generating lease PDF…')),
-                                        );
-                                        final resp = await ref.read(dioProvider).post(
-                                          '/api/v1/tenants/leases/${lease['id']}/send-lease/',
-                                        );
-                                        if (context.mounted) {
-                                          final msg = resp.data['message'] ?? 'Done';
-                                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                                            content: Text(msg),
-                                            backgroundColor: Colors.green,
-                                          ));
-                                        }
-                                      } catch (e) {
-                                        if (context.mounted) {
-                                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                                            content: Text(apiError(e)),
-                                            backgroundColor: Theme.of(context).colorScheme.error,
-                                          ));
-                                        }
-                                      }
-                                    } else if (action == 'terminate') {
-                                      final confirmed = await showDialog<bool>(
-                                        context: context,
-                                        useRootNavigator: true,
-                                        builder: (ctx) => AlertDialog(
-                                          title: const Text('Terminate Lease'),
-                                          content: Text(
-                                              'Terminate the lease for ${lease['tenant_name']}? '
-                                              'The unit will be marked vacant.'),
-                                          actions: [
-                                            TextButton(
-                                              onPressed: () =>
-                                                  Navigator.pop(ctx, false),
-                                              child: const Text('Cancel'),
-                                            ),
-                                            ElevatedButton(
-                                              style: ElevatedButton.styleFrom(
-                                                backgroundColor:
-                                                    Theme.of(ctx).colorScheme.error,
-                                                foregroundColor: Colors.white,
+                                    const SizedBox(width: 14),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Expanded(
+                                                child: Text(
+                                                  name.toUpperCase(),
+                                                  style: GoogleFonts.spaceGrotesk(
+                                                    fontSize: 14,
+                                                    fontWeight: FontWeight.w700,
+                                                    color: cs.onSurface,
+                                                    letterSpacing: -0.14,
+                                                  ),
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
                                               ),
-                                              onPressed: () =>
-                                                  Navigator.pop(ctx, true),
-                                              child: const Text('Terminate'),
+                                              const SizedBox(width: 6),
+                                              KasaChip(
+                                                label: chipLabel,
+                                                variant: chipVariant,
+                                                small: true,
+                                              ),
+                                            ],
+                                          ),
+                                          if (property.isNotEmpty || unit.isNotEmpty) ...[
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              'UNIT $unit · $property'.toUpperCase(),
+                                              style: GoogleFonts.inter(
+                                                fontSize: 11,
+                                                color: cs.kasaTextSub,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
                                             ),
                                           ],
-                                        ),
-                                      );
-                                      if (confirmed == true && context.mounted) {
-                                        try {
-                                          await ref.read(dioProvider).patch(
-                                            '/api/v1/tenants/leases/${lease['id']}/',
-                                            data: {'status': 'terminated'},
-                                          );
-                                          ref.invalidate(leasesProvider);
-                                        } catch (e) {
-                                          if (context.mounted) {
-                                            ScaffoldMessenger.of(context)
-                                                .showSnackBar(SnackBar(
-                                              content: Text(apiError(e)),
-                                              backgroundColor: Theme.of(context)
-                                                  .colorScheme
-                                                  .error,
-                                            ));
+                                          if (rent != null || endDate != null) ...[
+                                            const SizedBox(height: 6),
+                                            Row(
+                                              children: [
+                                                if (endDate != null) ...[
+                                                  Text(
+                                                    'LEASE: $endDate',
+                                                    style: GoogleFonts.spaceGrotesk(
+                                                      fontSize: 10,
+                                                      fontWeight: FontWeight.w700,
+                                                      color: cs.kasaTextSub,
+                                                    ),
+                                                  ),
+                                                  Text(
+                                                    '  |  ',
+                                                    style: TextStyle(color: cs.kasaTextSub, fontSize: 10),
+                                                  ),
+                                                ],
+                                                if (rent != null)
+                                                  Text(
+                                                    'KES ${rent.toString().replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')}',
+                                                    style: GoogleFonts.spaceGrotesk(
+                                                      fontSize: 10,
+                                                      fontWeight: FontWeight.w700,
+                                                      color: cs.kasaTextSub,
+                                                    ),
+                                                  ),
+                                              ],
+                                            ),
+                                          ],
+                                          if (phone != null) ...[
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              phone,
+                                              style: GoogleFonts.jetBrainsMono(
+                                                fontSize: 11,
+                                                color: cs.kasaTextSub,
+                                              ),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+                                    if (apiStatus == 'active')
+                                      PopupMenuButton<String>(
+                                        icon: Icon(Icons.more_vert,
+                                            size: 20, color: cs.kasaTextSub),
+                                        onSelected: (action) async {
+                                          if (action == 'send_lease') {
+                                            try {
+                                              ScaffoldMessenger.of(context)
+                                                  .showSnackBar(const SnackBar(
+                                                      content: Text(
+                                                          'Generating lease PDF…')));
+                                              final resp = await ref
+                                                  .read(dioProvider)
+                                                  .post(
+                                                    '/api/v1/tenants/leases/${lease['id']}/send-lease/',
+                                                  );
+                                              if (context.mounted) {
+                                                ScaffoldMessenger.of(context)
+                                                    .showSnackBar(SnackBar(
+                                                  content: Text(
+                                                      resp.data['message'] ??
+                                                          'Done'),
+                                                  backgroundColor: Colors.green,
+                                                ));
+                                              }
+                                            } catch (e) {
+                                              if (context.mounted) {
+                                                ScaffoldMessenger.of(context)
+                                                    .showSnackBar(SnackBar(
+                                                  content: Text(apiError(e)),
+                                                  backgroundColor: cs.error,
+                                                ));
+                                              }
+                                            }
+                                          } else if (action == 'terminate') {
+                                            final confirmed =
+                                                await showDialog<bool>(
+                                              context: context,
+                                              useRootNavigator: true,
+                                              builder: (ctx) => AlertDialog(
+                                                title: const Text(
+                                                    'Terminate Lease'),
+                                                content: Text(
+                                                    'Terminate the lease for $name? '
+                                                    'The unit will be marked vacant.'),
+                                                actions: [
+                                                  TextButton(
+                                                    onPressed: () =>
+                                                        Navigator.pop(
+                                                            ctx, false),
+                                                    child:
+                                                        const Text('Cancel'),
+                                                  ),
+                                                  ElevatedButton(
+                                                    style: ElevatedButton
+                                                        .styleFrom(
+                                                      backgroundColor:
+                                                          Theme.of(ctx)
+                                                              .colorScheme
+                                                              .error,
+                                                      foregroundColor:
+                                                          Colors.white,
+                                                    ),
+                                                    onPressed: () =>
+                                                        Navigator.pop(
+                                                            ctx, true),
+                                                    child: const Text(
+                                                        'Terminate'),
+                                                  ),
+                                                ],
+                                              ),
+                                            );
+                                            if (confirmed == true &&
+                                                context.mounted) {
+                                              try {
+                                                await ref
+                                                    .read(dioProvider)
+                                                    .patch(
+                                                      '/api/v1/tenants/leases/${lease['id']}/',
+                                                      data: {
+                                                        'status': 'terminated'
+                                                      },
+                                                    );
+                                                ref.invalidate(leasesProvider);
+                                              } catch (e) {
+                                                if (context.mounted) {
+                                                  ScaffoldMessenger.of(context)
+                                                      .showSnackBar(SnackBar(
+                                                    content: Text(apiError(e)),
+                                                    backgroundColor: cs.error,
+                                                  ));
+                                                }
+                                              }
+                                            }
                                           }
-                                        }
-                                      }
-                                    }
-                                  },
-                                  itemBuilder: (_) => const [
-                                    PopupMenuItem(
-                                      value: 'send_lease',
-                                      child: ListTile(
-                                        leading: Icon(Icons.picture_as_pdf_outlined,
-                                            color: Colors.blue),
-                                        title: Text('Send Lease Agreement'),
+                                        },
+                                        itemBuilder: (_) => [
+                                          PopupMenuItem(
+                                            value: 'send_lease',
+                                            child: ListTile(
+                                              leading: Icon(
+                                                  Icons.picture_as_pdf_outlined,
+                                                  color: cs.secondary),
+                                              title: const Text(
+                                                  'Send Lease Agreement'),
+                                            ),
+                                          ),
+                                          PopupMenuItem(
+                                            value: 'terminate',
+                                            child: ListTile(
+                                              leading: Icon(
+                                                  Icons.cancel_outlined,
+                                                  color: cs.error),
+                                              title: Text('Terminate',
+                                                  style: TextStyle(
+                                                      color: cs.error)),
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                    ),
-                                    PopupMenuItem(
-                                      value: 'terminate',
-                                      child: ListTile(
-                                        leading: Icon(Icons.cancel_outlined,
-                                            color: Colors.red),
-                                        title: Text('Terminate',
-                                            style: TextStyle(color: Colors.red)),
-                                      ),
-                                    ),
                                   ],
-                                )
-                              : null,
-                          isThreeLine: true,
+                                ),
+                              ),
+                            );
+                          },
                         ),
                       );
-                    },
-                  ),
-                ),
-        ),
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Future<void> _showOptions(BuildContext context, WidgetRef ref) async {
+  Future<void> _showOptions(BuildContext context) async {
     // Await the options sheet — it returns which action the user chose.
+    final cs = Theme.of(context).colorScheme;
     final action = await showModalBottomSheet<String>(
       context: context,
       useRootNavigator: true,
+      backgroundColor: cs.kasaBg,
       shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (sheetCtx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 8),
-            Container(
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(2)),
-            ),
-            const SizedBox(height: 8),
-            ListTile(
-              leading: const CircleAvatar(child: Icon(Icons.person_add)),
-              title: const Text('Add Tenant'),
-              subtitle: const Text('Register a new tenant account'),
-              // Pop with a return value instead of imperatively pushing the next sheet.
-              onTap: () => Navigator.pop(sheetCtx, 'addTenant'),
-            ),
-            ListTile(
-              leading: const CircleAvatar(child: Icon(Icons.assignment)),
-              title: const Text('New Lease'),
-              subtitle: const Text('Assign a unit to an existing tenant'),
-              onTap: () => Navigator.pop(sheetCtx, 'newLease'),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (sheetCtx) {
+        final scs = Theme.of(sheetCtx).colorScheme;
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 12),
+              Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                    color: scs.outlineVariant,
+                    borderRadius: BorderRadius.circular(2)),
+              ),
+              const SizedBox(height: 16),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Text(
+                  'ADD TENANT',
+                  style: GoogleFonts.spaceGrotesk(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.5,
+                    color: scs.onSurface,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+                child: KasaCard(
+                  padding: EdgeInsets.zero,
+                  child: Column(
+                    children: [
+                      ListTile(
+                        leading: Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: scs.secondaryContainer,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: scs.kasaStroke, width: 2),
+                          ),
+                          child: Icon(Icons.person_add,
+                              size: 20, color: scs.onSecondaryContainer),
+                        ),
+                        title: Text('Add Tenant',
+                            style: GoogleFonts.spaceGrotesk(
+                                fontWeight: FontWeight.w700)),
+                        subtitle: Text('Register a new tenant account',
+                            style: GoogleFonts.inter(
+                                fontSize: 12, color: scs.kasaTextSub)),
+                        trailing: Icon(Icons.chevron_right,
+                            color: scs.kasaTextSub),
+                        onTap: () => Navigator.pop(sheetCtx, 'addTenant'),
+                      ),
+                      Divider(height: 1, color: scs.kasaStroke, thickness: 2),
+                      ListTile(
+                        leading: Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: scs.tertiaryContainer,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: scs.kasaStroke, width: 2),
+                          ),
+                          child: Icon(Icons.assignment,
+                              size: 20, color: scs.onTertiaryContainer),
+                        ),
+                        title: Text('New Lease',
+                            style: GoogleFonts.spaceGrotesk(
+                                fontWeight: FontWeight.w700)),
+                        subtitle: Text('Assign a unit to an existing tenant',
+                            style: GoogleFonts.inter(
+                                fontSize: 12, color: scs.kasaTextSub)),
+                        trailing: Icon(Icons.chevron_right,
+                            color: scs.kasaTextSub),
+                        onTap: () => Navigator.pop(sheetCtx, 'newLease'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        );
+      },
     );
 
     if (action == null || !context.mounted) return;
@@ -492,14 +735,21 @@ class _AddTenantDialogState extends ConsumerState<_AddTenantDialog> {
     });
   }
 
-  Widget _sectionLabel(String text) => Padding(
-        padding: const EdgeInsets.only(top: 16, bottom: 6),
-        child: Text(text,
-            style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: Theme.of(context).colorScheme.primary)),
-      );
+  Widget _sectionLabel(String text) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(top: 16, bottom: 6),
+      child: Text(
+        text.toUpperCase(),
+        style: GoogleFonts.spaceGrotesk(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.04,
+          color: cs.kasaTextSub,
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {

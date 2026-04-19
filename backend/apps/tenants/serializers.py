@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Lease, MaintenanceRequest
+from .models import Lease, MaintenanceRequest, MaintenanceNote
 
 
 class LeaseSerializer(serializers.ModelSerializer):
@@ -19,7 +19,22 @@ class LeaseSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at"]
 
 
+class MaintenanceNoteSerializer(serializers.ModelSerializer):
+    author_name = serializers.CharField(source="author.get_full_name", read_only=True)
+    is_tenant = serializers.SerializerMethodField()
+
+    class Meta:
+        model = MaintenanceNote
+        fields = ["id", "body", "author_name", "is_tenant", "created_at"]
+        read_only_fields = ["id", "author_name", "is_tenant", "created_at"]
+
+    def get_is_tenant(self, obj):
+        return hasattr(obj.author, "is_tenant") and obj.author.is_tenant
+
+
 class MaintenanceRequestSerializer(serializers.ModelSerializer):
+    notes_count = serializers.IntegerField(source="notes.count", read_only=True)
+
     class Meta:
         model = MaintenanceRequest
         fields = "__all__"

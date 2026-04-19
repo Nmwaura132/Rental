@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
 import '../../core/constants.dart';
 import '../../core/providers/user_role_provider.dart';
+import '../../core/theme/kasa_tokens.dart';
 import '../../core/utils/api_error.dart';
 import '../../core/utils/currency.dart';
+import '../../core/widgets/kasa_primitives.dart';
 import '../../shared/widgets/shimmer_loading.dart';
 
 final _apiDate = DateFormat('yyyy-MM-dd');
@@ -19,22 +22,6 @@ final invoicesProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
   if (data is Map && data['results'] is List) return data['results'] as List<dynamic>;
   return [];
 });
-
-const _statusColor = {
-  'paid': Color(0xFF2E7D32),
-  'pending': Color(0xFFF57F17),
-  'overdue': Color(0xFFB71C1C),
-  'partially_paid': Color(0xFF0277BD),
-  'cancelled': Color(0xFF546E7A),
-};
-
-const _statusBgColor = {
-  'paid': Color(0xFFE8F5E9),
-  'pending': Color(0xFFFFF8E1),
-  'overdue': Color(0xFFFFEBEE),
-  'partially_paid': Color(0xFFE1F5FE),
-  'cancelled': Color(0xFFECEFF1),
-};
 
 // ─── Line Item Entry (mutable state for one invoice line item) ────────────────
 
@@ -101,92 +88,180 @@ class _LineItemEntry {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-class InvoicesScreen extends ConsumerWidget {
+class InvoicesScreen extends ConsumerStatefulWidget {
   const InvoicesScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<InvoicesScreen> createState() => _InvoicesScreenState();
+}
+
+class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
+  String _filter = 'all';
+
+  @override
+  Widget build(BuildContext context) {
     final invoices = ref.watch(invoicesProvider);
     final role = ref.watch(userRoleProvider).valueOrNull;
+    final isLandlord = role == 'landlord' || role == 'caretaker';
+    final cs = Theme.of(context).colorScheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Invoices')),
-      floatingActionButton: role == 'tenant'
-          ? null
-          : Padding(
-              padding: const EdgeInsets.only(bottom: 80),
-              child: FloatingActionButton.extended(
-                onPressed: () => Navigator.of(context, rootNavigator: true).push(
-                  MaterialPageRoute(
-                    fullscreenDialog: true,
-                    builder: (ctx) => Scaffold(
-                      appBar: AppBar(
-                        title: const Text('Create Invoice'),
-                        leading: IconButton(
-                          icon: const Icon(Icons.close),
-                          onPressed: () => Navigator.of(ctx).pop(),
-                        ),
-                      ),
-                      body: _CreateInvoiceDialog(
-                        onDone: () => ref.invalidate(invoicesProvider),
-                      ),
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Sticky header ──────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Row(
+                children: [
+                  Text(
+                    'INVOICES',
+                    style: GoogleFonts.spaceGrotesk(
+                      fontSize: 32,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.96,
+                      color: cs.onSurface,
+                      height: 1,
                     ),
                   ),
-                ),
-                icon: const Icon(Icons.add),
-                label: const Text('Create Invoice'),
+                  const Spacer(),
+                  if (isLandlord)
+                    KasaButton(
+                      variant: KasaButtonVariant.primary,
+                      fullWidth: false,
+                      label: 'ADD',
+                      leading: const Icon(Icons.add, size: 14),
+                      onTap: () => Navigator.of(context, rootNavigator: true).push(
+                        MaterialPageRoute(
+                          fullscreenDialog: true,
+                          builder: (ctx) => Scaffold(
+                            appBar: AppBar(
+                              title: const Text('Create Invoice'),
+                              leading: IconButton(
+                                icon: const Icon(Icons.close),
+                                onPressed: () => Navigator.of(ctx).pop(),
+                              ),
+                            ),
+                            body: _CreateInvoiceDialog(
+                              onDone: () => ref.invalidate(invoicesProvider),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
-      body: invoices.when(
-        loading: () => const SkeletonList(),
-        error: (e, _) => Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.cloud_off_outlined, size: 56, color: Colors.grey),
-              const SizedBox(height: 12),
-              Text(apiError(e), style: const TextStyle(color: Colors.grey)),
-              const SizedBox(height: 16),
-              ElevatedButton.icon(
-                onPressed: () => ref.invalidate(invoicesProvider),
-                icon: const Icon(Icons.refresh),
-                label: const Text('Retry'),
-              ),
-            ],
-          ),
-        ),
-        data: (list) => list.isEmpty
-            ? const Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.receipt_long_outlined, size: 64, color: Colors.grey),
-                    SizedBox(height: 12),
-                    Text('No invoices yet.', style: TextStyle(color: Colors.grey)),
-                    SizedBox(height: 4),
-                    Text('Tap "Create Invoice" to generate the first one.',
-                        style: TextStyle(color: Colors.grey, fontSize: 12)),
+
+            // ── Filter chips ───────────────────────────────────────────────
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+              child: Row(
+                children: [
+                  for (final (value, label) in const [
+                    ('all', 'ALL'),
+                    ('pending', 'PENDING'),
+                    ('paid', 'PAID'),
+                    ('overdue', 'OVERDUE'),
+                  ]) ...[
+                    GestureDetector(
+                      onTap: () => setState(() => _filter = value),
+                      child: KasaChip(
+                        label: label,
+                        variant: _filter == value
+                            ? KasaChipVariant.secondary
+                            : KasaChipVariant.neutral,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
                   ],
-                ),
-              )
-            : RefreshIndicator(
-                onRefresh: () => ref.refresh(invoicesProvider.future),
-                child: ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 100),
-                  itemCount: list.length,
-                  itemBuilder: (_, i) {
-                    final inv = list[i] as Map<String, dynamic>;
-                    return _InvoiceCard(
-                      invoice: inv,
-                      onChanged: () => ref.invalidate(invoicesProvider),
-                    );
-                  },
-                ),
+                ],
               ),
+            ),
+
+            // ── Invoice list ───────────────────────────────────────────────
+            Expanded(
+              child: invoices.when(
+                loading: () => const SkeletonList(),
+                error: (e, _) => Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.cloud_off_outlined,
+                          size: 56, color: Colors.grey),
+                      const SizedBox(height: 12),
+                      Text(apiError(e),
+                          style: const TextStyle(color: Colors.grey)),
+                      const SizedBox(height: 16),
+                      ElevatedButton.icon(
+                        onPressed: () => ref.invalidate(invoicesProvider),
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Retry'),
+                      ),
+                    ],
+                  ),
+                ),
+                data: (rawList) {
+                  List<dynamic> list = rawList;
+                  if (_filter != 'all') {
+                    list = list
+                        .where((i) =>
+                            (i as Map)['status'] == _filter)
+                        .toList();
+                  }
+                  if (list.isEmpty) {
+                    return Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.receipt_long_outlined,
+                              size: 64, color: Colors.grey),
+                          const SizedBox(height: 12),
+                          Text(
+                            _filter == 'all'
+                                ? 'No invoices yet.'
+                                : 'No ${_filter.toUpperCase()} invoices.',
+                            style: const TextStyle(color: Colors.grey),
+                          ),
+                          if (_filter == 'all') ...[
+                            const SizedBox(height: 4),
+                            const Text(
+                              'Tap "ADD" to generate the first one.',
+                              style: TextStyle(
+                                  color: Colors.grey, fontSize: 12),
+                            ),
+                          ],
+                        ],
+                      ),
+                    );
+                  }
+                  return RefreshIndicator(
+                    onRefresh: () => ref.refresh(invoicesProvider.future),
+                    child: ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
+                      itemCount: list.length,
+                      itemBuilder: (_, i) {
+                        final inv = list[i] as Map<String, dynamic>;
+                        return _InvoiceCard(
+                          invoice: inv,
+                          onChanged: () => ref.invalidate(invoicesProvider),
+                        );
+                      },
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
+
+// ─── Invoice Card ─────────────────────────────────────────────────────────────
 
 class _InvoiceCard extends ConsumerWidget {
   const _InvoiceCard({required this.invoice, required this.onChanged});
@@ -196,8 +271,6 @@ class _InvoiceCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final status = invoice['status'] as String;
-    final color = _statusColor[status] ?? const Color(0xFF546E7A);
-    final bgColor = _statusBgColor[status] ?? const Color(0xFFECEFF1);
     final balance = double.tryParse((invoice['balance'] ?? '0').toString()) ?? 0;
     final isPaid = status == 'paid';
     final canEdit = status == 'pending' || status == 'overdue';
@@ -205,140 +278,189 @@ class _InvoiceCard extends ConsumerWidget {
     final canVoid = status == 'paid' || status == 'partially_paid';
     final role = ref.watch(userRoleProvider).valueOrNull;
     final isLandlord = role == 'landlord' || role == 'caretaker';
+    final cs = Theme.of(context).colorScheme;
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+    // Status chip variant mapping
+    final chipVariant = switch (status) {
+      'paid'           => KasaChipVariant.primary,
+      'overdue'        => KasaChipVariant.tertiary,
+      'pending'        => KasaChipVariant.secondary,
+      'partially_paid' => KasaChipVariant.secondary,
+      _                => KasaChipVariant.neutral,
+    };
+    final chipLabel = switch (status) {
+      'paid'           => 'PAID',
+      'overdue'        => 'OVERDUE',
+      'pending'        => 'PENDING',
+      'partially_paid' => 'PARTIAL',
+      'cancelled'      => 'VOID',
+      _                => status.replaceAll('_', ' ').toUpperCase(),
+    };
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: KasaCard(
+        padding: const EdgeInsets.all(14),
         onTap: () => _showDetail(context),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 14, 6, 14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      invoice['invoice_number'] ?? '',
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 13),
-                    ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Row: invoice number + status chip + popup menu
+            Row(
+              children: [
+                Text(
+                  invoice['invoice_number'] ?? '',
+                  style: GoogleFonts.jetBrainsMono(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: cs.kasaTextSub,
                   ),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: bgColor,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      status.replaceAll('_', ' ').toUpperCase(),
-                      style: TextStyle(
-                          fontSize: 10,
-                          color: color,
-                          fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                  if (!isPaid || canEdit || canDelete || canVoid)
-                    PopupMenuButton<String>(
-                      icon: const Icon(Icons.more_vert, size: 20),
-                      itemBuilder: (_) => [
-                        if (!isPaid && isLandlord)
-                          const PopupMenuItem(
-                            value: 'pay',
-                            child: ListTile(
-                              leading: Icon(Icons.payments_outlined),
-                              title: Text('Record Cash/Bank'),
-                              contentPadding: EdgeInsets.zero,
-                              dense: true,
-                            ),
-                          ),
-                        if (canEdit)
-                          const PopupMenuItem(
-                            value: 'edit',
-                            child: ListTile(
-                              leading: Icon(Icons.edit_outlined),
-                              title: Text('Edit Invoice'),
-                              contentPadding: EdgeInsets.zero,
-                              dense: true,
-                            ),
-                          ),
-                        if (canVoid)
-                          const PopupMenuItem(
-                            value: 'void',
-                            child: ListTile(
-                              leading: Icon(Icons.cancel_outlined, color: Colors.orange),
-                              title: Text('Void Invoice', style: TextStyle(color: Colors.orange)),
-                              contentPadding: EdgeInsets.zero,
-                              dense: true,
-                            ),
-                          ),
-                        if (canDelete)
-                          const PopupMenuItem(
-                            value: 'delete',
-                            child: ListTile(
-                              leading: Icon(Icons.delete_outline, color: Colors.red),
-                              title: Text('Delete', style: TextStyle(color: Colors.red)),
-                              contentPadding: EdgeInsets.zero,
-                              dense: true,
-                            ),
-                          ),
-                      ],
-                      onSelected: (v) {
-                        if (v == 'pay') _showRecordPayment(context);
-                        if (v == 'edit') _showEdit(context);
-                        if (v == 'void') _confirmVoid(context, ref);
-                        if (v == 'delete') _confirmDelete(context, ref);
-                      },
-                    ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Text(
-                '${invoice['tenant_name'] ?? ''} · Unit ${invoice['unit_number'] ?? ''}',
-                style: const TextStyle(color: Colors.grey, fontSize: 13),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Balance due',
-                            style: TextStyle(
-                                fontSize: 11, color: Colors.grey.shade600)),
-                        Text(
-                          formatCurrency(balance),
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: isPaid ? Colors.green : color,
+                ),
+                const Spacer(),
+                KasaChip(label: chipLabel, variant: chipVariant, small: true),
+                if (isLandlord && (!isPaid || canEdit || canDelete || canVoid))
+                  PopupMenuButton<String>(
+                    icon: Icon(Icons.more_vert,
+                        size: 20, color: cs.kasaTextSub),
+                    itemBuilder: (_) => [
+                      if (!isPaid)
+                        const PopupMenuItem(
+                          value: 'pay',
+                          child: ListTile(
+                            leading: Icon(Icons.payments_outlined),
+                            title: Text('Record Cash/Bank'),
+                            contentPadding: EdgeInsets.zero,
+                            dense: true,
                           ),
                         ),
-                      ],
+                      if (canEdit)
+                        const PopupMenuItem(
+                          value: 'edit',
+                          child: ListTile(
+                            leading: Icon(Icons.edit_outlined),
+                            title: Text('Edit Invoice'),
+                            contentPadding: EdgeInsets.zero,
+                            dense: true,
+                          ),
+                        ),
+                      if (canVoid)
+                        const PopupMenuItem(
+                          value: 'void',
+                          child: ListTile(
+                            leading: Icon(Icons.cancel_outlined,
+                                color: Colors.orange),
+                            title: Text('Void Invoice',
+                                style: TextStyle(color: Colors.orange)),
+                            contentPadding: EdgeInsets.zero,
+                            dense: true,
+                          ),
+                        ),
+                      if (canDelete)
+                        const PopupMenuItem(
+                          value: 'delete',
+                          child: ListTile(
+                            leading: Icon(Icons.delete_outline,
+                                color: Colors.red),
+                            title: Text('Delete',
+                                style: TextStyle(color: Colors.red)),
+                            contentPadding: EdgeInsets.zero,
+                            dense: true,
+                          ),
+                        ),
+                    ],
+                    onSelected: (v) {
+                      if (v == 'pay') _showRecordPayment(context);
+                      if (v == 'edit') _showEdit(context);
+                      if (v == 'void') _confirmVoid(context, ref);
+                      if (v == 'delete') _confirmDelete(context, ref);
+                    },
+                  ),
+              ],
+            ),
+            const SizedBox(height: 6),
+
+            // Row: tenant · unit
+            Text(
+              '${invoice['tenant_name'] ?? ''} · Unit ${invoice['unit_number'] ?? ''}',
+              style: GoogleFonts.spaceGrotesk(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: cs.onSurface,
+              ),
+            ),
+            const SizedBox(height: 8),
+
+            // Row: balance due + record payment arrow
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'BALANCE DUE',
+                        style: GoogleFonts.spaceGrotesk(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: cs.kasaTextSub,
+                          letterSpacing: 0.04,
+                        ),
+                      ),
+                      Text(
+                        formatCurrency(balance),
+                        style: GoogleFonts.spaceGrotesk(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                          color: cs.onSurface,
+                          height: 1.1,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (!isPaid && isLandlord)
+                  GestureDetector(
+                    onTap: () => _showRecordPayment(context),
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: cs.secondary,
+                        borderRadius:
+                            BorderRadius.circular(KasaRadius.md),
+                        border: Border.all(
+                            color: cs.kasaStroke,
+                            width: KasaBorders.card),
+                        boxShadow: [
+                          BoxShadow(
+                            color: cs.kasaShadow,
+                            offset: const Offset(KasaBorders.shadow,
+                                KasaBorders.shadow),
+                            blurRadius: 0,
+                          ),
+                        ],
+                      ),
+                      child: Icon(Icons.arrow_forward,
+                          size: 18, color: cs.onSecondary),
                     ),
                   ),
-                  if (!isPaid && isLandlord)
-                    TextButton.icon(
-                      onPressed: () => _showRecordPayment(context),
-                      icon: const Icon(Icons.payments, size: 16),
-                      label: const Text('Record Cash/Bank'),
-                    ),
-                ],
-              ),
-              if (invoice['due_date'] != null)
-                Text(
-                  'Due: ${_tryFormatDate(invoice['due_date'])}',
-                  style: TextStyle(
-                      fontSize: 11,
-                      color: status == 'overdue'
-                          ? Colors.red
-                          : Colors.grey.shade600),
+              ],
+            ),
+
+            // Due date
+            if (invoice['due_date'] != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                'DUE ${_tryFormatDate(invoice['due_date'])}',
+                style: GoogleFonts.spaceGrotesk(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: cs.kasaTextSub,
+                  letterSpacing: 0.04,
                 ),
+              ),
             ],
-          ),
+          ],
         ),
       ),
     );
@@ -413,7 +535,8 @@ class _InvoiceCard extends ConsumerWidget {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-              content: Text('Invoice deleted.'), backgroundColor: Colors.green),
+              content: Text('Invoice deleted.'),
+              backgroundColor: Colors.green),
         );
       }
     } catch (e) {
@@ -572,142 +695,361 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
     }
   }
 
+  void _showPaymentMethodSheet(BuildContext context, WidgetRef ref) {
+    final balance = double.tryParse((invoice['balance'] ?? '0').toString()) ?? 0;
+    final role = ref.read(userRoleProvider).valueOrNull;
+    final isTenant = role == 'tenant';
+
+    showModalBottomSheet(
+      context: context,
+      useRootNavigator: true,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => _PaymentMethodSheet(
+        invoice: invoice,
+        balance: balance,
+        isTenant: isTenant,
+        onStkPush: () {
+          Navigator.pop(ctx);
+          _stkPush(context, ref);
+        },
+        onManualPayment: isTenant
+            ? null
+            : () {
+                Navigator.pop(ctx);
+                Future.delayed(const Duration(milliseconds: 300), () {
+                  if (!context.mounted) return;
+                  showDialog(
+                    context: context,
+                    useRootNavigator: true,
+                    barrierDismissible: false,
+                    builder: (_) => _RecordPaymentDialog(
+                      invoiceId: invoice['id'] as int,
+                      balance: balance,
+                      onDone: onChanged,
+                    ),
+                  );
+                });
+              },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final status = invoice['status'] as String;
-    final color = _statusColor[status] ?? const Color(0xFF546E7A);
-    final bgColor = _statusBgColor[status] ?? const Color(0xFFECEFF1);
     final isPaid = status == 'paid';
     final canEdit = status == 'pending' || status == 'overdue';
     final canDelete = status == 'pending' || status == 'cancelled';
     final canVoid = status == 'paid' || status == 'partially_paid';
     final payments = invoice['payments'] as List<dynamic>? ?? [];
     final role = ref.watch(userRoleProvider).valueOrNull;
+    final isLandlord = role == 'landlord' || role == 'manager';
+
+    final chipVariant = switch (status) {
+      'paid'           => KasaChipVariant.primary,
+      'overdue'        => KasaChipVariant.tertiary,
+      'pending'        => KasaChipVariant.secondary,
+      'partially_paid' => KasaChipVariant.secondary,
+      _                => KasaChipVariant.neutral,
+    };
+    final chipLabel = switch (status) {
+      'paid'           => 'PAID',
+      'overdue'        => 'OVERDUE',
+      'pending'        => 'PENDING',
+      'partially_paid' => 'PARTIAL',
+      'cancelled'      => 'VOID',
+      _                => status.replaceAll('_', ' ').toUpperCase(),
+    };
 
     return DraggableScrollableSheet(
       initialChildSize: 0.6,
       maxChildSize: 0.92,
       minChildSize: 0.4,
       expand: false,
-      builder: (_, controller) => Padding(
-        padding: const EdgeInsets.all(20),
+      builder: (_, controller) => Container(
+        decoration: BoxDecoration(
+          color: cs.kasaBg,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(KasaRadius.xl)),
+          border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
+        ),
         child: ListView(
           controller: controller,
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
           children: [
+            // Handle
             Center(
               child: Container(
-                width: 36,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 16),
+                width: 36, height: 4,
+                margin: const EdgeInsets.only(bottom: 20),
                 decoration: BoxDecoration(
-                    color: Colors.grey.shade300,
-                    borderRadius: BorderRadius.circular(2)),
+                  color: cs.outlineVariant,
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
             ),
-            Text(invoice['invoice_number'] ?? '',
-                style:
-                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+
+            // Header: invoice number + chip
+            Row(
+              children: [
+                Text(
+                  invoice['invoice_number'] ?? '',
+                  style: GoogleFonts.jetBrainsMono(
+                    fontSize: 13, fontWeight: FontWeight.w700, color: cs.kasaTextSub,
+                  ),
+                ),
+                const Spacer(),
+                KasaChip(label: chipLabel, variant: chipVariant, small: true),
+              ],
+            ),
+            const SizedBox(height: 8),
+
+            // Hero amount
+            Text(
+              formatCurrency(toDouble(invoice['amount_due'])),
+              style: GoogleFonts.spaceGrotesk(
+                fontSize: 40, fontWeight: FontWeight.w700,
+                letterSpacing: -1.2, color: cs.onSurface, height: 1,
+              ),
+            ),
             const SizedBox(height: 4),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: bgColor,
-                borderRadius: BorderRadius.circular(8),
+            Text(
+              '${invoice['tenant_name'] ?? ''} · Unit ${invoice['unit_number'] ?? ''}',
+              style: GoogleFonts.inter(
+                fontSize: 13, fontWeight: FontWeight.w500, color: cs.kasaTextSub,
               ),
-              child: Text(status.replaceAll('_', ' ').toUpperCase(),
-                  style: TextStyle(color: color, fontWeight: FontWeight.bold)),
             ),
-            const SizedBox(height: 16),
-            _DetailRow('Tenant', invoice['tenant_name'] ?? ''),
-            _DetailRow('Unit', 'Unit ${invoice['unit_number'] ?? ''}'),
-            _DetailRow('Amount Due', formatCurrency(toDouble(invoice['amount_due']))),
-            _DetailRow('Amount Paid', formatCurrency(toDouble(invoice['amount_paid']))),
-            _DetailRow('Balance', formatCurrency(toDouble(invoice['balance'])),
-                bold: true,
-                color: isPaid ? const Color(0xFF2E7D32) : const Color(0xFFB71C1C)),
-            if (invoice['due_date'] != null)
-              _DetailRow('Due Date', _tryFormatDate(invoice['due_date'] as String)),
-            if (invoice['period_start'] != null)
-              _DetailRow(
-                'Period',
-                '${_tryFormatDate(invoice['period_start'] as String)} – '
-                    '${_tryFormatDate(invoice['period_end'] as String? ?? '')}',
+            const SizedBox(height: 20),
+
+            // Detail rows
+            KasaCard(
+              padding: EdgeInsets.zero,
+              child: Column(
+                children: [
+                  _DetailRow('AMOUNT DUE', formatCurrency(toDouble(invoice['amount_due'])), isFirst: true),
+                  _DetailRow('AMOUNT PAID', formatCurrency(toDouble(invoice['amount_paid']))),
+                  _DetailRow('BALANCE', formatCurrency(toDouble(invoice['balance'])),
+                      bold: true,
+                      valueColor: isPaid ? cs.statusPaid : cs.error),
+                  if (invoice['due_date'] != null)
+                    _DetailRow('DUE DATE', _tryFormatDate(invoice['due_date'] as String)),
+                  if (invoice['period_start'] != null)
+                    _DetailRow(
+                      'PERIOD',
+                      '${_tryFormatDate(invoice['period_start'] as String)} – '
+                          '${_tryFormatDate(invoice['period_end'] as String? ?? '')}',
+                    ),
+                  if (invoice['notes']?.isNotEmpty == true)
+                    _DetailRow('NOTES', invoice['notes'] as String),
+                ],
               ),
-            if (invoice['notes']?.isNotEmpty == true)
-              _DetailRow('Notes', invoice['notes'] as String),
-            // ── Line Items Breakdown ──
+            ),
+
+            // Line items breakdown
             Builder(builder: (context) {
-              final lineItems =
-                  invoice['line_items'] as List<dynamic>? ?? [];
+              final lineItems = invoice['line_items'] as List<dynamic>? ?? [];
               if (lineItems.isEmpty) return const SizedBox.shrink();
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Divider(height: 32),
-                  const Text('Breakdown',
-                      style: TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 14)),
+                  const SizedBox(height: 16),
+                  Text(
+                    'BREAKDOWN',
+                    style: GoogleFonts.spaceGrotesk(
+                      fontSize: 11, fontWeight: FontWeight.w700,
+                      letterSpacing: 0.04, color: cs.kasaTextSub,
+                    ),
+                  ),
                   const SizedBox(height: 8),
-                  ...lineItems.map((rawItem) {
-                    final li = rawItem as Map<String, dynamic>;
-                    final isMetered = li['previous_reading'] != null;
-                    return ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      dense: true,
-                      title: Text(li['description'] as String? ?? ''),
-                      subtitle: isMetered
-                          ? Text(
-                              '${toDouble(li['current_reading']).toStringAsFixed(0)} − '
-                              '${toDouble(li['previous_reading']).toStringAsFixed(0)} = '
-                              '${toDouble(li['units_consumed']).toStringAsFixed(0)} units '
-                              '× ${AppConstants.currency} '
-                              '${toDouble(li['unit_price']).toStringAsFixed(2)}',
-                              style: const TextStyle(fontSize: 11),
-                            )
-                          : null,
-                      trailing: Text(formatCurrency(toDouble(li['amount'])),
-                          style: const TextStyle(
-                              fontWeight: FontWeight.w500, fontSize: 13)),
-                    );
-                  }),
+                  KasaCard(
+                    padding: EdgeInsets.zero,
+                    child: Column(
+                      children: lineItems.asMap().entries.map((e) {
+                        final i = e.key;
+                        final li = e.value as Map<String, dynamic>;
+                        final isMetered = li['previous_reading'] != null;
+                        return Container(
+                          decoration: BoxDecoration(
+                            border: Border(
+                              top: i > 0
+                                  ? BorderSide(color: cs.kasaStroke, width: 2)
+                                  : BorderSide.none,
+                            ),
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      li['description'] as String? ?? '',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 13, fontWeight: FontWeight.w600,
+                                        color: cs.onSurface,
+                                      ),
+                                    ),
+                                    if (isMetered) ...[
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        '${toDouble(li['current_reading']).toStringAsFixed(0)} − '
+                                        '${toDouble(li['previous_reading']).toStringAsFixed(0)} = '
+                                        '${toDouble(li['units_consumed']).toStringAsFixed(0)} units '
+                                        '× ${AppConstants.currency} '
+                                        '${toDouble(li['unit_price']).toStringAsFixed(2)}',
+                                        style: GoogleFonts.jetBrainsMono(
+                                          fontSize: 10, color: cs.kasaTextSub,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                              Text(
+                                formatCurrency(toDouble(li['amount'])),
+                                style: GoogleFonts.spaceGrotesk(
+                                  fontSize: 13, fontWeight: FontWeight.w700,
+                                  color: cs.onSurface,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
                 ],
               );
             }),
-            const Divider(height: 32),
-            Text('Payments (${payments.length})',
-                style: const TextStyle(fontWeight: FontWeight.bold)),
+
+            const SizedBox(height: 16),
+
+            // Payments
+            Text(
+              'PAYMENTS (${payments.length})',
+              style: GoogleFonts.spaceGrotesk(
+                fontSize: 11, fontWeight: FontWeight.w700,
+                letterSpacing: 0.04, color: cs.kasaTextSub,
+              ),
+            ),
             const SizedBox(height: 8),
             if (payments.isEmpty)
-              const Text('No payments recorded yet.',
-                  style: TextStyle(color: Colors.grey)),
-            ...payments.map((p) {
-              final pm = p as Map<String, dynamic>;
-              return ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.check_circle, color: Colors.green),
-                title: Text(formatCurrency(toDouble(pm['amount']))),
-                subtitle: Text(
-                    '${(pm['method'] as String).toUpperCase()} · ${_tryFormatDate(pm['paid_at'] as String? ?? '')}'),
-              );
-            }),
-            const SizedBox(height: 20),
-            if (!isPaid) ...[
-              ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF43A047),
-                  foregroundColor: Colors.white,
-                  minimumSize: const Size(double.infinity, 48),
+              KasaCard(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  'No payments recorded yet.',
+                  style: GoogleFonts.inter(fontSize: 13, color: cs.kasaTextSub),
                 ),
-                onPressed: _stkLoading ? null : () => _stkPush(context, ref),
-                icon: _stkLoading
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Icon(Icons.phone_android),
-                label: Text(_stkLoading ? 'Sending prompt…' : 'Pay with M-Pesa STK Push'),
+              )
+            else
+              KasaCard(
+                padding: EdgeInsets.zero,
+                child: Column(
+                  children: payments.asMap().entries.map((e) {
+                    final i = e.key;
+                    final pm = e.value as Map<String, dynamic>;
+                    return Container(
+                      decoration: BoxDecoration(
+                        border: Border(
+                          top: i > 0
+                              ? BorderSide(color: cs.kasaStroke, width: 2)
+                              : BorderSide.none,
+                        ),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 36, height: 36,
+                            decoration: BoxDecoration(
+                              color: cs.primary,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: cs.kasaStroke, width: 2),
+                            ),
+                            child: Icon(Icons.check, size: 18, color: cs.onPrimary),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  formatCurrency(toDouble(pm['amount'])),
+                                  style: GoogleFonts.spaceGrotesk(
+                                    fontSize: 14, fontWeight: FontWeight.w700,
+                                    color: cs.onSurface,
+                                  ),
+                                ),
+                                Text(
+                                  '${(pm['method_display'] as String? ?? (pm['method'] as String? ?? '')).toUpperCase()} · ${_tryFormatDate(pm['paid_at'] as String? ?? '')}',
+                                  style: GoogleFonts.jetBrainsMono(
+                                    fontSize: 10, color: cs.kasaTextSub,
+                                  ),
+                                ),
+                                // Bank details
+                                if (pm['method'] == 'bank') ...[
+                                  if (pm['bank_name'] != null)
+                                    Text(
+                                      pm['bank_name'] as String,
+                                      style: GoogleFonts.inter(
+                                        fontSize: 11, color: cs.kasaTextSub,
+                                      ),
+                                    ),
+                                  if (pm['bank_reference'] != null)
+                                    Text(
+                                      'Ref: ${pm['bank_reference']}',
+                                      style: GoogleFonts.jetBrainsMono(
+                                        fontSize: 10, color: cs.kasaTextSub,
+                                      ),
+                                    ),
+                                  if (pm['bank_account'] != null)
+                                    Text(
+                                      'From: ${pm['bank_account']}',
+                                      style: GoogleFonts.jetBrainsMono(
+                                        fontSize: 10, color: cs.kasaTextSub,
+                                      ),
+                                    ),
+                                  if (pm['bank_branch'] != null)
+                                    Text(
+                                      'Branch: ${pm['bank_branch']}',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 10, color: cs.kasaTextSub,
+                                      ),
+                                    ),
+                                ],
+                              ],
+                            ),
+                          ),
+                          const KasaChip(label: 'PAID', variant: KasaChipVariant.primary, small: true),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                ),
               ),
-              if (role != 'tenant') ...[
+
+            const SizedBox(height: 20),
+
+            // Actions
+            if (!isPaid)
+              KasaButton(
+                label: 'PAY WITH MPESA',
+                variant: KasaButtonVariant.primary,
+                leading: Icon(Icons.phone_android, size: 16, color: cs.onPrimary),
+                isLoading: _stkLoading,
+                onTap: _stkLoading ? null : () => _showPaymentMethodSheet(context, ref),
+              ),
+            if (isLandlord) ...[
+              if (canEdit) ...[
                 const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: () async {
+                KasaButton(
+                  label: 'EDIT INVOICE',
+                  variant: KasaButtonVariant.ghost,
+                  leading: Icon(Icons.edit_outlined, size: 16, color: cs.onSurface),
+                  onTap: () async {
                     Navigator.pop(context);
                     await Future.delayed(const Duration(milliseconds: 350));
                     if (!context.mounted) return;
@@ -715,154 +1057,124 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
                       context: context,
                       useRootNavigator: true,
                       barrierDismissible: false,
-                      builder: (_) => _RecordPaymentDialog(
-                        invoiceId: invoice['id'] as int,
-                        balance: double.tryParse((invoice['balance'] ?? '0').toString()) ?? 0,
+                      builder: (_) => _EditInvoiceDialog(
+                        invoice: invoice,
                         onDone: onChanged,
                       ),
                     );
                   },
-                  icon: const Icon(Icons.payments_outlined),
-                  label: const Text('Record Manual Payment'),
                 ),
               ],
-            ],
-            if (canEdit) ...[
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
-                onPressed: () async {
-                  Navigator.pop(context);
-                  await Future.delayed(const Duration(milliseconds: 350));
-                  if (!context.mounted) return;
-                  showDialog(
-                    context: context,
-                    useRootNavigator: true,
-                    barrierDismissible: false,
-                    builder: (_) => _EditInvoiceDialog(
-                      invoice: invoice,
-                      onDone: onChanged,
-                    ),
-                  );
-                },
-                icon: const Icon(Icons.edit_outlined),
-                label: const Text('Edit Invoice'),
-              ),
-            ],
-            if (canVoid) ...[
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.orange,
-                  side: const BorderSide(color: Colors.orange),
+              if (canVoid) ...[
+                const SizedBox(height: 8),
+                KasaButton(
+                  label: 'VOID INVOICE',
+                  variant: KasaButtonVariant.ghost,
+                  leading: Icon(Icons.cancel_outlined, size: 16, color: cs.tertiary),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    await Future.delayed(const Duration(milliseconds: 350));
+                    if (!context.mounted) return;
+                    final confirmed = await showDialog<bool>(
+                      context: context,
+                      useRootNavigator: true,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('Void Invoice'),
+                        content: Text(
+                            'Mark ${invoice['invoice_number']} as cancelled? '
+                            'This will reverse the paid status.'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx, false),
+                            child: const Text('Cancel'),
+                          ),
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.orange,
+                                foregroundColor: Colors.white),
+                            onPressed: () => Navigator.pop(ctx, true),
+                            child: const Text('Void'),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (confirmed != true || !context.mounted) return;
+                    try {
+                      final dio = ref.read(dioProvider);
+                      await dio.patch(
+                          '/api/v1/payments/invoices/${invoice['id']}/',
+                          data: {'status': 'cancelled'});
+                      onChanged();
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                          content: Text('Invoice voided.'),
+                          backgroundColor: Colors.orange,
+                        ));
+                      }
+                    } catch (e) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text(apiError(e)),
+                          backgroundColor: Theme.of(context).colorScheme.error,
+                        ));
+                      }
+                    }
+                  },
                 ),
-                onPressed: () async {
-                  Navigator.pop(context);
-                  await Future.delayed(const Duration(milliseconds: 350));
-                  if (!context.mounted) return;
-                  final confirmed = await showDialog<bool>(
-                    context: context,
-                    useRootNavigator: true,
-                    builder: (ctx) => AlertDialog(
-                      title: const Text('Void Invoice'),
-                      content: Text(
-                          'Mark ${invoice['invoice_number']} as cancelled? '
-                          'This will reverse the paid status.'),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(ctx, false),
-                          child: const Text('Cancel'),
-                        ),
-                        ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.orange,
-                              foregroundColor: Colors.white),
-                          onPressed: () => Navigator.pop(ctx, true),
-                          child: const Text('Void'),
-                        ),
-                      ],
-                    ),
-                  );
-                  if (confirmed != true || !context.mounted) return;
-                  try {
-                    final dio = ref.read(dioProvider);
-                    await dio.patch(
-                        '/api/v1/payments/invoices/${invoice['id']}/',
-                        data: {'status': 'cancelled'});
-                    onChanged();
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                        content: Text('Invoice voided.'),
-                        backgroundColor: Colors.orange,
-                      ));
+              ],
+              if (canDelete) ...[
+                const SizedBox(height: 8),
+                KasaButton(
+                  label: 'DELETE INVOICE',
+                  variant: KasaButtonVariant.ghost,
+                  leading: Icon(Icons.delete_outline, size: 16, color: cs.error),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    await Future.delayed(const Duration(milliseconds: 350));
+                    if (!context.mounted) return;
+                    final confirmed = await showDialog<bool>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('Delete Invoice'),
+                        content: Text(
+                            'Delete ${invoice['invoice_number']}? This cannot be undone.'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx, false),
+                            child: const Text('Cancel'),
+                          ),
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.red,
+                                foregroundColor: Colors.white),
+                            onPressed: () => Navigator.pop(ctx, true),
+                            child: const Text('Delete'),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (confirmed != true || !context.mounted) return;
+                    try {
+                      final dio = ref.read(dioProvider);
+                      await dio.delete('/api/v1/payments/invoices/${invoice['id']}/');
+                      onChanged();
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                          content: Text('Invoice deleted.'),
+                          backgroundColor: Colors.green,
+                        ));
+                      }
+                    } catch (e) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text(apiError(e)),
+                          backgroundColor: Theme.of(context).colorScheme.error,
+                        ));
+                      }
                     }
-                  } catch (e) {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        content: Text(apiError(e)),
-                        backgroundColor: Theme.of(context).colorScheme.error,
-                      ));
-                    }
-                  }
-                },
-                icon: const Icon(Icons.cancel_outlined),
-                label: const Text('Void Invoice'),
-              ),
-            ],
-            if (canDelete) ...[
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.red,
-                  side: const BorderSide(color: Colors.red),
+                  },
                 ),
-                onPressed: () async {
-                  Navigator.pop(context);
-                  await Future.delayed(const Duration(milliseconds: 350));
-                  if (!context.mounted) return;
-                  final confirmed = await showDialog<bool>(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      title: const Text('Delete Invoice'),
-                      content: Text(
-                          'Delete ${invoice['invoice_number']}? This cannot be undone.'),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(ctx, false),
-                          child: const Text('Cancel'),
-                        ),
-                        ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.red,
-                              foregroundColor: Colors.white),
-                          onPressed: () => Navigator.pop(ctx, true),
-                          child: const Text('Delete'),
-                        ),
-                      ],
-                    ),
-                  );
-                  if (confirmed != true || !context.mounted) return;
-                  try {
-                    final dio = ref.read(dioProvider);
-                    await dio.delete('/api/v1/payments/invoices/${invoice['id']}/');
-                    onChanged();
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                        content: Text('Invoice deleted.'),
-                        backgroundColor: Colors.green,
-                      ));
-                    }
-                  } catch (e) {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        content: Text(apiError(e)),
-                        backgroundColor: Theme.of(context).colorScheme.error,
-                      ));
-                    }
-                  }
-                },
-                icon: const Icon(Icons.delete_outline),
-                label: const Text('Delete Invoice'),
-              ),
+              ],
             ],
           ],
         ),
@@ -1022,32 +1334,442 @@ class _EditInvoiceDialogState extends ConsumerState<_EditInvoiceDialog> {
 }
 
 class _DetailRow extends StatelessWidget {
-  const _DetailRow(this.label, this.value, {this.bold = false, this.color});
+  const _DetailRow(this.label, this.value,
+      {this.isFirst = false, this.bold = false, this.valueColor});
   final String label, value;
+  final bool isFirst;
   final bool bold;
-  final Color? color;
+  final Color? valueColor;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      decoration: isFirst
+          ? null
+          : BoxDecoration(
+              border: Border(top: BorderSide(color: cs.kasaStroke, width: 2))),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 100,
-            child: Text(label,
-                style: const TextStyle(color: Colors.grey, fontSize: 13)),
+          Text(
+            label,
+            style: GoogleFonts.spaceGrotesk(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.04,
+              color: cs.kasaTextSub,
+            ),
           ),
-          Expanded(
+          const Spacer(),
+          Flexible(
             child: Text(
               value,
-              style: TextStyle(
-                fontWeight: bold ? FontWeight.bold : FontWeight.normal,
-                color: color,
+              textAlign: TextAlign.right,
+              style: GoogleFonts.inter(
                 fontSize: 13,
+                fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
+                color: valueColor ?? cs.onSurface,
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Payment Method Sheet ─────────────────────────────────────────────────────
+
+class _PaymentMethodSheet extends StatelessWidget {
+  const _PaymentMethodSheet({
+    required this.invoice,
+    required this.balance,
+    required this.isTenant,
+    required this.onStkPush,
+    required this.onManualPayment,
+  });
+
+  final Map<String, dynamic> invoice;
+  final double balance;
+  final bool isTenant;
+  final VoidCallback onStkPush;
+  final VoidCallback? onManualPayment;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final invoiceNo = invoice['invoice_number'] as String? ?? '';
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+          20, 16, 20, 20 + MediaQuery.of(context).viewInsets.bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Handle
+          Center(
+            child: Container(
+              width: 36, height: 4,
+              margin: const EdgeInsets.only(bottom: 20),
+              decoration: BoxDecoration(
+                  color: cs.outlineVariant,
+                  borderRadius: BorderRadius.circular(2)),
+            ),
+          ),
+          Text(
+            'PAY INVOICE',
+            style: GoogleFonts.spaceGrotesk(
+              fontSize: 22, fontWeight: FontWeight.w700,
+              letterSpacing: -0.44, color: cs.onSurface,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Invoice $invoiceNo · Balance ${formatCurrency(balance)}',
+            style: GoogleFonts.inter(fontSize: 13, color: cs.kasaTextSub),
+          ),
+          const SizedBox(height: 20),
+
+          // ── M-Pesa STK Push ───────────────────────────────────────────
+          _MethodTile(
+            icon: Icons.phone_android_outlined,
+            color: const Color(0xFF43A047),
+            title: 'M-Pesa (STK Push)',
+            subtitle: 'We\'ll send a payment prompt directly to your phone.',
+            onTap: onStkPush,
+          ),
+
+          const SizedBox(height: 10),
+
+          // ── M-Pesa Paybill (manual) ───────────────────────────────────
+          _MethodTile(
+            icon: Icons.dialpad_outlined,
+            color: const Color(0xFF00897B),
+            title: 'M-Pesa Paybill',
+            subtitle: 'Pay manually via Lipa na M-Pesa then wait for confirmation.',
+            onTap: () {
+              Navigator.pop(context);
+              _showPaybillInstructions(context, invoice);
+            },
+          ),
+
+          // ── Bank Transfer (landlord only) ─────────────────────────────
+          if (!isTenant) ...[
+            const SizedBox(height: 10),
+            _MethodTile(
+              icon: Icons.account_balance_outlined,
+              color: const Color(0xFF1565C0),
+              title: 'Bank Transfer',
+              subtitle: 'Record a payment received via bank transfer.',
+              onTap: onManualPayment ?? () {},
+            ),
+          ],
+
+          // ── Cash ──────────────────────────────────────────────────────
+          if (!isTenant) ...[
+            const SizedBox(height: 10),
+            _MethodTile(
+              icon: Icons.payments_outlined,
+              color: const Color(0xFFF57F17),
+              title: 'Cash',
+              subtitle: 'Tenant pays in cash. Record when received.',
+              onTap: onManualPayment ?? () {},
+            ),
+          ] else ...[
+            const SizedBox(height: 10),
+            _MethodTile(
+              icon: Icons.payments_outlined,
+              color: const Color(0xFFF57F17),
+              title: 'Cash',
+              subtitle: 'Pay your landlord in cash and wait for them to confirm.',
+              onTap: () {
+                Navigator.pop(context);
+                _showCashInstructions(context);
+              },
+            ),
+          ],
+
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+
+  void _showPaybillInstructions(
+      BuildContext context, Map<String, dynamic> invoice) {
+    final unitNo = invoice['unit_number']?.toString() ?? '—';
+    showModalBottomSheet(
+      context: context,
+      useRootNavigator: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 36),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 36, height: 4,
+                margin: const EdgeInsets.only(bottom: 20),
+                decoration: BoxDecoration(
+                    color: Theme.of(ctx).colorScheme.outlineVariant,
+                    borderRadius: BorderRadius.circular(2)),
+              ),
+            ),
+            Row(children: [
+              Icon(Icons.dialpad_outlined,
+                  color: Theme.of(ctx).colorScheme.secondary, size: 22),
+              const SizedBox(width: 10),
+              Text(
+                'LIPA NA M-PESA',
+                style: GoogleFonts.spaceGrotesk(
+                  fontSize: 18, fontWeight: FontWeight.w700,
+                  letterSpacing: -0.36,
+                  color: Theme.of(ctx).colorScheme.onSurface,
+                ),
+              ),
+            ]),
+            const SizedBox(height: 20),
+            const _InstructionStep(
+                n: 1, text: 'Open M-Pesa on your phone'),
+            const _InstructionStep(
+                n: 2, text: 'Select  Lipa na M-Pesa  →  Pay Bill'),
+            _InstructionStep(
+                n: 3,
+                label: 'Business No.',
+                value: invoice['mpesa_paybill']?.toString() ?? 'Ask your landlord'),
+            _InstructionStep(
+                n: 4, label: 'Account No.', value: unitNo),
+            _InstructionStep(
+                n: 5,
+                label: 'Amount',
+                value: formatCurrency(
+                    double.tryParse((invoice['balance'] ?? '0').toString()) ??
+                        0)),
+            const _InstructionStep(
+                n: 6, text: 'Enter your M-Pesa PIN and confirm'),
+            const SizedBox(height: 16),
+            KasaCard(
+              accent: KasaCardAccent.secondary,
+              padding: const EdgeInsets.all(12),
+              showShadow: false,
+              child: Row(children: [
+                Icon(Icons.info_outline,
+                    color: Theme.of(ctx).colorScheme.onSecondary, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Your invoice will update automatically once payment is confirmed.',
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      color: Theme.of(ctx).colorScheme.onSecondary,
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showCashInstructions(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      useRootNavigator: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) {
+        final cs = Theme.of(ctx).colorScheme;
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(24, 20, 24, 36),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 36, height: 4,
+                  margin: const EdgeInsets.only(bottom: 20),
+                  decoration: BoxDecoration(
+                      color: cs.outlineVariant,
+                      borderRadius: BorderRadius.circular(2)),
+                ),
+              ),
+              Row(children: [
+                Icon(Icons.payments_outlined, color: cs.tertiary, size: 22),
+                const SizedBox(width: 10),
+                Text(
+                  'CASH PAYMENT',
+                  style: GoogleFonts.spaceGrotesk(
+                    fontSize: 18, fontWeight: FontWeight.w700,
+                    letterSpacing: -0.36, color: cs.onSurface,
+                  ),
+                ),
+              ]),
+              const SizedBox(height: 20),
+              _InstructionStep(
+                  n: 1,
+                  text: 'Hand the cash payment of ${formatCurrency(balance)} to your landlord or caretaker.'),
+              const _InstructionStep(
+                  n: 2, text: 'Ask for a signed receipt.'),
+              const _InstructionStep(
+                  n: 3,
+                  text: 'Wait for your landlord to record the payment — your invoice will update once confirmed.'),
+              const SizedBox(height: 16),
+              KasaCard(
+                accent: KasaCardAccent.tertiary,
+                padding: const EdgeInsets.all(12),
+                showShadow: false,
+                child: Row(children: [
+                  Icon(Icons.warning_amber_outlined,
+                      color: cs.tertiaryInk, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Cash payments must be confirmed by your landlord. If your invoice is not updated within 24 hours, contact them directly.',
+                      style: GoogleFonts.inter(fontSize: 12, color: cs.tertiaryInk),
+                    ),
+                  ),
+                ]),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _MethodTile extends StatelessWidget {
+  const _MethodTile({
+    required this.icon,
+    required this.color,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final Color color;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return KasaCard(
+      onTap: onTap,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      child: Row(
+        children: [
+          Container(
+            width: 44, height: 44,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: cs.kasaStroke, width: 2),
+            ),
+            child: Icon(icon, color: color, size: 22),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: GoogleFonts.spaceGrotesk(
+                    fontSize: 14, fontWeight: FontWeight.w700,
+                    letterSpacing: -0.14, color: cs.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: GoogleFonts.inter(fontSize: 12, color: cs.kasaTextSub),
+                ),
+              ],
+            ),
+          ),
+          Icon(Icons.chevron_right, color: cs.kasaTextSub, size: 18),
+        ],
+      ),
+    );
+  }
+}
+
+class _InstructionStep extends StatelessWidget {
+  const _InstructionStep({required this.n, this.text, this.label, this.value});
+  final int n;
+  final String? text;
+  final String? label;
+  final String? value;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 26, height: 26,
+            decoration: BoxDecoration(
+              color: cs.secondary,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: cs.kasaStroke, width: 2),
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              '$n',
+              style: GoogleFonts.spaceGrotesk(
+                fontSize: 11, fontWeight: FontWeight.w700,
+                color: cs.onSecondary,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: text != null
+                ? Text(
+                    text!,
+                    style: GoogleFonts.inter(
+                      fontSize: 14, fontWeight: FontWeight.w500,
+                      color: cs.onSurface,
+                    ),
+                  )
+                : Row(
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
+                    children: [
+                      Text(
+                        '$label  ',
+                        style: GoogleFonts.spaceGrotesk(
+                          fontSize: 11, fontWeight: FontWeight.w700,
+                          letterSpacing: 0.04, color: cs.kasaTextSub,
+                        ),
+                      ),
+                      Flexible(
+                        child: Text(
+                          value ?? '—',
+                          style: GoogleFonts.jetBrainsMono(
+                            fontSize: 14, fontWeight: FontWeight.w700,
+                            color: cs.onSurface,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
           ),
         ],
       ),
@@ -1075,13 +1797,22 @@ class _RecordPaymentDialog extends ConsumerStatefulWidget {
 class _RecordPaymentDialogState extends ConsumerState<_RecordPaymentDialog> {
   String _method = 'cash';
   late final TextEditingController _amountCtrl;
+  // Bank-specific controllers
+  String? _bankName;
+  final _bankAccountCtrl = TextEditingController();
+  final _bankReferenceCtrl = TextEditingController();
+  final _bankBranchCtrl = TextEditingController();
   bool _loading = false;
 
-  // Landlord manual recording — cash and bank only.
-  // M-Pesa and Airtel are handled via STK Push / C2B webhooks automatically.
   static const _methods = [
     ('cash', 'Cash'),
     ('bank', 'Bank Transfer'),
+  ];
+
+  static const _kenyanBanks = [
+    'KCB', 'Equity Bank', 'Co-operative Bank', 'NCBA', 'Absa Kenya',
+    'Standard Chartered', 'DTB', 'I&M Bank', 'Family Bank', 'Stanbic',
+    'Prime Bank', 'HF Group', 'GT Bank', 'Other',
   ];
 
   @override
@@ -1094,14 +1825,25 @@ class _RecordPaymentDialogState extends ConsumerState<_RecordPaymentDialog> {
   @override
   void dispose() {
     _amountCtrl.dispose();
+    _bankAccountCtrl.dispose();
+    _bankReferenceCtrl.dispose();
+    _bankBranchCtrl.dispose();
     super.dispose();
   }
+
+  bool get _isBank => _method == 'bank';
 
   Future<void> _submit() async {
     final amount = double.tryParse(_amountCtrl.text.replaceAll(',', ''));
     if (amount == null || amount <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Enter a valid amount.')),
+      );
+      return;
+    }
+    if (_isBank && _bankReferenceCtrl.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Bank reference / transaction ID is required.')),
       );
       return;
     }
@@ -1112,6 +1854,14 @@ class _RecordPaymentDialogState extends ConsumerState<_RecordPaymentDialog> {
         'invoice': widget.invoiceId,
         'method': _method,
         'amount': amount,
+        if (_isBank) ...{
+          if (_bankName != null) 'bank_name': _bankName,
+          if (_bankAccountCtrl.text.trim().isNotEmpty)
+            'bank_account': _bankAccountCtrl.text.trim(),
+          'bank_reference': _bankReferenceCtrl.text.trim(),
+          if (_bankBranchCtrl.text.trim().isNotEmpty)
+            'bank_branch': _bankBranchCtrl.text.trim(),
+        },
       });
       widget.onDone();
       if (mounted) {
@@ -1135,28 +1885,104 @@ class _RecordPaymentDialogState extends ConsumerState<_RecordPaymentDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return AlertDialog(
-      title: const Text('Record Payment'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          DropdownButtonFormField<String>(
-            initialValue: _method,
-            decoration: const InputDecoration(labelText: 'Payment Method'),
-            items: _methods
-                .map((m) =>
-                    DropdownMenuItem(value: m.$1, child: Text(m.$2)))
-                .toList(),
-            onChanged: (v) => setState(() => _method = v!),
-          ),
-          const SizedBox(height: 12),
-          TextFormField(
-            controller: _amountCtrl,
-            decoration: const InputDecoration(
-                labelText: 'Amount (${AppConstants.currency})', prefixText: '${AppConstants.currency} '),
-            keyboardType: TextInputType.number,
-          ),
-        ],
+      title: Text(
+        _isBank ? 'Record Bank Transfer' : 'Record Cash Payment',
+        style: GoogleFonts.spaceGrotesk(fontWeight: FontWeight.w700),
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // ── Method ──────────────────────────────────────────────────
+            DropdownButtonFormField<String>(
+              initialValue: _method,
+              decoration: const InputDecoration(labelText: 'Payment Method'),
+              items: _methods
+                  .map((m) => DropdownMenuItem(value: m.$1, child: Text(m.$2)))
+                  .toList(),
+              onChanged: (v) => setState(() => _method = v!),
+            ),
+            const SizedBox(height: 12),
+
+            // ── Amount ──────────────────────────────────────────────────
+            TextFormField(
+              controller: _amountCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Amount (${AppConstants.currency})',
+                prefixText: '${AppConstants.currency} ',
+              ),
+              keyboardType: TextInputType.number,
+            ),
+
+            // ── Bank-specific fields ────────────────────────────────────
+            if (_isBank) ...[
+              const SizedBox(height: 16),
+              Divider(color: cs.outlineVariant, thickness: 1),
+              const SizedBox(height: 8),
+              Text(
+                'BANK DETAILS',
+                style: GoogleFonts.spaceGrotesk(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.04,
+                  color: cs.kasaTextSub,
+                ),
+              ),
+              const SizedBox(height: 10),
+
+              // Bank name
+              DropdownButtonFormField<String>(
+                initialValue: _bankName,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Bank Name'),
+                hint: const Text('Select bank…'),
+                items: _kenyanBanks
+                    .map((b) => DropdownMenuItem(value: b, child: Text(b)))
+                    .toList(),
+                onChanged: (v) => setState(() => _bankName = v),
+              ),
+              const SizedBox(height: 10),
+
+              // Sender account / phone
+              TextFormField(
+                controller: _bankAccountCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Sender Account / Phone',
+                  hintText: 'e.g. 1234567890 or 0712 345 678',
+                  prefixIcon: Icon(Icons.account_box_outlined),
+                ),
+                keyboardType: TextInputType.text,
+              ),
+              const SizedBox(height: 10),
+
+              // Transaction reference — required
+              TextFormField(
+                controller: _bankReferenceCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Transaction Ref / Slip No. *',
+                  hintText: 'e.g. FT25001234567',
+                  prefixIcon: Icon(Icons.receipt_long_outlined),
+                ),
+                textCapitalization: TextCapitalization.characters,
+              ),
+              const SizedBox(height: 10),
+
+              // Branch — optional
+              TextFormField(
+                controller: _bankBranchCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Branch (optional)',
+                  hintText: 'e.g. Westlands',
+                  prefixIcon: Icon(Icons.location_on_outlined),
+                ),
+                textCapitalization: TextCapitalization.words,
+              ),
+            ],
+          ],
+        ),
       ),
       actions: [
         TextButton(

@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../../core/api/api_client.dart';
 import '../../core/constants.dart';
+import '../../core/theme/kasa_tokens.dart';
 import '../../core/utils/api_error.dart';
 import '../../core/utils/currency.dart';
+import '../../core/widgets/kasa_primitives.dart';
 
 final propertyDetailProvider =
     FutureProvider.family.autoDispose<Map<String, dynamic>, int>((ref, id) async {
@@ -21,12 +24,6 @@ const _unitTypeLabels = {
   'commercial': 'Commercial',
 };
 
-const _statusColors = {
-  'vacant': Colors.green,
-  'occupied': Colors.blue,
-  'maintenance': Colors.orange,
-};
-
 class PropertyDetailScreen extends ConsumerWidget {
   const PropertyDetailScreen({super.key, required this.propertyId});
   final int propertyId;
@@ -34,25 +31,29 @@ class PropertyDetailScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final prop = ref.watch(propertyDetailProvider(propertyId));
+    final cs = Theme.of(context).colorScheme;
 
     return prop.when(
-      loading: () => const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+      loading: () => Scaffold(
+        backgroundColor: cs.kasaBg,
+        body: const Center(child: CircularProgressIndicator()),
       ),
       error: (e, _) => Scaffold(
-        appBar: AppBar(),
+        backgroundColor: cs.kasaBg,
+        appBar: AppBar(backgroundColor: cs.kasaBg, elevation: 0),
         body: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.cloud_off_outlined, size: 56, color: Colors.grey),
+              Icon(Icons.cloud_off_outlined, size: 56, color: cs.kasaTextSub),
               const SizedBox(height: 12),
-              Text(apiError(e), style: const TextStyle(color: Colors.grey)),
+              Text(apiError(e), style: GoogleFonts.inter(color: cs.kasaTextSub)),
               const SizedBox(height: 16),
-              ElevatedButton.icon(
-                onPressed: () => ref.invalidate(propertyDetailProvider),
-                icon: const Icon(Icons.refresh),
-                label: const Text('Retry'),
+              KasaButton(
+                label: 'RETRY',
+                variant: KasaButtonVariant.ghost,
+                leading: Icon(Icons.refresh, size: 16, color: cs.secondary),
+                onTap: () => ref.invalidate(propertyDetailProvider(propertyId)),
               ),
             ],
           ),
@@ -80,212 +81,213 @@ class _PropertyDetailView extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final units = (data['units'] as List<dynamic>? ?? []);
-    final theme = Theme.of(context);
+    final cs = Theme.of(context).colorScheme;
+    final unitCount = data['unit_count'] as int? ?? units.length;
+    final vacantCount = data['vacant_count'] as int? ?? 0;
+    final occupiedCount = unitCount - vacantCount;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Property Details'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: onRefresh,
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (_) => _AddUnitDialog(propertyId: propertyId, onDone: onRefresh),
-        ),
-        icon: const Icon(Icons.add),
-        label: const Text('Add Unit'),
-      ),
+      backgroundColor: cs.kasaBg,
       body: RefreshIndicator(
         onRefresh: () async => onRefresh(),
         child: CustomScrollView(
           slivers: [
+            // ── App bar ────────────────────────────────────────────────────
+            SliverAppBar(
+              backgroundColor: cs.kasaBg,
+              pinned: true,
+              elevation: 0,
+              leading: IconButton(
+                icon: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: cs.kasaCard,
+                    borderRadius: BorderRadius.circular(KasaRadius.sm),
+                    border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
+                    boxShadow: [
+                      BoxShadow(color: cs.kasaShadow, offset: const Offset(3, 3), blurRadius: 0),
+                    ],
+                  ),
+                  child: Icon(Icons.arrow_back, size: 18, color: cs.onSurface),
+                ),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+              actions: [
+                Padding(
+                  padding: const EdgeInsets.only(right: 16),
+                  child: KasaButton(
+                    label: 'ADD UNIT',
+                    variant: KasaButtonVariant.primary,
+                    fullWidth: false,
+                    leading: Icon(Icons.add, size: 14, color: cs.onPrimary),
+                    onTap: () => showDialog(
+                      context: context,
+                      barrierDismissible: false,
+                      builder: (_) => _AddUnitDialog(propertyId: propertyId, onDone: onRefresh),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
+            // ── Property summary card ──────────────────────────────────────
             SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Property info card
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                child: KasaCard(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 52,
+                            height: 52,
+                            decoration: BoxDecoration(
+                              color: cs.secondary,
+                              borderRadius: BorderRadius.circular(KasaRadius.md),
+                              border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
+                            ),
+                            child: Icon(Icons.home_work, size: 26, color: cs.onSecondary),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Hero(
-                                  tag: 'property_avatar_$propertyId',
-                                  child: CircleAvatar(
-                                    backgroundColor: theme.colorScheme.primaryContainer,
-                                    child: Icon(Icons.home_work, color: theme.colorScheme.onPrimaryContainer),
+                                Text(
+                                  (data['name'] as String? ?? 'Property').toUpperCase(),
+                                  style: GoogleFonts.spaceGrotesk(
+                                    fontSize: 20, fontWeight: FontWeight.w700,
+                                    letterSpacing: -0.4, color: cs.onSurface, height: 1,
                                   ),
                                 ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(data['name'] ?? 'Property', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-                                      const SizedBox(height: 4),
-                                      Row(children: [
-                                        Icon(Icons.location_on, size: 16, color: theme.colorScheme.primary),
-                                        const SizedBox(width: 4),
-                                        Expanded(child: Text(data['address'] ?? '', style: theme.textTheme.bodyMedium)),
-                                      ]),
-                                    ],
+                                if ((data['address'] as String? ?? '').isNotEmpty) ...[
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    data['address'] as String,
+                                    style: GoogleFonts.inter(fontSize: 12, color: cs.kasaTextSub),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
-                                ),
+                                ],
                               ],
                             ),
-                            const SizedBox(height: 4),
-                            Text('${data['town']}, ${data['county']}',
-                                style: theme.textTheme.bodySmall
-                                    ?.copyWith(color: Colors.grey)),
-                            const SizedBox(height: 12),
-                            Row(children: [
-                              _InfoChip(
-                                label: '${data['unit_count']} units',
-                                icon: Icons.meeting_room,
-                                color: theme.colorScheme.primary,
-                              ),
-                              const SizedBox(width: 8),
-                              _InfoChip(
-                                label: '${data['vacant_count']} vacant',
-                                icon: Icons.door_front_door,
-                                color: (data['vacant_count'] as int? ?? 0) > 0
-                                    ? Colors.orange
-                                    : Colors.green,
-                              ),
-                            ]),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
-                    ),
-                    const SizedBox(height: 16),
-                    Text('Units', style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 8),
-                  ],
+                      const SizedBox(height: 16),
+                      // KPI row
+                      Row(
+                        children: [
+                          _KpiTile(label: 'TOTAL', value: '$unitCount', accent: KasaCardAccent.elevated),
+                          const SizedBox(width: 10),
+                          _KpiTile(label: 'OCCUPIED', value: '$occupiedCount', accent: KasaCardAccent.secondary),
+                          const SizedBox(width: 10),
+                          _KpiTile(label: 'VACANT', value: '$vacantCount',
+                              accent: vacantCount > 0 ? KasaCardAccent.tertiary : KasaCardAccent.none),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
+
+            // ── Units heading ─────────────────────────────────────────────
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
+                child: Text(
+                  'UNITS',
+                  style: GoogleFonts.spaceGrotesk(
+                    fontSize: 13, fontWeight: FontWeight.w700,
+                    letterSpacing: 0.04, color: cs.kasaTextSub,
+                  ),
+                ),
+              ),
+            ),
+
+            // ── Units list ────────────────────────────────────────────────
             if (units.isEmpty)
-              const SliverFillRemaining(
+              SliverFillRemaining(
                 child: Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.meeting_room_outlined, size: 64, color: Colors.grey),
-                      SizedBox(height: 12),
-                      Text('No units yet.', style: TextStyle(color: Colors.grey)),
-                      SizedBox(height: 4),
-                      Text('Tap "Add Unit" to add the first unit.',
-                          style: TextStyle(color: Colors.grey, fontSize: 12)),
+                      Icon(Icons.meeting_room_outlined, size: 64, color: cs.kasaTextSub),
+                      const SizedBox(height: 12),
+                      Text('No units yet.',
+                          style: GoogleFonts.spaceGrotesk(
+                              fontWeight: FontWeight.w700, color: cs.kasaTextSub)),
+                      const SizedBox(height: 4),
+                      Text('Tap ADD UNIT to create one.',
+                          style: GoogleFonts.inter(fontSize: 12, color: cs.kasaTextSub)),
                     ],
                   ),
                 ),
               )
             else
               SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
                 sliver: SliverList(
                   delegate: SliverChildBuilderDelegate(
                     (_, i) {
                       final u = units[i] as Map<String, dynamic>;
-                      final status = u['status'] as String;
-                      final color = _statusColors[status] ?? Colors.grey;
-                      return Card(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        child: ListTile(
-                          leading: CircleAvatar(
-                            backgroundColor: color.withValues(alpha: 0.15),
-                            child: Icon(Icons.meeting_room, color: color),
+                      final uStatus = u['status'] as String? ?? 'vacant';
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: _UnitCard(
+                          unit: u,
+                          status: uStatus,
+                          onEdit: () => showDialog(
+                            context: context,
+                            barrierDismissible: false,
+                            builder: (_) => _EditUnitDialog(unit: u, onDone: onRefresh),
                           ),
-                          title: Text('Unit ${u['unit_number']}',
-                              style: const TextStyle(fontWeight: FontWeight.w600)),
-                          subtitle: Text(
-                              '${_unitTypeLabels[u['unit_type']] ?? u['unit_type']}  ·  Floor ${u['floor']}\n${formatCurrency(toDouble(u['rent_amount']))}'),
-                          isThreeLine: true,
-                          trailing: PopupMenuButton<String>(
-                            onSelected: (action) async {
-                              if (action == 'edit') {
-                                await showDialog(
-                                  context: context,
-                                  barrierDismissible: false,
-                                  builder: (_) => _EditUnitDialog(
-                                    unit: u,
-                                    onDone: onRefresh,
-                                  ),
-                                );
-                              } else if (action == 'delete') {
-                                if (status != 'vacant') {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('Only vacant units can be deleted.'),
+                          onDelete: () async {
+                            if (uStatus != 'vacant') {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Only vacant units can be deleted.')),
+                              );
+                              return;
+                            }
+                            final confirmed = await showDialog<bool>(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                title: const Text('Delete Unit'),
+                                content: Text('Delete Unit ${u['unit_number']}?'),
+                                actions: [
+                                  TextButton(
+                                      onPressed: () => Navigator.pop(ctx, false),
+                                      child: const Text('Cancel')),
+                                  ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Theme.of(ctx).colorScheme.error,
+                                      foregroundColor: Colors.white,
                                     ),
-                                  );
-                                  return;
-                                }
-                                final confirmed = await showDialog<bool>(
-                                  context: context,
-                                  builder: (ctx) => AlertDialog(
-                                    title: const Text('Delete Unit'),
-                                    content: Text('Delete Unit ${u['unit_number']}?'),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () => Navigator.pop(ctx, false),
-                                        child: const Text('Cancel'),
-                                      ),
-                                      ElevatedButton(
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Theme.of(ctx).colorScheme.error,
-                                          foregroundColor: Colors.white,
-                                        ),
-                                        onPressed: () => Navigator.pop(ctx, true),
-                                        child: const Text('Delete'),
-                                      ),
-                                    ],
+                                    onPressed: () => Navigator.pop(ctx, true),
+                                    child: const Text('Delete'),
                                   ),
-                                );
-                                if (confirmed == true && context.mounted) {
-                                  try {
-                                    await ref.read(dioProvider).delete(
-                                        '/api/v1/properties/units/${u['id']}/');
-                                    onRefresh();
-                                  } catch (e) {
-                                    if (context.mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                                        content: Text('Delete failed: $e'),
-                                        backgroundColor: Theme.of(context).colorScheme.error,
-                                      ));
-                                    }
-                                  }
+                                ],
+                              ),
+                            );
+                            if (confirmed == true && context.mounted) {
+                              try {
+                                await ref.read(dioProvider).delete('/api/v1/properties/units/${u['id']}/');
+                                onRefresh();
+                              } catch (e) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                    content: Text(apiError(e)),
+                                    backgroundColor: Theme.of(context).colorScheme.error,
+                                  ));
                                 }
                               }
-                            },
-                            itemBuilder: (_) => [
-                              const PopupMenuItem(
-                                  value: 'edit',
-                                  child: ListTile(
-                                      leading: Icon(Icons.edit_outlined),
-                                      title: Text('Edit'))),
-                              const PopupMenuItem(
-                                  value: 'delete',
-                                  child: ListTile(
-                                      leading: Icon(Icons.delete_outline,
-                                          color: Colors.red),
-                                      title: Text('Delete',
-                                          style: TextStyle(color: Colors.red)))),
-                            ],
-                          ),
+                            }
+                          },
                         ),
                       );
                     },
@@ -300,21 +302,153 @@ class _PropertyDetailView extends ConsumerWidget {
   }
 }
 
-class _InfoChip extends StatelessWidget {
-  const _InfoChip({required this.label, required this.icon, required this.color});
-  final String label;
-  final IconData icon;
-  final Color color;
+// ─── KPI tile ─────────────────────────────────────────────────────────────────
+
+class _KpiTile extends StatelessWidget {
+  const _KpiTile({required this.label, required this.value, required this.accent});
+  final String label, value;
+  final KasaCardAccent accent;
 
   @override
   Widget build(BuildContext context) {
-    return Chip(
-      avatar: Icon(icon, size: 14, color: color),
-      label: Text(label, style: TextStyle(fontSize: 12, color: color)),
-      backgroundColor: color.withValues(alpha: 0.1),
-      side: BorderSide(color: color.withValues(alpha: 0.3)),
-      padding: EdgeInsets.zero,
-      visualDensity: VisualDensity.compact,
+    final cs = Theme.of(context).colorScheme;
+    final fill = switch (accent) {
+      KasaCardAccent.secondary => cs.secondary,
+      KasaCardAccent.tertiary  => cs.tertiary,
+      KasaCardAccent.elevated  => cs.surfaceContainerHighest,
+      _                        => cs.kasaCard,
+    };
+    final fg = switch (accent) {
+      KasaCardAccent.secondary => cs.onSecondary,
+      KasaCardAccent.tertiary  => cs.onTertiary,
+      _                        => cs.onSurface,
+    };
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+        decoration: BoxDecoration(
+          color: fill,
+          borderRadius: BorderRadius.circular(KasaRadius.sm),
+          border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
+        ),
+        child: Column(
+          children: [
+            Text(value,
+                style: GoogleFonts.spaceGrotesk(
+                    fontSize: 28, fontWeight: FontWeight.w900, color: fg, height: 1)),
+            const SizedBox(height: 2),
+            Text(label,
+                style: GoogleFonts.spaceGrotesk(
+                    fontSize: 9, fontWeight: FontWeight.w700,
+                    letterSpacing: 0.04, color: fg.withValues(alpha: 0.7))),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Unit card ────────────────────────────────────────────────────────────────
+
+class _UnitCard extends StatelessWidget {
+  const _UnitCard({
+    required this.unit,
+    required this.status,
+    required this.onEdit,
+    required this.onDelete,
+  });
+  final Map<String, dynamic> unit;
+  final String status;
+  final VoidCallback onEdit, onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    final (accentColor, chipVariant, chipLabel) = switch (status) {
+      'occupied'    => (cs.secondary,   KasaChipVariant.secondary, 'OCCUPIED'),
+      'maintenance' => (cs.tertiary,    KasaChipVariant.tertiary,  'MAINTENANCE'),
+      _             => (cs.kasaTextSub, KasaChipVariant.neutral,   'VACANT'),
+    };
+
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(KasaRadius.md),
+        boxShadow: [BoxShadow(color: cs.kasaShadow, offset: const Offset(4, 4), blurRadius: 0)],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(KasaRadius.md),
+        child: Container(
+          decoration: BoxDecoration(
+            color: cs.kasaCard,
+            border: Border(
+              left:   BorderSide(color: accentColor,   width: 6),
+              right:  BorderSide(color: cs.kasaStroke, width: 2),
+              top:    BorderSide(color: cs.kasaStroke, width: 2),
+              bottom: BorderSide(color: cs.kasaStroke, width: 2),
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            'UNIT ${unit['unit_number']}'.toUpperCase(),
+                            style: GoogleFonts.spaceGrotesk(
+                              fontSize: 15, fontWeight: FontWeight.w700,
+                              letterSpacing: -0.15, color: cs.onSurface,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          KasaChip(label: chipLabel, variant: chipVariant, small: true),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${_unitTypeLabels[unit['unit_type']] ?? unit['unit_type']} · Floor ${unit['floor']}',
+                        style: GoogleFonts.inter(fontSize: 11, color: cs.kasaTextSub),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${formatCurrency(toDouble(unit['rent_amount']))}/mo',
+                        style: GoogleFonts.spaceGrotesk(
+                          fontSize: 13, fontWeight: FontWeight.w700,
+                          color: cs.secondary, letterSpacing: -0.1,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                PopupMenuButton<String>(
+                  icon: Icon(Icons.more_vert, color: cs.kasaTextSub, size: 20),
+                  onSelected: (action) {
+                    if (action == 'edit') onEdit();
+                    if (action == 'delete') onDelete();
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(
+                        value: 'edit',
+                        child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Edit'), dense: true, contentPadding: EdgeInsets.zero)),
+                    PopupMenuItem(
+                        value: 'delete',
+                        child: ListTile(
+                            leading: Icon(Icons.delete_outline, color: Colors.red),
+                            title: Text('Delete', style: TextStyle(color: Colors.red)),
+                            dense: true,
+                            contentPadding: EdgeInsets.zero)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -386,8 +520,7 @@ class _AddUnitDialogState extends ConsumerState<_AddUnitDialog> {
             children: [
               TextFormField(
                 controller: _numberCtrl,
-                decoration: const InputDecoration(
-                    labelText: 'Unit Number *', hintText: 'e.g. A1, 101'),
+                decoration: const InputDecoration(labelText: 'Unit Number *', hintText: 'e.g. A1, 101'),
                 validator: (v) => v!.isEmpty ? 'Required' : null,
               ),
               const SizedBox(height: 12),
@@ -403,13 +536,11 @@ class _AddUnitDialogState extends ConsumerState<_AddUnitDialog> {
               TextFormField(
                 controller: _rentCtrl,
                 decoration: const InputDecoration(
-                    labelText: 'Monthly Rent (${AppConstants.currency}) *', prefixText: '${AppConstants.currency} '),
+                    labelText: 'Monthly Rent *', prefixText: '${AppConstants.currency} '),
                 keyboardType: TextInputType.number,
                 validator: (v) {
                   if (v!.isEmpty) return 'Required';
-                  if (double.tryParse(v.replaceAll(',', '')) == null) {
-                    return 'Enter a valid amount';
-                  }
+                  if (double.tryParse(v.replaceAll(',', '')) == null) return 'Invalid';
                   return null;
                 },
               ),
@@ -417,13 +548,11 @@ class _AddUnitDialogState extends ConsumerState<_AddUnitDialog> {
               TextFormField(
                 controller: _depositCtrl,
                 decoration: const InputDecoration(
-                    labelText: 'Deposit Amount (${AppConstants.currency}) *', prefixText: '${AppConstants.currency} '),
+                    labelText: 'Deposit *', prefixText: '${AppConstants.currency} '),
                 keyboardType: TextInputType.number,
                 validator: (v) {
                   if (v!.isEmpty) return 'Required';
-                  if (double.tryParse(v.replaceAll(',', '')) == null) {
-                    return 'Enter a valid amount';
-                  }
+                  if (double.tryParse(v.replaceAll(',', '')) == null) return 'Invalid';
                   return null;
                 },
               ),
@@ -434,10 +563,7 @@ class _AddUnitDialogState extends ConsumerState<_AddUnitDialog> {
                   const SizedBox(width: 8),
                   DropdownButton<int>(
                     value: _floor,
-                    items: List.generate(
-                      20,
-                      (i) => DropdownMenuItem(value: i, child: Text('$i')),
-                    ),
+                    items: List.generate(20, (i) => DropdownMenuItem(value: i, child: Text('$i'))),
                     onChanged: (v) => setState(() => _floor = v!),
                   ),
                 ],
@@ -447,15 +573,11 @@ class _AddUnitDialogState extends ConsumerState<_AddUnitDialog> {
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: _loading ? null : () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
+        TextButton(onPressed: _loading ? null : () => Navigator.pop(context), child: const Text('Cancel')),
         ElevatedButton(
           onPressed: _loading ? null : _submit,
           child: _loading
-              ? const SizedBox(
-                  width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
               : const Text('Add Unit'),
         ),
       ],
@@ -485,10 +607,8 @@ class _EditUnitDialogState extends ConsumerState<_EditUnitDialog> {
   @override
   void initState() {
     super.initState();
-    _rentCtrl = TextEditingController(
-        text: widget.unit['rent_amount']?.toString() ?? '');
-    _depositCtrl = TextEditingController(
-        text: widget.unit['deposit_amount']?.toString() ?? '');
+    _rentCtrl = TextEditingController(text: widget.unit['rent_amount']?.toString() ?? '');
+    _depositCtrl = TextEditingController(text: widget.unit['deposit_amount']?.toString() ?? '');
     _unitType = widget.unit['unit_type'] as String? ?? 'bedsitter';
     _status = widget.unit['status'] as String? ?? 'vacant';
   }
@@ -504,22 +624,18 @@ class _EditUnitDialogState extends ConsumerState<_EditUnitDialog> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loading = true);
     try {
-      await ref.read(dioProvider).patch(
-        '/api/v1/properties/units/${widget.unit['id']}/',
-        data: {
-          'unit_type': _unitType,
-          'rent_amount': double.parse(_rentCtrl.text.replaceAll(',', '')),
-          'deposit_amount':
-              double.parse(_depositCtrl.text.replaceAll(',', '')),
-          'status': _status,
-        },
-      );
+      await ref.read(dioProvider).patch('/api/v1/properties/units/${widget.unit['id']}/', data: {
+        'unit_type': _unitType,
+        'rent_amount': double.parse(_rentCtrl.text.replaceAll(',', '')),
+        'deposit_amount': double.parse(_depositCtrl.text.replaceAll(',', '')),
+        'status': _status,
+      });
       widget.onDone();
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Update failed: $e'),
+          content: Text(apiError(e)),
           backgroundColor: Theme.of(context).colorScheme.error,
         ));
       }
@@ -542,8 +658,7 @@ class _EditUnitDialogState extends ConsumerState<_EditUnitDialog> {
                 initialValue: _unitType,
                 decoration: const InputDecoration(labelText: 'Unit Type'),
                 items: _unitTypeLabels.entries
-                    .map((e) =>
-                        DropdownMenuItem(value: e.key, child: Text(e.value)))
+                    .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
                     .toList(),
                 onChanged: (v) => setState(() => _unitType = v!),
               ),
@@ -553,39 +668,30 @@ class _EditUnitDialogState extends ConsumerState<_EditUnitDialog> {
                 decoration: const InputDecoration(labelText: 'Status'),
                 items: const [
                   DropdownMenuItem(value: 'vacant', child: Text('Vacant')),
-                  DropdownMenuItem(
-                      value: 'occupied', child: Text('Occupied')),
-                  DropdownMenuItem(
-                      value: 'maintenance',
-                      child: Text('Under Maintenance')),
+                  DropdownMenuItem(value: 'occupied', child: Text('Occupied')),
+                  DropdownMenuItem(value: 'maintenance', child: Text('Under Maintenance')),
                 ],
                 onChanged: (v) => setState(() => _status = v!),
               ),
               const SizedBox(height: 12),
               TextFormField(
                 controller: _rentCtrl,
-                decoration: const InputDecoration(
-                    labelText: 'Monthly Rent *', prefixText: '${AppConstants.currency} '),
+                decoration: const InputDecoration(labelText: 'Monthly Rent *', prefixText: '${AppConstants.currency} '),
                 keyboardType: TextInputType.number,
                 validator: (v) {
                   if (v!.isEmpty) return 'Required';
-                  if (double.tryParse(v.replaceAll(',', '')) == null) {
-                    return 'Invalid';
-                  }
+                  if (double.tryParse(v.replaceAll(',', '')) == null) return 'Invalid';
                   return null;
                 },
               ),
               const SizedBox(height: 12),
               TextFormField(
                 controller: _depositCtrl,
-                decoration: const InputDecoration(
-                    labelText: 'Deposit *', prefixText: '${AppConstants.currency} '),
+                decoration: const InputDecoration(labelText: 'Deposit *', prefixText: '${AppConstants.currency} '),
                 keyboardType: TextInputType.number,
                 validator: (v) {
                   if (v!.isEmpty) return 'Required';
-                  if (double.tryParse(v.replaceAll(',', '')) == null) {
-                    return 'Invalid';
-                  }
+                  if (double.tryParse(v.replaceAll(',', '')) == null) return 'Invalid';
                   return null;
                 },
               ),
@@ -594,17 +700,11 @@ class _EditUnitDialogState extends ConsumerState<_EditUnitDialog> {
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: _loading ? null : () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
+        TextButton(onPressed: _loading ? null : () => Navigator.pop(context), child: const Text('Cancel')),
         ElevatedButton(
           onPressed: _loading ? null : _submit,
           child: _loading
-              ? const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2))
+              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
               : const Text('Save'),
         ),
       ],

@@ -3,11 +3,17 @@ from .models import Invoice, Payment, InvoiceLineItem
 
 
 class PaymentSerializer(serializers.ModelSerializer):
+    method_display = serializers.CharField(source="get_method_display", read_only=True)
+
     class Meta:
         model = Payment
         fields = [
-            "id", "invoice", "method", "status", "amount",
-            "mpesa_receipt_number", "mpesa_phone", "paid_at", "created_at",
+            "id", "invoice", "method", "method_display", "status", "amount",
+            # M-Pesa
+            "mpesa_receipt_number", "mpesa_phone",
+            # Bank transfer
+            "bank_name", "bank_account", "bank_reference", "bank_branch",
+            "paid_at", "created_at",
         ]
         read_only_fields = fields
 

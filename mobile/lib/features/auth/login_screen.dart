@@ -5,9 +5,8 @@ import 'package:go_router/go_router.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:dio/dio.dart';
-import 'package:google_fonts/google_fonts.dart';
-
 import '../../core/providers/server_url_provider.dart';
+import '../../core/widgets/kasa_logo.dart';
 
 const _storage = FlutterSecureStorage();
 
@@ -211,16 +210,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 child: Opacity(opacity: val, child: child),
                               );
                             },
-                            child: Column(
-                              children: [
-                                Text('Kasa',
-                                    style: GoogleFonts.outfit(
-                                        textStyle: theme.textTheme.displayMedium,
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.w900,
-                                        letterSpacing: 2.0)),
-                              ],
-                            ),
+                            child: const KasaLockupStacked(markSize: 64),
                           ),
                           
                           const SizedBox(height: 56),

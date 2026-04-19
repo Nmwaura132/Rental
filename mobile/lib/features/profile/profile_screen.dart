@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import '../../core/api/api_client.dart';
 import '../../core/utils/api_error.dart';
 import '../../core/providers/theme_provider.dart';
 import '../../core/constants.dart';
+import '../../core/theme/kasa_tokens.dart';
+import '../../core/widgets/kasa_primitives.dart';
 
 const _storage = FlutterSecureStorage();
 
@@ -168,190 +171,411 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final themeMode = ref.watch(themeModeProvider);
-    final theme = Theme.of(context);
+    final cs = Theme.of(context).colorScheme;
+
+    final isLandlord = _role.toLowerCase() == 'landlord';
+    final roleChipVariant =
+        isLandlord ? KasaChipVariant.primary : KasaChipVariant.secondary;
+    final avatarAccent =
+        isLandlord ? KasaCardAccent.primary : KasaCardAccent.secondary;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Profile')),
-      body: ListView(
-        children: [
-          // User info header
-          Container(
-            padding: const EdgeInsets.symmetric(vertical: 24),
-            color: theme.colorScheme.primaryContainer.withValues(alpha: 0.3),
-            child: Column(
-              children: [
-                CircleAvatar(
-                  radius: 40,
-                  backgroundColor: theme.colorScheme.primary,
-                  child: Text(
-                    _name.isNotEmpty ? _name[0].toUpperCase() : '?',
-                    style: const TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white),
-                  ),
+      backgroundColor: cs.kasaBg,
+      body: SafeArea(
+        child: ListView(
+          children: [
+            // ── Page heading ──────────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
+              child: Text(
+                'PROFILE',
+                style: GoogleFonts.spaceGrotesk(
+                  fontSize: 32,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.96,
+                  color: cs.onSurface,
+                  height: 1,
                 ),
-                const SizedBox(height: 12),
-                Text(_name,
-                    style: theme.textTheme.titleLarge
-                        ?.copyWith(fontWeight: FontWeight.bold)),
-                if (_phone.isNotEmpty)
-                  Text(_phone,
-                      style: theme.textTheme.bodyMedium
-                          ?.copyWith(color: Colors.grey)),
-                if (_role.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  Chip(
-                    label: Text(_role.toUpperCase()),
-                    backgroundColor:
-                        theme.colorScheme.primaryContainer,
-                    labelStyle: TextStyle(
-                        color: theme.colorScheme.onPrimaryContainer,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600),
-                    padding: EdgeInsets.zero,
-                  ),
-                ],
-              ],
+              ),
             ),
-          ),
 
-          const SizedBox(height: 8),
+            // ── User info card ────────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: KasaCard(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Role chip — top-right aligned
+                    if (_role.isNotEmpty)
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: KasaChip(
+                          label: _role,
+                          variant: roleChipVariant,
+                          small: true,
+                        ),
+                      ),
+                    const SizedBox(height: 12),
+                    // Avatar + name + phone — centred
+                    Column(
+                      children: [
+                        KasaAvatar(
+                          name: _name.isNotEmpty ? _name : '?',
+                          size: 88,
+                          accent: avatarAccent,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          _name,
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.spaceGrotesk(
+                            fontSize: 24,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.02 * 24,
+                            color: cs.onSurface,
+                            height: 1.1,
+                          ),
+                        ),
+                        if (_phone.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            _phone,
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.jetBrainsMono(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: cs.kasaTextSub,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
 
-          // Theme section
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-            child: Text('Appearance',
-                style: theme.textTheme.labelLarge
-                    ?.copyWith(color: theme.colorScheme.primary)),
-          ),
-          Card(
-            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
+            const SizedBox(height: 20),
+
+            // ── ACCOUNT section ───────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
+              child: Text(
+                'ACCOUNT',
+                style: GoogleFonts.spaceGrotesk(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.04,
+                  color: cs.kasaTextSub,
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: KasaCard(
+                padding: EdgeInsets.zero,
+                child: Column(
+                  children: [
+                    _DetailRow(
+                      label: 'NAME',
+                      value: _name,
+                      isFirst: true,
+                    ),
+                    _DetailRow(
+                      label: 'PHONE',
+                      value: _phone,
+                      valueStyle: GoogleFonts.jetBrainsMono(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: cs.onSurface,
+                      ),
+                    ),
+                    _DetailRow(
+                      label: 'ROLE',
+                      value: _role.isNotEmpty ? _role.toUpperCase() : '—',
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 20),
+
+            // ── PREFERENCES section ───────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
+              child: Text(
+                'PREFERENCES',
+                style: GoogleFonts.spaceGrotesk(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.04,
+                  color: cs.kasaTextSub,
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: KasaCard(
+                padding: EdgeInsets.zero,
+                child: Column(
+                  children: [
+                    // Theme row
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 18, vertical: 14),
+                      child: Row(
+                        children: [
+                          Text(
+                            'THEME',
+                            style: GoogleFonts.spaceGrotesk(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.04,
+                              color: cs.kasaTextSub,
+                            ),
+                          ),
+                          const Spacer(),
+                          SegmentedButton<ThemeMode>(
+                            segments: const [
+                              ButtonSegment(
+                                  value: ThemeMode.system,
+                                  icon: Icon(Icons.brightness_auto, size: 16),
+                                  label: Text('Auto')),
+                              ButtonSegment(
+                                  value: ThemeMode.light,
+                                  icon: Icon(Icons.light_mode, size: 16),
+                                  label: Text('Light')),
+                              ButtonSegment(
+                                  value: ThemeMode.dark,
+                                  icon: Icon(Icons.dark_mode, size: 16),
+                                  label: Text('Dark')),
+                            ],
+                            selected: {themeMode},
+                            onSelectionChanged: (sel) => ref
+                                .read(themeModeProvider.notifier)
+                                .setMode(sel.first),
+                            style: const ButtonStyle(
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Password row
+                    Container(
+                      decoration: BoxDecoration(
+                        border: Border(
+                          top: BorderSide(color: cs.kasaStroke, width: 2),
+                        ),
+                      ),
+                      child: GestureDetector(
+                        onTap: _showChangePasswordDialog,
+                        behavior: HitTestBehavior.opaque,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 18, vertical: 14),
+                          child: Row(
+                            children: [
+                              Text(
+                                'PASSWORD',
+                                style: GoogleFonts.spaceGrotesk(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 0.04,
+                                  color: cs.kasaTextSub,
+                                ),
+                              ),
+                              const Spacer(),
+                              Icon(
+                                Icons.chevron_right,
+                                size: 20,
+                                color: cs.kasaTextSub,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // Server URL row
+                    Container(
+                      decoration: BoxDecoration(
+                        border: Border(
+                          top: BorderSide(color: cs.kasaStroke, width: 2),
+                        ),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 18, vertical: 14),
+                      child: Row(
+                        children: [
+                          Text(
+                            'SERVER',
+                            style: GoogleFonts.spaceGrotesk(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.04,
+                              color: cs.kasaTextSub,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              AppConstants.apiBaseUrl,
+                              textAlign: TextAlign.right,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.jetBrainsMono(
+                                fontSize: 11,
+                                color: cs.kasaTextSub,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 24),
+
+            // ── Action buttons ────────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Column(
                 children: [
-                  const Icon(Icons.palette_outlined),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text('Theme',
-                        style: theme.textTheme.bodyLarge),
-                  ),
-                  SegmentedButton<ThemeMode>(
-                    segments: const [
-                      ButtonSegment(
-                          value: ThemeMode.system,
-                          icon: Icon(Icons.brightness_auto, size: 18),
-                          label: Text('Auto')),
-                      ButtonSegment(
-                          value: ThemeMode.light,
-                          icon: Icon(Icons.light_mode, size: 18),
-                          label: Text('Light')),
-                      ButtonSegment(
-                          value: ThemeMode.dark,
-                          icon: Icon(Icons.dark_mode, size: 18),
-                          label: Text('Dark')),
-                    ],
-                    selected: {themeMode},
-                    onSelectionChanged: (sel) =>
-                        ref.read(themeModeProvider.notifier).setMode(sel.first),
-                    style: const ButtonStyle(
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  // Switch role — amber ghost style
+                  GestureDetector(
+                    onTap: () async {
+                      await _storage.deleteAll();
+                      if (context.mounted) context.go('/login');
+                    },
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 14),
+                      decoration: BoxDecoration(
+                        color: Colors.transparent,
+                        borderRadius: BorderRadius.circular(KasaRadius.xl),
+                        border: Border.all(
+                          color: Colors.amber.shade600,
+                          width: KasaBorders.button,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.swap_horiz,
+                              size: 18, color: Colors.amber.shade700),
+                          const SizedBox(width: 8),
+                          Text(
+                            'SWITCH ROLE (DEV)',
+                            style: GoogleFonts.spaceGrotesk(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: -0.28,
+                              color: Colors.amber.shade700,
+                              height: 1,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
+
+                  const SizedBox(height: 10),
+
+                  // Log out
+                  KasaButton(
+                    label: 'LOG OUT',
+                    variant: KasaButtonVariant.primary,
+                    leading: Icon(Icons.logout,
+                        size: 18, color: cs.onPrimary),
+                    onTap: _confirmLogout,
+                  ),
                 ],
               ),
             ),
-          ),
 
-          const SizedBox(height: 8),
+            const SizedBox(height: 24),
 
-          // Settings section
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-            child: Text('Settings',
-                style: theme.textTheme.labelLarge
-                    ?.copyWith(color: theme.colorScheme.primary)),
-          ),
-          Card(
-            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            child: Column(
-              children: [
-                const ListTile(
-                  leading: Icon(Icons.dns_outlined),
-                  title: Text('Server URL'),
-                  subtitle: Text(
-                    AppConstants.apiBaseUrl,
-                    style: TextStyle(fontSize: 12),
-                    overflow: TextOverflow.ellipsis,
+            // ── Version footer ────────────────────────────────────────────────
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 32),
+                child: Text(
+                  'KASA v1.0.0',
+                  style: GoogleFonts.jetBrainsMono(
+                    fontSize: 10,
+                    color: cs.kasaTextSub,
                   ),
                 ),
-                const Divider(height: 1, indent: 16),
-                ListTile(
-                  leading: const Icon(Icons.lock_outline),
-                  title: const Text('Change Password'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: _showChangePasswordDialog,
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 16),
-
-          // Switch role (dev helper)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.amber.shade800,
-                side: BorderSide(color: Colors.amber.shade400),
-                minimumSize: const Size.fromHeight(48),
               ),
-              onPressed: () async {
-                await _storage.deleteAll();
-                if (mounted) context.go('/login');
-              },
-              icon: const Icon(Icons.swap_horiz_rounded),
-              label: const Text('Switch Role (Dev)'),
             ),
-          ),
-          const SizedBox(height: 10),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
-          // Logout
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: theme.colorScheme.error,
-                side: BorderSide(color: theme.colorScheme.error),
-                minimumSize: const Size.fromHeight(48),
+// ─── Detail row helper ─────────────────────────────────────────────────────────
+
+class _DetailRow extends StatelessWidget {
+  const _DetailRow({
+    required this.label,
+    required this.value,
+    this.isFirst = false,
+    this.valueStyle,
+  });
+
+  final String label;
+  final String value;
+  final bool isFirst;
+  final TextStyle? valueStyle;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Container(
+      decoration: isFirst
+          ? null
+          : BoxDecoration(
+              border: Border(
+                top: BorderSide(color: cs.kasaStroke, width: 2),
               ),
-              onPressed: _confirmLogout,
-              icon: const Icon(Icons.logout),
-              label: const Text('Log Out'),
+            ),
+      padding:
+          const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+      child: Row(
+        children: [
+          Text(
+            label,
+            style: GoogleFonts.spaceGrotesk(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.04,
+              color: cs.kasaTextSub,
             ),
           ),
-          const SizedBox(height: 32),
-
-          // App version
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-            child: Text('About',
-                style: theme.textTheme.labelLarge
-                    ?.copyWith(color: theme.colorScheme.primary)),
-          ),
-          Card(
-            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            child: ListTile(
-              leading: const Icon(Icons.home_work_rounded),
-              title: const Text('Rental Manager'),
-              subtitle: const Text('Version 1.0.0'),
-              trailing: Icon(Icons.verified_outlined,
-                  color: theme.colorScheme.primary, size: 18),
+          const Spacer(),
+          Flexible(
+            child: Text(
+              value.isNotEmpty ? value : '—',
+              textAlign: TextAlign.right,
+              style: valueStyle ??
+                  GoogleFonts.inter(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: cs.onSurface,
+                  ),
             ),
           ),
-          const SizedBox(height: 32),
         ],
       ),
     );

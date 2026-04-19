@@ -3,18 +3,20 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:dio/dio.dart' show FormData, MultipartFile;
 
 import '../../core/api/api_client.dart';
+import '../../core/constants.dart';
+import '../../core/providers/user_role_provider.dart';
 import '../../core/utils/api_error.dart';
-import '../../shared/theme/app_theme.dart';
+import '../../core/theme/kasa_tokens.dart';
+import '../../core/widgets/kasa_primitives.dart';
 
 // ─── Providers ────────────────────────────────────────────────────────────────
 
-const _storage = FlutterSecureStorage();
 
 final maintenanceListProvider =
     FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
@@ -57,20 +59,9 @@ class MaintenanceScreen extends ConsumerStatefulWidget {
 
 class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen> {
   String? _selectedStatus; // null = show all
-  String _role = '';
 
-  @override
-  void initState() {
-    super.initState();
-    _loadRole();
-  }
-
-  Future<void> _loadRole() async {
-    final role = await _storage.read(key: 'user_role') ?? '';
-    if (mounted) setState(() => _role = role);
-  }
-
-  bool get _isTenant => _role == 'tenant';
+  bool get _isTenant =>
+      ref.watch(userRoleProvider).valueOrNull == 'tenant';
 
   List<Map<String, dynamic>> _filtered(List<Map<String, dynamic>> all) {
     if (_selectedStatus == null) return all;
@@ -84,42 +75,71 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen> {
     final cs = theme.colorScheme;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Maintenance'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Refresh',
-            onPressed: () {
-              HapticFeedback.lightImpact();
-              ref.invalidate(maintenanceListProvider);
-            },
-          ),
-        ],
-      ),
+      backgroundColor: cs.kasaBg,
       body: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Status filter chips
-          SizedBox(
-            height: 48,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          // ── Header ──────────────────────────────────────────────────────
+          SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 12, 8),
+              child: Row(
+                children: [
+                  Text(
+                    'MAINTENANCE',
+                    style: GoogleFonts.spaceGrotesk(
+                      fontSize: 32,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.96,
+                      color: cs.onSurface,
+                      height: 1,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    icon: Icon(Icons.refresh, size: 22, color: cs.onSurface),
+                    tooltip: 'Refresh',
+                    onPressed: () {
+                      HapticFeedback.lightImpact();
+                      ref.invalidate(maintenanceListProvider);
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // ── Filter chips ─────────────────────────────────────────────────
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+            child: Row(
               children: [
-                _FilterChip(
-                  label: 'All',
-                  selected: _selectedStatus == null,
+                GestureDetector(
                   onTap: () => setState(() => _selectedStatus = null),
+                  child: KasaChip(
+                    label: 'ALL',
+                    variant: _selectedStatus == null
+                        ? KasaChipVariant.secondary
+                        : KasaChipVariant.neutral,
+                  ),
                 ),
-                ..._statusLabels.entries.map((e) => _FilterChip(
-                      label: e.value,
-                      selected: _selectedStatus == e.key,
-                      onTap: () => setState(() => _selectedStatus = e.key),
-                    )),
+                ..._statusLabels.entries.map((e) => Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: GestureDetector(
+                    onTap: () => setState(() => _selectedStatus = e.key),
+                    child: KasaChip(
+                      label: e.value.toUpperCase(),
+                      variant: _selectedStatus == e.key
+                          ? KasaChipVariant.secondary
+                          : KasaChipVariant.neutral,
+                    ),
+                  ),
+                )),
               ],
             ),
           ),
-          const Divider(height: 1),
           Expanded(
             child: listAsync.when(
               loading: () => const Center(child: CircularProgressIndicator()),
@@ -174,12 +194,15 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen> {
         ],
       ),
       floatingActionButton: _isTenant
-          ? FloatingActionButton(
-              onPressed: () {
-                HapticFeedback.lightImpact();
-                _showCreateDialog(context);
-              },
-              child: const Icon(Icons.add),
+          ? Padding(
+              padding: const EdgeInsets.only(bottom: 80),
+              child: FloatingActionButton(
+                onPressed: () {
+                  HapticFeedback.lightImpact();
+                  _showCreateDialog(context);
+                },
+                child: const Icon(Icons.add),
+              ),
             )
           : null,
     );
@@ -199,37 +222,6 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen> {
           ref.invalidate(maintenanceListProvider);
           Navigator.pop(context);
         },
-      ),
-    );
-  }
-}
-
-// ─── Filter Chip ──────────────────────────────────────────────────────────────
-
-class _FilterChip extends StatelessWidget {
-  const _FilterChip({required this.label, required this.selected, required this.onTap});
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.only(right: 6),
-      child: FilterChip(
-        label: Text(label),
-        selected: selected,
-        onSelected: (_) => onTap(),
-        selectedColor: cs.primaryContainer,
-        checkmarkColor: cs.onPrimaryContainer,
-        labelStyle: TextStyle(
-          fontSize: 13,
-          fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
-          color: selected ? cs.onPrimaryContainer : cs.onSurface,
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 4),
-        visualDensity: VisualDensity.compact,
       ),
     );
   }
@@ -266,70 +258,115 @@ class _RequestTile extends ConsumerWidget {
       } catch (_) {}
     }
 
-    final photoUrl = request['photo'] as String?;
+    // Accent color drives the thick left border (design: open→secondary, progress→tertiary, resolved→primary)
+    final accentColor = switch (status) {
+      'open'        => cs.secondary,
+      'in_progress' => cs.tertiary,
+      'resolved'    => cs.primary,
+      _             => cs.outline,
+    };
 
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
+    // Priority icon in the left column
+    final priorityIcon = switch (priority) {
+      'urgent' => Icons.warning_amber_rounded,
+      'high'   => Icons.arrow_upward_rounded,
+      'low'    => Icons.arrow_downward_rounded,
+      _        => Icons.remove_rounded,
+    };
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      child: GestureDetector(
         onTap: isLandlord
             ? () => _showStatusUpdateDialog(context, ref)
             : () => _showDetailSheet(context),
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(title,
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w600, fontSize: 15)),
-                  ),
-                  _PriorityBadge(priority: priority),
-                  if (photoUrl != null && photoUrl.isNotEmpty) ...[
-                    const SizedBox(width: 8),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(6),
-                      child: Image.network(
-                        photoUrl,
-                        width: 48,
-                        height: 48,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(KasaRadius.md),
+            boxShadow: [BoxShadow(color: cs.kasaShadow, offset: const Offset(4, 4), blurRadius: 0)],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(KasaRadius.md),
+            child: Container(
+              decoration: BoxDecoration(
+                color: cs.kasaCard,
+                border: Border(
+                  left:   BorderSide(color: accentColor,    width: 8),
+                  right:  BorderSide(color: cs.kasaStroke,  width: 2),
+                  top:    BorderSide(color: cs.kasaStroke,  width: 2),
+                  bottom: BorderSide(color: cs.kasaStroke,  width: 2),
+                ),
+              ),
+              child: IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Icon column — 52px wide, elev background
+                    Container(
+                      width: 52,
+                      decoration: BoxDecoration(
+                        color: cs.surfaceContainerHighest,
+                        border: Border(right: BorderSide(color: cs.kasaStroke, width: 2)),
+                      ),
+                      alignment: Alignment.center,
+                      child: Icon(priorityIcon, size: 22, color: cs.onSurface),
+                    ),
+                    // Content
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.all(14),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    title.toUpperCase(),
+                                    style: GoogleFonts.spaceGrotesk(
+                                      fontSize: 14, fontWeight: FontWeight.w700,
+                                      letterSpacing: -0.14, color: cs.onSurface,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  if (description.isNotEmpty) ...[
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      description,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: GoogleFonts.inter(
+                                        fontSize: 11, fontWeight: FontWeight.w500,
+                                        color: cs.kasaTextSub,
+                                      ),
+                                    ),
+                                  ],
+                                  if (dateStr.isNotEmpty) ...[
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      'SUBMITTED $dateStr',
+                                      style: GoogleFonts.spaceGrotesk(
+                                        fontSize: 10, fontWeight: FontWeight.w700,
+                                        letterSpacing: 0.04, color: cs.kasaTextSub,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            _StatusBadge(status: status),
+                          ],
+                        ),
                       ),
                     ),
                   ],
-                ],
+                ),
               ),
-              if (description.isNotEmpty) ...[
-                const SizedBox(height: 4),
-                Text(description,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        fontSize: 13,
-                        color: cs.onSurface.withValues(alpha: 0.7))),
-              ],
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  _StatusBadge(status: status),
-                  const Spacer(),
-                  if (dateStr.isNotEmpty)
-                    Text(dateStr,
-                        style: TextStyle(
-                            fontSize: 11,
-                            color: cs.onSurface.withValues(alpha: 0.5))),
-                  if (isLandlord) ...[
-                    const SizedBox(width: 4),
-                    Icon(Icons.edit_outlined,
-                        size: 14, color: cs.onSurface.withValues(alpha: 0.4)),
-                  ],
-                ],
-              ),
-            ],
+            ),
           ),
         ),
       ),
@@ -340,6 +377,9 @@ class _RequestTile extends ConsumerWidget {
     showModalBottomSheet(
       context: context,
       useRootNavigator: true,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Theme.of(context).colorScheme.kasaCard,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -371,36 +411,20 @@ class _StatusBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    Color bg, fg;
-    switch (status) {
-      case 'open':
-        bg = cs.statusPendingBg;
-        fg = cs.statusPending;
-      case 'in_progress':
-        bg = cs.statusVacantBg;
-        fg = cs.statusVacant;
-      case 'resolved':
-        bg = cs.statusPaidBg;
-        fg = cs.statusPaid;
-      case 'closed':
-        bg = cs.statusCancelledBg;
-        fg = cs.statusCancelled;
-      default:
-        bg = cs.surfaceContainerHighest;
-        fg = cs.onSurface;
-    }
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Text(
-        _statusLabels[status] ?? status,
-        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: fg),
-      ),
-    );
+    final variant = switch (status) {
+      'open'        => KasaChipVariant.secondary,
+      'in_progress' => KasaChipVariant.tertiary,
+      'resolved'    => KasaChipVariant.primary,
+      _             => KasaChipVariant.neutral,
+    };
+    final label = switch (status) {
+      'open'        => 'OPEN',
+      'in_progress' => 'IN PROGRESS',
+      'resolved'    => 'RESOLVED',
+      'closed'      => 'CLOSED',
+      _             => status.replaceAll('_', ' ').toUpperCase(),
+    };
+    return KasaChip(label: label, variant: variant, small: true);
   }
 }
 
@@ -412,136 +436,392 @@ class _PriorityBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Color color;
-    switch (priority) {
-      case 'urgent':
-        color = const Color(0xFFB71C1C);
-      case 'high':
-        color = const Color(0xFFE65100);
-      case 'medium':
-        color = const Color(0xFFF57F17);
-      default:
-        color = const Color(0xFF388E3C);
-    }
+    final cs = Theme.of(context).colorScheme;
+    final color = switch (priority) {
+      'urgent' => cs.error,
+      'high'   => cs.tertiary,
+      'medium' => cs.secondary,
+      _        => cs.kasaTextSub,
+    };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: color.withValues(alpha: 0.35)),
+        borderRadius: BorderRadius.circular(KasaRadius.pill),
+        border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
       ),
       child: Text(
-        _priorityLabels[priority] ?? priority,
-        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: color),
+        (_priorityLabels[priority] ?? priority).toUpperCase(),
+        style: GoogleFonts.spaceGrotesk(
+          fontSize: 10, fontWeight: FontWeight.w700,
+          letterSpacing: 0.04, color: color,
+        ),
       ),
     );
   }
 }
 
-// ─── Detail Sheet (tenant read-only) ─────────────────────────────────────────
+// ─── Detail Sheet (tenant — view + reply) ────────────────────────────────────
 
-class _DetailSheet extends StatelessWidget {
+class _DetailSheet extends ConsumerStatefulWidget {
   const _DetailSheet({required this.request});
   final Map<String, dynamic> request;
 
+  @override
+  ConsumerState<_DetailSheet> createState() => _DetailSheetState();
+}
+
+class _DetailSheetState extends ConsumerState<_DetailSheet> {
   static final _fmt = DateFormat('dd MMM y · HH:mm');
+
+  List<Map<String, dynamic>> _notes = [];
+  bool _notesLoading = true;
+  bool _sending = false;
+  final _replyCtrl = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadNotes();
+  }
+
+  @override
+  void dispose() {
+    _replyCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadNotes() async {
+    try {
+      final dio = ref.read(dioProvider);
+      final resp = await dio.get('/api/v1/tenants/maintenance/${widget.request['id']}/notes/');
+      final data = resp.data;
+      if (mounted) {
+        setState(() {
+          _notes = List<Map<String, dynamic>>.from(data is List ? data : []);
+          _notesLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _notesLoading = false);
+    }
+  }
+
+  Future<void> _sendReply() async {
+    final body = _replyCtrl.text.trim();
+    if (body.isEmpty) return;
+    setState(() => _sending = true);
+    try {
+      final dio = ref.read(dioProvider);
+      final resp = await dio.post(
+        '/api/v1/tenants/maintenance/${widget.request['id']}/notes/',
+        data: {'body': body},
+      );
+      _replyCtrl.clear();
+      if (mounted) {
+        setState(() {
+          _notes.add(Map<String, dynamic>.from(resp.data as Map));
+          _sending = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _sending = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(apiError(e)),
+              backgroundColor: Theme.of(context).colorScheme.error),
+        );
+      }
+    }
+  }
+
+  String _fmtDate(dynamic raw) {
+    if (raw == null) return '—';
+    try { return _fmt.format(DateTime.parse(raw.toString()).toLocal()); }
+    catch (_) { return raw.toString(); }
+  }
+
+
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final status = request['status'] as String? ?? '';
-    final priority = request['priority'] as String? ?? '';
-    final createdRaw = request['created_at'];
-    final updatedRaw = request['updated_at'];
+    final status = widget.request['status'] as String? ?? '';
+    final priority = widget.request['priority'] as String? ?? '';
+    final rawPhoto = widget.request['photo'];
+    final photoUrl = rawPhoto != null && (rawPhoto as String).isNotEmpty
+        ? AppConstants.resolveMediaUrl(rawPhoto)
+        : null;
 
-    String fmtDate(dynamic raw) {
-      if (raw == null) return '—';
-      try {
-        return _fmt.format(DateTime.parse(raw.toString()).toLocal());
-      } catch (_) {
-        return raw.toString();
-      }
-    }
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.75,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      builder: (_, scrollCtrl) => Column(
         children: [
+          // Handle
           Center(
             child: Container(
-              width: 36,
-              height: 4,
+              width: 36, height: 4,
+              margin: const EdgeInsets.fromLTRB(0, 12, 0, 0),
               decoration: BoxDecoration(
                 color: cs.outlineVariant,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
           ),
-          const SizedBox(height: 16),
-          Text(request['title'] as String? ?? '—',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-          const SizedBox(height: 10),
-          Row(children: [
-            _StatusBadge(status: status),
-            const SizedBox(width: 8),
-            _PriorityBadge(priority: priority),
-          ]),
-          const SizedBox(height: 14),
-          if ((request['description'] as String? ?? '').isNotEmpty) ...[
-            Text('Description',
-                style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: cs.onSurface.withValues(alpha: 0.5))),
-            const SizedBox(height: 4),
-            Text(request['description'] as String,
-                style: const TextStyle(fontSize: 14)),
-            const SizedBox(height: 14),
-          ],
-          if (request['photo'] != null && (request['photo'] as String).isNotEmpty) ...[
-            Text('Photo',
-                style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: cs.onSurface.withValues(alpha: 0.5))),
-            const SizedBox(height: 6),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: Image.network(
-                request['photo'] as String,
-                height: 200,
-                width: double.infinity,
-                fit: BoxFit.cover,
-                loadingBuilder: (_, child, progress) => progress == null
-                    ? child
-                    : SizedBox(
-                        height: 200,
-                        child: Center(
-                          child: CircularProgressIndicator(
-                            value: progress.expectedTotalBytes != null
-                                ? progress.cumulativeBytesLoaded /
-                                    progress.expectedTotalBytes!
-                                : null,
+          // Scrollable body
+          Expanded(
+            child: ListView(
+              controller: scrollCtrl,
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
+              children: [
+                // Title + badges
+                Text(
+                  (widget.request['title'] as String? ?? '—').toUpperCase(),
+                  style: GoogleFonts.spaceGrotesk(
+                    fontSize: 20, fontWeight: FontWeight.w700,
+                    letterSpacing: -0.4, color: cs.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Row(children: [
+                  _StatusBadge(status: status),
+                  const SizedBox(width: 8),
+                  _PriorityBadge(priority: priority),
+                ]),
+                const SizedBox(height: 14),
+
+                // Description
+                if ((widget.request['description'] as String? ?? '').isNotEmpty) ...[
+                  const _SectionLabel('DESCRIPTION'),
+                  const SizedBox(height: 4),
+                  Text(widget.request['description'] as String,
+                      style: GoogleFonts.inter(fontSize: 14, color: cs.onSurface)),
+                  const SizedBox(height: 14),
+                ],
+
+                // Photo
+                if (photoUrl != null) ...[
+                  const _SectionLabel('PHOTO'),
+                  const SizedBox(height: 6),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(KasaRadius.md),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
+                        borderRadius: BorderRadius.circular(KasaRadius.md),
+                        boxShadow: [BoxShadow(color: cs.kasaShadow, offset: const Offset(4, 4), blurRadius: 0)],
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(KasaRadius.md - KasaBorders.card),
+                        child: Image.network(
+                          photoUrl,
+                          height: 200,
+                          width: double.infinity,
+                          fit: BoxFit.cover,
+                          loadingBuilder: (_, child, progress) => progress == null
+                              ? child
+                              : SizedBox(
+                                  height: 200,
+                                  child: Center(
+                                    child: CircularProgressIndicator(
+                                      value: progress.expectedTotalBytes != null
+                                          ? progress.cumulativeBytesLoaded / progress.expectedTotalBytes!
+                                          : null,
+                                    ),
+                                  ),
+                                ),
+                          errorBuilder: (_, __, ___) => Container(
+                            height: 80,
+                            color: cs.surfaceContainerHighest,
+                            child: Center(
+                              child: Icon(Icons.broken_image_outlined,
+                                  color: cs.kasaTextSub),
+                            ),
                           ),
                         ),
                       ),
-                errorBuilder: (_, __, ___) => Container(
-                  height: 80,
-                  color: cs.surfaceContainerHighest,
-                  child: Center(
-                    child: Icon(Icons.broken_image_outlined,
-                        color: cs.onSurface.withValues(alpha: 0.4)),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                ],
+
+                // Meta
+                _InfoRow(label: 'Submitted', value: _fmtDate(widget.request['created_at'])),
+                _InfoRow(label: 'Last updated', value: _fmtDate(widget.request['updated_at'])),
+                const SizedBox(height: 20),
+
+                // Notes / replies
+                _SectionLabel('REPLIES (${_notes.length})'),
+                const SizedBox(height: 8),
+                if (_notesLoading)
+                  const Center(child: Padding(
+                    padding: EdgeInsets.symmetric(vertical: 16),
+                    child: CircularProgressIndicator(),
+                  ))
+                else if (_notes.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: Text('No replies yet. Be the first to add one.',
+                        style: GoogleFonts.inter(fontSize: 13, color: cs.kasaTextSub)),
+                  )
+                else
+                  ..._notes.map((n) => _NoteCard(note: n)),
+
+                const SizedBox(height: 12),
+              ],
+            ),
+          ),
+
+          // Reply input bar
+          Container(
+            padding: EdgeInsets.fromLTRB(16, 10, 16, 16 + MediaQuery.of(context).viewInsets.bottom),
+            decoration: BoxDecoration(
+              color: cs.kasaCard,
+              border: Border(top: BorderSide(color: cs.kasaStroke, width: KasaBorders.card)),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: cs.kasaBg,
+                      borderRadius: BorderRadius.circular(KasaRadius.sm),
+                      border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
+                    ),
+                    child: TextField(
+                      controller: _replyCtrl,
+                      maxLines: null,
+                      textCapitalization: TextCapitalization.sentences,
+                      style: GoogleFonts.inter(fontSize: 14, color: cs.onSurface),
+                      decoration: InputDecoration(
+                        hintText: 'Add a reply…',
+                        hintStyle: GoogleFonts.inter(fontSize: 14, color: cs.kasaTextSub),
+                        border: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      ),
+                    ),
                   ),
                 ),
-              ),
+                const SizedBox(width: 10),
+                GestureDetector(
+                  onTap: _sending ? null : _sendReply,
+                  child: Container(
+                    width: 44, height: 44,
+                    decoration: BoxDecoration(
+                      color: cs.secondary,
+                      borderRadius: BorderRadius.circular(KasaRadius.sm),
+                      border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
+                      boxShadow: [BoxShadow(color: cs.kasaShadow, offset: const Offset(3, 3), blurRadius: 0)],
+                    ),
+                    child: _sending
+                        ? Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: CircularProgressIndicator(strokeWidth: 2, color: cs.onSecondary),
+                          )
+                        : Icon(Icons.send_rounded, size: 20, color: cs.onSecondary),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 14),
-          ],
-          _InfoRow(label: 'Submitted', value: fmtDate(createdRaw)),
-          _InfoRow(label: 'Last updated', value: fmtDate(updatedRaw)),
+          ),
         ],
+      ),
+    );
+  }
+}
+
+// ─── Section label ────────────────────────────────────────────────────────────
+
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Text(
+      text,
+      style: GoogleFonts.spaceGrotesk(
+        fontSize: 11, fontWeight: FontWeight.w700,
+        letterSpacing: 0.04, color: cs.kasaTextSub,
+      ),
+    );
+  }
+}
+
+// ─── Note / reply card ────────────────────────────────────────────────────────
+
+class _NoteCard extends StatelessWidget {
+  const _NoteCard({required this.note});
+  final Map<String, dynamic> note;
+
+  static final _fmt = DateFormat('dd MMM · HH:mm');
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final isTenant = note['is_tenant'] as bool? ?? false;
+    final author = note['author_name'] as String? ?? 'Unknown';
+    final body = note['body'] as String? ?? '';
+    final raw = note['created_at'];
+    String timeStr = '';
+    if (raw != null) {
+      try { timeStr = _fmt.format(DateTime.parse(raw.toString()).toLocal()); }
+      catch (_) {}
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Container(
+        decoration: BoxDecoration(
+          color: isTenant ? cs.secondary.withValues(alpha: 0.08) : cs.kasaCard,
+          borderRadius: BorderRadius.circular(KasaRadius.sm),
+          border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
+        ),
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 28, height: 28,
+                  decoration: BoxDecoration(
+                    color: isTenant ? cs.secondary : cs.surfaceContainerHighest,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    author.isNotEmpty ? author[0].toUpperCase() : '?',
+                    style: GoogleFonts.spaceGrotesk(
+                      fontSize: 12, fontWeight: FontWeight.w700,
+                      color: isTenant ? cs.onSecondary : cs.onSurface,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    author.toUpperCase(),
+                    style: GoogleFonts.spaceGrotesk(
+                      fontSize: 11, fontWeight: FontWeight.w700,
+                      color: cs.onSurface,
+                    ),
+                  ),
+                ),
+                if (timeStr.isNotEmpty)
+                  Text(timeStr,
+                      style: GoogleFonts.inter(fontSize: 10, color: cs.kasaTextSub)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(body, style: GoogleFonts.inter(fontSize: 13, color: cs.onSurface)),
+          ],
+        ),
       ),
     );
   }
@@ -555,15 +835,23 @@ class _InfoRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
-          Text('$label: ',
-              style: TextStyle(
-                  fontSize: 13,
-                  color: cs.onSurface.withValues(alpha: 0.55),
-                  fontWeight: FontWeight.w500)),
-          Text(value, style: const TextStyle(fontSize: 13)),
+          Text(
+            label.toUpperCase(),
+            style: GoogleFonts.spaceGrotesk(
+              fontSize: 11, fontWeight: FontWeight.w700,
+              letterSpacing: 0.04, color: cs.kasaTextSub,
+            ),
+          ),
+          const Spacer(),
+          Text(
+            value,
+            style: GoogleFonts.inter(
+              fontSize: 13, fontWeight: FontWeight.w600, color: cs.onSurface,
+            ),
+          ),
         ],
       ),
     );

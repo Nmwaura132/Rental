@@ -1,10 +1,10 @@
 import logging
-from rest_framework import viewsets, permissions
+from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
-from .models import Lease, MaintenanceRequest
-from .serializers import LeaseSerializer, MaintenanceRequestSerializer
+from .models import Lease, MaintenanceRequest, MaintenanceNote
+from .serializers import LeaseSerializer, MaintenanceRequestSerializer, MaintenanceNoteSerializer
 
 logger = logging.getLogger(__name__)
 
@@ -151,3 +151,14 @@ class MaintenanceRequestViewSet(viewsets.ModelViewSet):
                 lease__unit__property__caretaker=user
             ).select_related("lease__tenant", "lease__unit")
         return MaintenanceRequest.objects.filter(lease__tenant=user).select_related("lease__unit__property")
+
+    @action(detail=True, methods=["get", "post"], url_path="notes")
+    def notes(self, request, pk=None):
+        mr = self.get_object()
+        if request.method == "GET":
+            qs = mr.notes.select_related("author")
+            return Response(MaintenanceNoteSerializer(qs, many=True).data)
+        serializer = MaintenanceNoteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(request=mr, author=request.user)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)

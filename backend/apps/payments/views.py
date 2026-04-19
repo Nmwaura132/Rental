@@ -115,6 +115,15 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
         if invoice.status == Invoice.Status.PAID:
             return Response({"error": "Invoice is already fully paid."}, status=status.HTTP_400_BAD_REQUEST)
 
+        bank_fields = {}
+        if method == Payment.Method.BANK:
+            bank_fields = {
+                "bank_name": (request.data.get("bank_name") or "").strip() or None,
+                "bank_account": (request.data.get("bank_account") or "").strip() or None,
+                "bank_reference": (request.data.get("bank_reference") or "").strip() or None,
+                "bank_branch": (request.data.get("bank_branch") or "").strip() or None,
+            }
+
         payment = Payment.objects.create(
             invoice=invoice,
             method=method,
@@ -122,6 +131,7 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
             amount=amount,
             idempotency_key=f"{method}:{uuid.uuid4().hex}",
             paid_at=timezone.now(),
+            **bank_fields,
         )
 
         invoice.amount_paid = (invoice.amount_paid or Decimal('0')) + Decimal(str(payment.amount))
@@ -346,6 +356,43 @@ class MpesaSTKStatusView(APIView):
             "result_desc": req.result_desc,
             "mpesa_receipt_number": req.mpesa_receipt_number,
             "amount": req.amount,
+        })
+
+
+class MpesaRegisterC2BView(APIView):
+    """
+    POST /api/v1/payments/mpesa/register/
+    Trigger C2B URL registration with Daraja. Landlords only.
+    Safe to call multiple times — Daraja overwrites with the latest URLs.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        if not request.user.is_landlord:
+            return Response({"error": "Landlords only."}, status=403)
+        from .mpesa import register_c2b_urls
+        from django.conf import settings
+        missing = [
+            k for k in ("MPESA_CONSUMER_KEY", "MPESA_CONSUMER_SECRET",
+                        "MPESA_SHORTCODE", "MPESA_PASSKEY", "MPESA_CALLBACK_URL")
+            if not getattr(settings, k, "")
+        ]
+        if missing:
+            return Response(
+                {"error": f"Missing Daraja settings: {', '.join(missing)}. Fill in .env."},
+                status=500,
+            )
+        try:
+            result = register_c2b_urls()
+        except Exception as exc:
+            logger.error("C2B registration failed: %s", exc)
+            return Response({"error": str(exc)}, status=502)
+
+        return Response({
+            "message": "C2B URLs registered with Daraja.",
+            "confirm_url": f"{settings.MPESA_CALLBACK_URL}confirm/",
+            "validate_url": f"{settings.MPESA_CALLBACK_URL}validate/",
+            "daraja_response": result,
         })
 
 

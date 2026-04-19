@@ -58,9 +58,14 @@ def register_c2b_urls() -> dict:
         headers={"Authorization": f"Bearer {token}"},
         timeout=10,
     )
-    resp.raise_for_status()
-    logger.info("M-Pesa C2B URLs registered: %s", resp.json())
-    return resp.json()
+    try:
+        data = resp.json()
+    except Exception:
+        data = {"raw": resp.text}
+    if not resp.ok:
+        raise Exception(f"HTTP {resp.status_code} — {data}")
+    logger.info("M-Pesa C2B URLs registered: %s", data)
+    return data
 
 
 def make_idempotency_key(receipt_number: str) -> str:
@@ -119,6 +124,44 @@ def stk_push(phone: str, amount: int, account_ref: str, description: str) -> dic
     resp.raise_for_status()
     data = resp.json()
     logger.info("STK Push initiated: %s", data)
+    return data
+
+
+def simulate_c2b_payment(phone: str, amount: int, account_ref: str,
+                         shortcode: str = None) -> dict:
+    """
+    Sandbox only — simulate a C2B Paybill payment hitting your webhook.
+    Safaricom will POST to your registered ConfirmationURL.
+
+    Args:
+        phone: Sender phone in 2547XXXXXXXX format.
+        amount: Amount as integer.
+        account_ref: BillRefNumber (typically the unit number).
+        shortcode: Override shortcode. Defaults to MPESA_SHORTCODE.
+    """
+    if settings.MPESA_ENVIRONMENT != "sandbox":
+        raise RuntimeError("simulate_c2b_payment is only available in sandbox mode.")
+    token = get_access_token()
+    payload = {
+        "ShortCode": shortcode or settings.MPESA_SHORTCODE,
+        "CommandID": "CustomerPayBillOnline",
+        "Amount": int(amount),
+        "Msisdn": phone,
+        "BillRefNumber": account_ref,
+    }
+    resp = requests.post(
+        f"{_base_url()}/mpesa/c2b/v1/simulate",
+        json=payload,
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10,
+    )
+    try:
+        data = resp.json()
+    except Exception:
+        data = {"raw": resp.text}
+    if not resp.ok:
+        raise Exception(f"HTTP {resp.status_code} — {data}")
+    logger.info("C2B simulate result: %s", data)
     return data
 
 

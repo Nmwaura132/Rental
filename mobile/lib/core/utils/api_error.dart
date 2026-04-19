@@ -1,7 +1,22 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
 /// Extracts a user-friendly error message from a Dio exception or any error.
 String apiError(Object e) {
+  if (kDebugMode) {
+    debugPrint('─── API ERROR ──────────────────────────────────────────────────');
+    debugPrint('Type: ${e.runtimeType}');
+    if (e is DioException) {
+      debugPrint('Path: ${e.requestOptions.path}');
+      debugPrint('Method: ${e.requestOptions.method}');
+      debugPrint('Status Code: ${e.response?.statusCode}');
+      debugPrint('Error Data: ${e.response?.data}');
+    } else {
+      debugPrint('Error: $e');
+    }
+    debugPrint('──────────────────────────────────────────────────────────────');
+  }
+
   if (e is DioException) {
     final data = e.response?.data;
     if (data is Map) {
@@ -11,7 +26,15 @@ String apiError(Object e) {
       if (first is List && first.isNotEmpty) return first.first.toString();
       if (first is String) return first;
     }
-    if (data is String && data.isNotEmpty) return data;
+    if (data is String && data.isNotEmpty) {
+      // Django debug page or other raw HTML — never show to user
+      if (data.trimLeft().startsWith('<')) {
+        final code = e.response?.statusCode;
+        if (code != null && code >= 500) return 'Server error. Please try again later.';
+        return 'Request failed (HTTP $code). Check server logs.';
+      }
+      return data;
+    }
     switch (e.type) {
       case DioExceptionType.connectionTimeout:
       case DioExceptionType.sendTimeout:

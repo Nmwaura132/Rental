@@ -1,6 +1,6 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -17,13 +17,9 @@ import '../features/tenants/tenants_screen.dart';
 import '../features/maintenance/maintenance_screen.dart';
 import '../features/profile/profile_screen.dart';
 import 'providers/user_role_provider.dart';
+import 'navigation_key.dart';
 
 const _storage = FlutterSecureStorage();
-
-// Stable root navigator key — required for useRootNavigator:true to work
-// correctly inside StatefulShellRoute. Without this, showModalBottomSheet and
-// showDialog with useRootNavigator:true have no reliable root to target.
-final rootNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'root');
 
 final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -117,23 +113,25 @@ class _MainShellState extends ConsumerState<MainShell> {
     final role = ref.watch(userRoleProvider).valueOrNull;
     final isTenant = role == 'tenant';
 
+    // Design bundle labels: HOME / PROPS / TENANTS / BILLS / FIX
     final navItems = isTenant
         ? [
-            (icon: Icons.dashboard, label: 'Home', index: 0),
-            (icon: Icons.receipt_long, label: 'Invoices', index: 3),
-            (icon: Icons.construction, label: 'Maintenance', index: 4),
+            (icon: Icons.grid_view_rounded,  label: 'HOME',    index: 0),
+            (icon: Icons.receipt_long,        label: 'BILLS',   index: 3),
+            (icon: Icons.construction,        label: 'FIX',     index: 4),
           ]
         : [
-            (icon: Icons.dashboard, label: 'Home', index: 0),
-            (icon: Icons.home_work, label: 'Properties', index: 1),
-            (icon: Icons.people, label: 'Tenants', index: 2),
-            (icon: Icons.receipt_long, label: 'Invoices', index: 3),
-            (icon: Icons.construction, label: 'Maintenance', index: 4),
+            (icon: Icons.grid_view_rounded,  label: 'HOME',    index: 0),
+            (icon: Icons.home_work_outlined,  label: 'PROPS',   index: 1),
+            (icon: Icons.people_outline,      label: 'TENANTS', index: 2),
+            (icon: Icons.receipt_long,        label: 'BILLS',   index: 3),
+            (icon: Icons.construction,        label: 'FIX',     index: 4),
           ];
 
     int selectedUITab = navItems.indexWhere((e) => e.index == widget.navigationShell.currentIndex);
     if (selectedUITab < 0) selectedUITab = 0;
 
+    final cs = Theme.of(context).colorScheme;
     final bottomInset = MediaQuery.of(context).padding.bottom;
 
     return Scaffold(
@@ -149,71 +147,71 @@ class _MainShellState extends ConsumerState<MainShell> {
         },
         child: widget.navigationShell,
       ),
+      // Neo-brutalist pill nav — no glass blur, no soft shadow, hard-edge offset only.
       bottomNavigationBar: AnimatedSlide(
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeInOut,
         offset: _isVisible ? Offset.zero : const Offset(0, 1.2),
-        child: Theme(
-          data: Theme.of(context).copyWith(
-            splashColor: Colors.transparent,
-            highlightColor: Colors.transparent,
-          ),
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + bottomInset),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(30),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                child: Container(
-                  height: 64,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.8),
-                    borderRadius: BorderRadius.circular(30),
-                    border: Border.all(
-                      color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.2),
-                      width: 1,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.1),
-                        blurRadius: 20,
-                        offset: const Offset(0, 10),
-                      ),
-                    ],
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: List.generate(navItems.length, (i) {
-                      final item = navItems[i];
-                      final isSelected = selectedUITab == i;
-                      final color = isSelected
-                          ? Theme.of(context).colorScheme.primary
-                          : Theme.of(context).colorScheme.onSurfaceVariant;
-                      
-                      return GestureDetector(
-                        onTap: () {
-                          widget.navigationShell.goBranch(
-                            item.index,
-                            initialLocation: item.index == widget.navigationShell.currentIndex,
-                          );
-                        },
-                        behavior: HitTestBehavior.opaque,
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 250),
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: isSelected 
-                                ? Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.5)
-                                : Colors.transparent,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Icon(item.icon, color: color),
-                        ),
-                      );
-                    }),
-                  ),
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + bottomInset),
+          child: Container(
+            height: 68,
+            decoration: BoxDecoration(
+              color: cs.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: cs.outline, width: 2),
+              boxShadow: [
+                BoxShadow(
+                  color: cs.shadow,
+                  offset: const Offset(4, 4),
+                  blurRadius: 0,
                 ),
-              ),
+              ],
+            ),
+            padding: const EdgeInsets.all(6),
+            child: Row(
+              children: List.generate(navItems.length, (i) {
+                final item = navItems[i];
+                final isSelected = selectedUITab == i;
+                return Expanded(
+                  child: GestureDetector(
+                    onTap: () => widget.navigationShell.goBranch(
+                      item.index,
+                      initialLocation: item.index == widget.navigationShell.currentIndex,
+                    ),
+                    behavior: HitTestBehavior.opaque,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      curve: Curves.easeOut,
+                      decoration: BoxDecoration(
+                        color: isSelected ? cs.secondary : Colors.transparent,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            item.icon,
+                            size: 20,
+                            color: isSelected ? cs.onSecondary : cs.onSurfaceVariant,
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            item.label,
+                            style: GoogleFonts.spaceGrotesk(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.02,
+                              color: isSelected ? cs.onSecondary : cs.onSurfaceVariant,
+                              height: 1,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }),
             ),
           ),
         ),

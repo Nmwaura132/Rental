@@ -3,7 +3,7 @@ from datetime import timedelta
 from celery import shared_task
 from django.utils import timezone
 
-from .models import Invoice, Payment
+from .models import Invoice, Payment, BankPaymentNotification
 from .mpesa import make_idempotency_key
 
 logger = logging.getLogger(__name__)
@@ -216,6 +216,100 @@ def reconcile_pending_stk_transactions():
                 process_stk_callback.delay(synthetic)
         except Exception as e:
             logger.error("STK reconcile query failed for %s: %s", req.checkout_request_id, e)
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=30)
+def process_bank_notification(self, notification_id: int):
+    """
+    Reconcile a BankPaymentNotification against open invoices.
+    Called immediately after KCB or Equity IPN is received.
+    """
+    from .models import BankPaymentNotification
+    from .bank_reconcile import reconcile_bank_notification
+    try:
+        notification = BankPaymentNotification.objects.get(pk=notification_id)
+        reconcile_bank_notification(notification)
+    except BankPaymentNotification.DoesNotExist:
+        logger.error("BankPaymentNotification %s not found.", notification_id)
+    except Exception as exc:
+        logger.error("Error reconciling bank notification %s: %s", notification_id, exc)
+        raise self.retry(exc=exc)
+
+
+@shared_task
+def poll_equity_statement(date_from: str | None = None, date_to: str | None = None):
+    """
+    Pull recent Equity transactions via Jenga API and reconcile any new ones.
+    Celery Beat: run every 30 minutes (catches EFTs with no IPN).
+    Can also be triggered manually via POST /api/v1/payments/bank/equity/poll/.
+    """
+    from datetime import date, timedelta
+    from .models import BankPaymentNotification
+    from .bank_reconcile import reconcile_bank_notification
+    try:
+        from .jenga import get_mini_statement, get_full_statement
+    except Exception as exc:
+        logger.error("Jenga import error: %s", exc)
+        return
+
+    try:
+        if date_from and date_to:
+            transactions = get_full_statement(date_from, date_to)
+        else:
+            transactions = get_mini_statement()
+    except Exception as exc:
+        logger.error("Equity statement fetch failed: %s", exc)
+        return
+
+    new_count = 0
+    for txn in transactions:
+        # Normalize Jenga transaction shape
+        # Jenga full-statement fields: transactionReference, amount, date, narrative, debitCredit
+        ref = (
+            txn.get("transactionReference")
+            or txn.get("reference")
+            or txn.get("TransID", "")
+        ).strip()
+        if not ref:
+            continue
+
+        debit_credit = txn.get("debitCredit", txn.get("type", "")).upper()
+        if debit_credit and debit_credit not in ("C", "CREDIT", "CR"):
+            continue  # skip debits
+
+        if BankPaymentNotification.objects.filter(transaction_ref=ref).exists():
+            continue  # already processed
+
+        try:
+            from decimal import Decimal
+            amount = Decimal(str(txn.get("amount", txn.get("runningBalance", 0))))
+            date_str = txn.get("date", txn.get("transactionDate", ""))
+            from datetime import timezone
+            from django.utils import timezone as dj_timezone
+            credited_at = (
+                __import__("dateutil.parser", fromlist=["parse"]).parse(date_str).replace(tzinfo=timezone.utc)
+                if date_str else dj_timezone.now()
+            )
+        except Exception as exc:
+            logger.warning("Equity statement parse error for txn %s: %s", ref, exc)
+            continue
+
+        narrative = txn.get("narrative", txn.get("remarks", ""))
+        notification = BankPaymentNotification.objects.create(
+            bank=BankPaymentNotification.Bank.EQUITY,
+            transaction_ref=ref,
+            amount=amount,
+            payer_name=txn.get("payerName", ""),
+            payer_account=txn.get("payerAccount", ""),
+            payment_ref=narrative[:100],
+            credited_at=credited_at,
+            raw_payload=txn,
+        )
+        reconcile_bank_notification(notification)
+        new_count += 1
+
+    logger.info("Equity statement poll: %d new transactions processed.", new_count)
+    return new_count
 
 
 @shared_task
