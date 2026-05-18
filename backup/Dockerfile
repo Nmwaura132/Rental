@@ -1,16 +1,25 @@
-# Minimal backup runner: mysqldump (from official mysql image) + mc binary.
+# Minimal backup runner: mysql-client (provides mysqldump) + mc (MinIO client).
 #
-# WHY start from mysql:8.0 instead of alpine + apk add mariadb-client:
-# mysqldump-from-mysql-8 produces output that's guaranteed identical to the
-# tooling that maintains the running DB. mariadb-dump diverges slightly on
-# default-charset and view definitions.
-FROM mysql:8.0
+# WHY python:3.12-slim and not mysql:8.0:
+#   mysql:8.0 is oraclelinux:9-slim under the hood — fine in theory but
+#   microdnf has been flaky in BuildKit runs (Coolify build hit exit 127
+#   on a clean `microdnf install`). python:3.12-slim is the same Debian
+#   base our api uses; apt-get is reliable and the install path is short.
+# WHY default-mysql-client and not the full mysql server:
+#   mysqldump-compatible binary in <30MB. Backup container stays small.
+FROM python:3.12-slim
 
-# mc binary — pinned URL; Dependabot can't auto-update this, manual bump only.
 ARG MC_VERSION=RELEASE.2024-11-21T17-21-54Z
-RUN microdnf install -y curl tzdata gzip ca-certificates 2>/dev/null || \
-    apt-get update && apt-get install -y --no-install-recommends curl tzdata gzip ca-certificates && rm -rf /var/lib/apt/lists/*
-RUN curl -sSLo /usr/local/bin/mc \
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      default-mysql-client \
+      ca-certificates \
+      curl \
+      gzip \
+      tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -sSLfo /usr/local/bin/mc \
       "https://dl.min.io/client/mc/release/linux-amd64/archive/mc.${MC_VERSION}" \
     && chmod +x /usr/local/bin/mc
 
