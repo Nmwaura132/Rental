@@ -41,5 +41,5 @@ gevent==24.11.1
 
 # ── Dev / Testing ─────────────────────────────────────────────────────────────
 pytest-django==4.9.0
-pytest==8.3.4
+pytest==9.0.3
 factory-boy==3.3.1               # test data factories
