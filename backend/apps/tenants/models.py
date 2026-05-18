@@ -54,10 +54,14 @@ class MaintenanceRequest(models.Model):
     priority = models.CharField(max_length=10, choices=Priority.choices, default=Priority.MEDIUM)
     status = models.CharField(max_length=15, choices=Status.choices, default=Status.OPEN, db_index=True)
     photo = models.ImageField(
-        upload_to="maintenance/%Y/%m/", 
-        null=True, 
+        upload_to="maintenance/%Y/%m/",
+        null=True,
         blank=True,
-        storage=PublicMediaStorage() if settings.USE_S3 else None
+        # WHY: pass the class, not an instance. S3Boto3Storage's __init__
+        # constructs a boto3 client eagerly — instantiating at class-definition
+        # time crashes Django import when S3 env vars are unset (e.g. in CI
+        # or during migrations without S3 wired). Django instantiates lazily.
+        storage=PublicMediaStorage if settings.USE_S3 else None,
     )
     resolved_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

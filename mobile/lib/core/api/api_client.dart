@@ -107,6 +107,14 @@ class _AuthInterceptor extends Interceptor {
         data: {'refresh': refresh},
       );
       await _storage.write(key: 'access_token', value: resp.data['access']);
+      // WHY: backend has ROTATE_REFRESH_TOKENS=True + BLACKLIST_AFTER_ROTATION=True.
+      // Each refresh issues a new refresh token and blacklists the old one. Without
+      // persisting the rotated token here, the next 401 finds a blacklisted refresh
+      // and force-logs the user out.
+      final newRefresh = resp.data['refresh'];
+      if (newRefresh != null) {
+        await _storage.write(key: 'refresh_token', value: newRefresh);
+      }
       return true;
     } catch (_) {
       return false;

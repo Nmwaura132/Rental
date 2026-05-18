@@ -12,6 +12,7 @@ from django.utils import timezone
 from rest_framework import permissions
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from drf_spectacular.utils import extend_schema
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ def _upload_pdf(pdf_bytes: bytes, key: str) -> str:
     return f"{endpoint}/{bucket}/{key}"
 
 
+@extend_schema(exclude=True)  # WHY: ad-hoc query params; returns PDF URL — document in handoff.md
 class ReportsView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 

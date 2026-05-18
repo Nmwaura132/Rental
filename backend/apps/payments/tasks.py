@@ -1,6 +1,8 @@
 import logging
 from datetime import timedelta
+from decimal import Decimal, InvalidOperation
 from celery import shared_task
+from django.db import transaction as db_transaction
 from django.utils import timezone
 
 from .models import Invoice, Payment, BankPaymentNotification
@@ -14,12 +16,21 @@ def process_mpesa_payment(self, receipt_number, amount, account_ref, phone, idem
     """
     Match an M-Pesa C2B payment to an open invoice and record it.
     account_ref is the BillRefNumber the tenant entered (typically unit number).
+    `amount` is a string (JSON-safe); parsed to Decimal here.
     """
     from apps.tenants.models import Lease
     from .models import Invoice, Payment
     from apps.core.utils.phone import normalize_phone
 
     try:
+        # WHY: parse to Decimal at the boundary. Daraja sends "TransAmount" as a
+        # JSON string or number; either way, str()->Decimal preserves cents.
+        try:
+            amount_dec = Decimal(str(amount))
+        except (TypeError, ValueError, InvalidOperation):
+            logger.error("Invalid amount in M-Pesa payload: %r (receipt=%s)", amount, receipt_number)
+            return
+
         # Normalize incoming phone
         normalized_phone = normalize_phone(phone)
 
@@ -35,40 +46,50 @@ def process_mpesa_payment(self, receipt_number, amount, account_ref, phone, idem
             logger.warning("No active lease found for account_ref=%s receipt=%s", account_ref, receipt_number)
             return
 
-        # Find the oldest unpaid invoice for this lease
-        invoice = (
-            Invoice.objects
-            .filter(lease=lease, status__in=[Invoice.Status.PENDING, Invoice.Status.OVERDUE, Invoice.Status.PARTIALLY_PAID])
-            .order_by("due_date")
-            .first()
-        )
+        # WHY: wrap the Payment.create + Invoice update in a single transaction and
+        # take a row lock on the Invoice. Two concurrent C2B callbacks for the same
+        # invoice (Safaricom retries) would otherwise race the read-modify-write on
+        # amount_paid and corrupt the balance. The idempotency_key prevents a
+        # double Payment row; the lock prevents the lost-update on amount_paid.
+        with db_transaction.atomic():
+            # Find oldest unpaid invoice for this lease — locked for update.
+            invoice = (
+                Invoice.objects
+                .select_for_update()
+                .filter(lease=lease, status__in=[Invoice.Status.PENDING, Invoice.Status.OVERDUE, Invoice.Status.PARTIALLY_PAID])
+                .order_by("due_date")
+                .first()
+            )
 
-        if not invoice:
-            logger.warning("No open invoice for lease=%s receipt=%s", lease.id, receipt_number)
-            return
+            if not invoice:
+                logger.warning("No open invoice for lease=%s receipt=%s", lease.id, receipt_number)
+                return
 
-        # Record the payment
-        payment = Payment.objects.create(
-            invoice=invoice,
-            method=Payment.Method.MPESA,
-            status=Payment.Status.CONFIRMED,
-            amount=amount,
-            mpesa_receipt_number=receipt_number,
-            mpesa_phone=normalized_phone,
-            mpesa_account_ref=account_ref,
-            idempotency_key=idempotency_key,
-            paid_at=timezone.now(),
-        )
+            # Idempotency belt-and-suspenders: skip if this receipt already recorded.
+            if Payment.objects.filter(idempotency_key=idempotency_key).exists():
+                logger.info("Idempotent skip for receipt=%s", receipt_number)
+                return
 
-        # Update invoice totals
-        invoice.amount_paid += payment.amount
-        if invoice.amount_paid >= invoice.amount_due:
-            invoice.status = Invoice.Status.PAID
-        else:
-            invoice.status = Invoice.Status.PARTIALLY_PAID
-        invoice.save(update_fields=["amount_paid", "status"])
+            payment = Payment.objects.create(
+                invoice=invoice,
+                method=Payment.Method.MPESA,
+                status=Payment.Status.CONFIRMED,
+                amount=amount_dec,
+                mpesa_receipt_number=receipt_number,
+                mpesa_phone=normalized_phone,
+                mpesa_account_ref=account_ref,
+                idempotency_key=idempotency_key,
+                paid_at=timezone.now(),
+            )
 
-        # Send SMS receipt
+            invoice.amount_paid = (invoice.amount_paid or Decimal("0")) + payment.amount
+            invoice.status = (
+                Invoice.Status.PAID if invoice.amount_paid >= invoice.amount_due
+                else Invoice.Status.PARTIALLY_PAID
+            )
+            invoice.save(update_fields=["amount_paid", "status"])
+
+        # Send SMS receipt (after commit — task can be retried if the row isn't visible yet)
         from apps.notifications.tasks import send_payment_receipt_sms
         send_payment_receipt_sms.delay(payment.id)
 
@@ -77,7 +98,7 @@ def process_mpesa_payment(self, receipt_number, amount, account_ref, phone, idem
         cache.delete(f"dashboard:{lease.tenant.id}")
         cache.delete(f"dashboard:{lease.unit.property.owner.id}")
 
-        logger.info("Payment recorded: receipt=%s amount=%s invoice=%s", receipt_number, amount, invoice.invoice_number)
+        logger.info("Payment recorded: receipt=%s amount=%s invoice=%s", receipt_number, amount_dec, invoice.invoice_number)
 
     except Exception as exc:
         logger.error("Error processing M-Pesa payment %s: %s", receipt_number, exc)
@@ -88,9 +109,9 @@ def process_mpesa_payment(self, receipt_number, amount, account_ref, phone, idem
 def process_stk_callback(self, payload: dict):
     """
     Process an STK Push callback from Safaricom.
-    Uses select_for_update to prevent race conditions on duplicate callbacks.
+    Locks both the MpesaSTKRequest row AND the linked Invoice row so concurrent
+    callbacks/reconciles can't race the amount_paid update.
     """
-    from django.db import transaction as db_transaction
     from .models import MpesaSTKRequest, Payment
 
     stk = payload.get("Body", {}).get("stkCallback", {})
@@ -100,6 +121,9 @@ def process_stk_callback(self, payload: dict):
     if not checkout_id:
         logger.error("STK callback missing CheckoutRequestID: %s", payload)
         return
+
+    payment_id_for_sms = None
+    cache_keys_to_invalidate = []
 
     try:
         with db_transaction.atomic():
@@ -138,42 +162,64 @@ def process_stk_callback(self, payload: dict):
                 req.save()
 
                 # Record payment on linked invoice
-                if req.invoice:
+                if req.invoice_id:
                     idempotency_key = make_idempotency_key(receipt)
                     if not Payment.objects.filter(idempotency_key=idempotency_key).exists():
-                        from decimal import Decimal
+                        # WHY: re-fetch the invoice with select_for_update so two
+                        # callbacks for the SAME invoice (partial-pay scenarios with
+                        # different STK requests) serialize their amount_paid updates.
+                        # Without this, the STK row lock only protects this row;
+                        # the Invoice read-modify-write could still race.
+                        invoice = (
+                            Invoice.objects
+                            .select_for_update()
+                            .select_related("lease__tenant", "lease__unit__property__owner")
+                            .get(pk=req.invoice_id)
+                        )
+                        try:
+                            amount_dec = Decimal(str(paid_amount if paid_amount is not None else req.amount))
+                        except (TypeError, ValueError, InvalidOperation):
+                            logger.error("Invalid STK amount %r for receipt=%s", paid_amount, receipt)
+                            return
+
                         payment = Payment.objects.create(
-                            invoice=req.invoice,
+                            invoice=invoice,
                             method=Payment.Method.MPESA,
                             status=Payment.Status.CONFIRMED,
-                            amount=Decimal(str(paid_amount or req.amount)),
+                            amount=amount_dec,
                             mpesa_receipt_number=receipt,
                             mpesa_phone=phone,
                             mpesa_account_ref=req.account_ref,
                             idempotency_key=idempotency_key,
                             paid_at=timezone.now(),
                         )
-                        invoice = req.invoice
-                        invoice.amount_paid += payment.amount
+                        invoice.amount_paid = (invoice.amount_paid or Decimal("0")) + payment.amount
                         invoice.status = (
                             Invoice.Status.PAID if invoice.amount_paid >= invoice.amount_due
                             else Invoice.Status.PARTIALLY_PAID
                         )
                         invoice.save(update_fields=["amount_paid", "status"])
 
-                        from apps.notifications.tasks import send_payment_receipt_sms
-                        send_payment_receipt_sms.delay(payment.id)
-                        # Invalidate dashboard cache for tenant and landlord
-                        from django.core.cache import cache
-                        tenant = req.invoice.lease.tenant
-                        landlord = req.invoice.lease.unit.property.owner
-                        cache.delete(f"dashboard:{tenant.id}")
-                        cache.delete(f"dashboard:{landlord.id}")
+                        payment_id_for_sms = payment.id
+                        cache_keys_to_invalidate = [
+                            f"dashboard:{invoice.lease.tenant_id}",
+                            f"dashboard:{invoice.lease.unit.property.owner_id}",
+                        ]
             else:
                 # User cancelled (1032), timeout (1037), insufficient funds (1), etc.
                 req.status = MpesaSTKRequest.Status.CANCELLED if result_code == 1032 \
                     else MpesaSTKRequest.Status.FAILED
                 req.save()
+
+        # WHY: side effects (SMS dispatch, cache invalidation) happen AFTER commit.
+        # Otherwise the SMS task could see an uncommitted Payment row and crash.
+        if payment_id_for_sms:
+            from apps.notifications.tasks import send_payment_receipt_sms
+            send_payment_receipt_sms.delay(payment_id_for_sms)
+        if cache_keys_to_invalidate:
+            from django.core.cache import cache
+            for key in cache_keys_to_invalidate:
+                cache.delete(key)
 
     except Exception as exc:
         logger.error("Error processing STK callback for %s: %s", checkout_id, exc)
@@ -317,6 +363,13 @@ def generate_monthly_invoices():
     """
     Celery Beat task — runs on the 1st of each month.
     Creates invoices for all active leases.
+
+    WHY due_date = period_start + 7 days: invoices are generated on the 1st,
+    and `send_rent_reminders` fires reminders at -7d, -3d, 0d before due_date.
+    With due_date == period_start, the -7d and -3d reminders looked for invoices
+    that didn't exist yet. Pushing due to the 8th gives tenants a real grace
+    window AND aligns the reminder cadence with reality (reminder #1 lands the
+    same day the invoice arrives).
     """
     from apps.tenants.models import Lease
     from .models import Invoice
@@ -327,7 +380,7 @@ def generate_monthly_invoices():
     period_start = today.replace(day=1)
     next_month = (today.replace(day=28) + timedelta(days=4)).replace(day=1)
     period_end = next_month - timedelta(days=1)
-    due_date = period_start  # due on 1st
+    due_date = period_start + timedelta(days=7)  # 8th of the month — gives reminder window room
 
     active_leases = Lease.objects.filter(status=Lease.Status.ACTIVE).select_related("unit", "tenant")
     created = 0

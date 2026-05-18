@@ -30,10 +30,10 @@ class PropertySerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "owner", "created_at"]
 
-    def get_unit_count(self, obj):
+    def get_unit_count(self, obj) -> int:
         return len(obj.units.all())
 
-    def get_vacant_count(self, obj):
+    def get_vacant_count(self, obj) -> int:
         return len([u for u in obj.units.all() if u.status == "vacant"])
 
     def create(self, validated_data):

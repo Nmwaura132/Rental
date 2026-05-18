@@ -6,6 +6,7 @@ from .serializers import NotificationSerializer
 class NotificationListView(generics.ListAPIView):
     serializer_class = NotificationSerializer
     permission_classes = [permissions.IsAuthenticated]
+    queryset = Notification.objects.none()  # for drf-spectacular schema introspection
 
     def get_queryset(self):
         return Notification.objects.filter(recipient=self.request.user)

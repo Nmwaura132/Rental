@@ -1,6 +1,32 @@
 # Environment
+# WHY each pattern:
+#   .env             — gitignored explicitly (the .env pattern doesn't match dotfiles like `.env.production`)
+#   .env.*           — `.env.production`, `.env.local`, etc — these hold real credentials, NEVER commit
+#   *.env            — files ending in .env (e.g. `local.env`) — same reason
+#   !.env.example    — but DO keep the example/template file (no secrets, useful for new devs)
 .env
+.env.*
 *.env
+!.env.example
+
+# Claude Code / gstack — local-only state (per-machine), never push
+.claude/settings.local.json
+.gstack/
+
+# Local utility binaries dropped in repo root by tools
+/ngrok
+/curl
+
+# Large design artifacts (Stitch + Lodify exports). Keep out of git history;
+# store in a design folder, Google Drive, or S3 if they need versioning.
+/kasa.zip
+/kasa_export/
+/stitch_bento_rental_management.zip
+/stitch_bento_rental_management/
+/LoDi-Uppercase K integrated*.png
+
+# Flutter web build output (we ship Android; web builds are dev-only side trips)
+/mobile/web/
 
 # Python
 __pycache__/

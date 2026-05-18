@@ -18,6 +18,7 @@ from django.utils import timezone as dj_timezone
 from rest_framework import permissions, serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from drf_spectacular.utils import extend_schema
 
 from .models import BankPaymentNotification, Invoice, Payment
 from .bank_reconcile import reconcile_bank_notification
@@ -50,6 +51,7 @@ class BankNotificationSerializer(serializers.ModelSerializer):
 
 # ─── KCB Buni IPN ─────────────────────────────────────────────────────────────
 
+@extend_schema(exclude=True)  # bank IPN webhook
 class KCBIPNView(APIView):
     """
     POST /api/v1/payments/bank/kcb/ipn/
@@ -77,8 +79,13 @@ class KCBIPNView(APIView):
     def _verify_signature(self, request) -> bool:
         secret = getattr(settings, "KCB_IPN_SECRET", "")
         if not secret:
-            logger.warning("KCB_IPN_SECRET not set — skipping signature verification (dev mode).")
-            return True
+            # WHY: fail-CLOSED in production. An unset secret is a misconfiguration,
+            # not a license to accept unsigned payments. Allow skip only in DEBUG.
+            if settings.DEBUG:
+                logger.warning("KCB_IPN_SECRET not set — skipping signature verification (DEBUG only).")
+                return True
+            logger.error("KCB_IPN_SECRET not set in production — rejecting webhook.")
+            return False
         received_sig = request.headers.get("X-KCB-Signature", "")
         expected_sig = hmac.new(
             secret.encode(),
@@ -140,6 +147,7 @@ class KCBIPNView(APIView):
 
 # ─── Equity Jenga IPN ─────────────────────────────────────────────────────────
 
+@extend_schema(exclude=True)  # bank IPN webhook
 class EquityIPNView(APIView):
     """
     POST /api/v1/payments/bank/equity/ipn/
@@ -173,8 +181,12 @@ class EquityIPNView(APIView):
         username = getattr(settings, "JENGA_IPN_USERNAME", "")
         password = getattr(settings, "JENGA_IPN_PASSWORD", "")
         if not username or not password:
-            logger.warning("JENGA_IPN_USERNAME/PASSWORD not set — skipping auth (dev mode).")
-            return True
+            # WHY: fail-CLOSED in production. See KCBIPNView._verify_signature.
+            if settings.DEBUG:
+                logger.warning("JENGA_IPN credentials not set — skipping auth (DEBUG only).")
+                return True
+            logger.error("JENGA_IPN credentials not set in production — rejecting webhook.")
+            return False
         import base64
         auth_header = request.headers.get("Authorization", "")
         if not auth_header.startswith("Basic "):
@@ -241,6 +253,7 @@ class EquityIPNView(APIView):
 
 # ─── Equity Statement Poll ─────────────────────────────────────────────────────
 
+@extend_schema(exclude=True)  # admin-only manual trigger
 class EquityStatementPollView(APIView):
     """
     POST /api/v1/payments/bank/equity/poll/
@@ -265,6 +278,7 @@ class EquityStatementPollView(APIView):
 
 # ─── Bank Notification List ────────────────────────────────────────────────────
 
+@extend_schema(exclude=True)
 class BankNotificationListView(APIView):
     """
     GET /api/v1/payments/bank/notifications/?status=unmatched&bank=kcb
@@ -291,6 +305,7 @@ class BankNotificationListView(APIView):
 
 # ─── Manual Match ─────────────────────────────────────────────────────────────
 
+@extend_schema(exclude=True)
 class BankNotificationMatchView(APIView):
     """
     POST /api/v1/payments/bank/notifications/<id>/match/

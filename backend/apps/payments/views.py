@@ -1,12 +1,14 @@
 import logging
 import uuid
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
+from django.db import transaction as db_transaction
 from django.utils import timezone
 from django.db.models import Sum, Count, Q
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from drf_spectacular.utils import extend_schema
 
 from .models import Invoice, Payment, MpesaSTKRequest
 from .serializers import InvoiceSerializer, PaymentSerializer
@@ -35,6 +37,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     serializer_class = InvoiceSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ["status", "lease"]
+    queryset = Invoice.objects.none()  # for drf-spectacular schema introspection
 
     def get_queryset(self):
         return _invoice_qs_for_user(self.request.user).select_related(
@@ -70,6 +73,7 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = PaymentSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ["method", "status"]
+    queryset = Payment.objects.none()  # for drf-spectacular schema introspection
 
     def get_queryset(self):
         return _payment_qs_for_user(self.request.user).select_related(
@@ -100,20 +104,15 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # WHY: Decimal(str(...)) is the only safe path for money. float() loses
+        # precision (e.g. 1000.10 -> 1000.1000000000001 in IEEE-754) and that drift
+        # compounds across additions, breaking partial-payment ledgers.
         try:
-            amount = float(amount)
+            amount = Decimal(str(amount))
             if amount <= 0:
                 raise ValueError
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, InvalidOperation):
             return Response({"error": "Amount must be a positive number."}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            invoice = _invoice_qs_for_user(request.user).get(id=invoice_id)
-        except Invoice.DoesNotExist:
-            return Response({"error": "Invoice not found."}, status=status.HTTP_404_NOT_FOUND)
-
-        if invoice.status == Invoice.Status.PAID:
-            return Response({"error": "Invoice is already fully paid."}, status=status.HTTP_400_BAD_REQUEST)
 
         bank_fields = {}
         if method == Payment.Method.BANK:
@@ -124,26 +123,43 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
                 "bank_branch": (request.data.get("bank_branch") or "").strip() or None,
             }
 
-        payment = Payment.objects.create(
-            invoice=invoice,
-            method=method,
-            status=Payment.Status.CONFIRMED,
-            amount=amount,
-            idempotency_key=f"{method}:{uuid.uuid4().hex}",
-            paid_at=timezone.now(),
-            **bank_fields,
-        )
+        # WHY: lock the invoice row, then create the payment and update totals in
+        # one transaction. A landlord could otherwise record two payments at the
+        # same time and stomp each other's amount_paid update.
+        try:
+            with db_transaction.atomic():
+                invoice = (
+                    _invoice_qs_for_user(request.user)
+                    .select_for_update()
+                    .get(id=invoice_id)
+                )
 
-        invoice.amount_paid = (invoice.amount_paid or Decimal('0')) + Decimal(str(payment.amount))
-        invoice.status = (
-            Invoice.Status.PAID if invoice.amount_paid >= invoice.amount_due
-            else Invoice.Status.PARTIALLY_PAID
-        )
-        invoice.save(update_fields=["amount_paid", "status"])
+                if invoice.status == Invoice.Status.PAID:
+                    return Response({"error": "Invoice is already fully paid."}, status=status.HTTP_400_BAD_REQUEST)
+
+                payment = Payment.objects.create(
+                    invoice=invoice,
+                    method=method,
+                    status=Payment.Status.CONFIRMED,
+                    amount=amount,
+                    idempotency_key=f"{method}:{uuid.uuid4().hex}",
+                    paid_at=timezone.now(),
+                    **bank_fields,
+                )
+
+                invoice.amount_paid = (invoice.amount_paid or Decimal("0")) + payment.amount
+                invoice.status = (
+                    Invoice.Status.PAID if invoice.amount_paid >= invoice.amount_due
+                    else Invoice.Status.PARTIALLY_PAID
+                )
+                invoice.save(update_fields=["amount_paid", "status"])
+        except Invoice.DoesNotExist:
+            return Response({"error": "Invoice not found."}, status=status.HTTP_404_NOT_FOUND)
 
         return Response(PaymentSerializer(payment).data, status=status.HTTP_201_CREATED)
 
 
+@extend_schema(exclude=True)  # WHY: returns ad-hoc dict shaped by user role; document in handoff.md instead
 class DashboardStatsView(APIView):
     """Summary stats for the landlord / caretaker dashboard. Cached 60s per user."""
     permission_classes = [permissions.IsAuthenticated]
@@ -229,6 +245,7 @@ class DashboardStatsView(APIView):
         })
 
 
+@extend_schema(exclude=True)  # WHY: documented in handoff.md; ad-hoc body schema
 class MpesaSTKPushView(APIView):
     """
     POST /api/v1/payments/stk/push/
@@ -315,6 +332,7 @@ class MpesaSTKPushView(APIView):
         }, status=status.HTTP_200_OK)
 
 
+@extend_schema(exclude=True)  # WHY: Safaricom webhook — shape defined by Daraja, not us
 class MpesaSTKCallbackView(APIView):
     """
     POST /api/v1/payments/stk/callback/
@@ -332,6 +350,7 @@ class MpesaSTKCallbackView(APIView):
         return Response({"ResultCode": 0, "ResultDesc": "Accepted"})
 
 
+@extend_schema(exclude=True)
 class MpesaSTKStatusView(APIView):
     """
     GET /api/v1/payments/stk/status/?checkout_request_id=ws_CO_xxx
@@ -359,6 +378,7 @@ class MpesaSTKStatusView(APIView):
         })
 
 
+@extend_schema(exclude=True)  # admin-only, no client schema needed
 class MpesaRegisterC2BView(APIView):
     """
     POST /api/v1/payments/mpesa/register/
@@ -396,6 +416,7 @@ class MpesaRegisterC2BView(APIView):
         })
 
 
+@extend_schema(exclude=True)  # Safaricom webhook
 class MpesaC2BValidateView(APIView):
     permission_classes = [permissions.AllowAny]
 
@@ -404,6 +425,7 @@ class MpesaC2BValidateView(APIView):
         return Response({"ResultCode": 0, "ResultDesc": "Accepted"})
 
 
+@extend_schema(exclude=True)  # Safaricom webhook
 class MpesaC2BConfirmView(APIView):
     permission_classes = [permissions.AllowAny]
 
@@ -422,10 +444,13 @@ class MpesaC2BConfirmView(APIView):
             logger.warning("Duplicate M-Pesa webhook ignored: %s", receipt_number)
             return Response({"ResultCode": 0, "ResultDesc": "OK"})
 
+        # WHY: send amount as a JSON-safe string and let the Celery task parse it
+        # to Decimal. Passing float() here corrupts cents for any non-integer KES
+        # (Safaricom occasionally returns "100.50" depending on the tariff).
         from .tasks import process_mpesa_payment
         process_mpesa_payment.delay(
             receipt_number=receipt_number,
-            amount=float(amount),
+            amount=str(amount),
             account_ref=account_ref,
             phone=phone,
             idempotency_key=idempotency_key,

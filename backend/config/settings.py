@@ -12,7 +12,11 @@ environ.Env.read_env(BASE_DIR / ".env")
 SECRET_KEY = env("SECRET_KEY")
 DEBUG = env("DEBUG")
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
-ALLOWED_HOSTS += [".sslip.io"]  # allow all sslip.io subdomains for VPS staging
+# WHY: sslip.io is an open wildcard DNS service — accepting *.sslip.io in
+# production lets anyone with an sslip.io subdomain pointing at our VPS IP
+# pass Host header checks. Gate behind an env var so only the staging VPS opts in.
+if env.bool("ALLOW_SSLIP_HOSTS", default=False):
+    ALLOWED_HOSTS += [".sslip.io"]
 
 # ── Apps ──────────────────────────────────────────────────────────────────────
 DJANGO_APPS = [
@@ -232,6 +236,8 @@ REST_FRAMEWORK = {
         "user": "100/minute",
         "mpesa_webhook": "300/minute",   # Safaricom can burst; allow high rate
         "stk_push": "10/minute",         # Per user — prevent STK push spam
+        "password_reset": "3/minute",    # WHY: SMS costs real money; tight cap per IP
+        "register": "5/minute",          # WHY: slow bulk-account-creation abuse per IP
     },
 }
 

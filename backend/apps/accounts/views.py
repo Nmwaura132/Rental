@@ -1,8 +1,13 @@
+import logging
+
 from django.contrib.auth import get_user_model
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
+from drf_spectacular.utils import extend_schema
+
+logger = logging.getLogger(__name__)
 
 from .serializers import (
     CustomTokenObtainPairSerializer,
@@ -16,6 +21,7 @@ class TenantListView(generics.ListAPIView):
     """List all active tenants — for landlords/caretakers to select when creating leases."""
     serializer_class = UserProfileSerializer
     permission_classes = [permissions.IsAuthenticated]
+    queryset = User.objects.none()  # for drf-spectacular schema introspection
 
     def get_queryset(self):
         user = self.request.user
@@ -29,6 +35,8 @@ class TenantListView(generics.ListAPIView):
 class RegisterView(generics.CreateAPIView):
     serializer_class = UserRegistrationSerializer
     permission_classes = [permissions.AllowAny]
+    # WHY: cap account creation per IP to slow bulk-account abuse.
+    throttle_classes = [__import__('apps.core.throttles', fromlist=['RegisterThrottle']).RegisterThrottle]
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -53,6 +61,7 @@ class ProfileView(generics.RetrieveUpdateAPIView):
         return self.request.user
 
 
+@extend_schema(exclude=True)  # WHY: ad-hoc body, no serializer; flow documented in handoff.md
 class PasswordResetRequestView(APIView):
     """
     Step 1 — Request a reset OTP.
@@ -60,9 +69,12 @@ class PasswordResetRequestView(APIView):
     Returns same message regardless of whether the number exists (anti-enumeration).
     """
     permission_classes = [permissions.AllowAny]
+    # WHY: each request triggers a real SMS at ~Ksh 0.20-1.50. Without a tight
+    # cap per IP, an attacker could burn SMS credits at 20/min anon limit.
+    throttle_classes = [__import__('apps.core.throttles', fromlist=['PasswordResetThrottle']).PasswordResetThrottle]
 
     def post(self, request):
-        import random
+        import secrets
         from django.core.cache import cache
 
         phone_number = request.data.get("phone_number", "").strip()
@@ -81,7 +93,10 @@ class PasswordResetRequestView(APIView):
             # Same response to prevent phone enumeration
             return Response({"message": "If that number is registered, an OTP has been sent."})
 
-        otp = f"{random.randint(100000, 999999)}"
+        # WHY: secrets.randbelow is CSPRNG-backed; random.randint is Mersenne Twister
+        # whose state can be recovered from ~624 outputs, making OTPs predictable
+        # after enough password-reset requests.
+        otp = f"{secrets.randbelow(900000) + 100000}"
         cache_key = f"pwd_reset_otp:{phone_number}"
         cache.set(cache_key, otp, timeout=300)  # 5 minutes
 
@@ -94,12 +109,16 @@ class PasswordResetRequestView(APIView):
         return Response({"message": "If that number is registered, an OTP has been sent."})
 
 
+@extend_schema(exclude=True)
 class PasswordResetView(APIView):
     """
     Step 2 — Confirm OTP and set new password.
     POST { phone_number, otp, new_password }
     """
     permission_classes = [permissions.AllowAny]
+    # WHY: cap OTP-confirmation attempts per IP to slow brute-force of the
+    # 6-digit code window. Step 1 also caps requests so refilling OTPs is bounded.
+    throttle_classes = [__import__('apps.core.throttles', fromlist=['PasswordResetThrottle']).PasswordResetThrottle]
 
     def post(self, request):
         from django.core.cache import cache
@@ -145,6 +164,7 @@ class PasswordResetView(APIView):
         return Response({"message": "Password reset successfully."})
 
 
+@extend_schema(exclude=True)  # multipart upload — document in handoff.md
 class UploadIdPhotoView(APIView):
     """
     Upload tenant ID photo (front or back) to MinIO.
@@ -217,8 +237,15 @@ class UploadIdPhotoView(APIView):
             )
             endpoint = django_settings.AWS_S3_ENDPOINT_URL.rstrip("/")
             photo_url = f"{endpoint}/{bucket}/{key}"
-        except Exception as e:
-            return Response({"error": f"Upload failed: {e}"}, status=500)
+        except Exception:
+            # WHY: never expose boto3/S3 exception text to clients — it leaks
+            # endpoint URLs, bucket names, and IAM identifiers. Log the full
+            # traceback for ops; return a generic message.
+            logger.exception("ID photo upload failed (tenant=%s side=%s)", tenant_phone, side)
+            return Response(
+                {"error": "Upload failed. Please try again or contact support."},
+                status=500,
+            )
 
         # Save URL on tenant
         if side == "front":
@@ -230,6 +257,7 @@ class UploadIdPhotoView(APIView):
         return Response({"url": photo_url, "side": side})
 
 
+@extend_schema(exclude=True)
 class ChangePasswordView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 

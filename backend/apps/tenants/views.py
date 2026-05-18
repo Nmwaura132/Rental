@@ -14,19 +14,13 @@ class LeaseViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["status", "tenant", "unit"]
+    queryset = Lease.objects.none()  # for drf-spectacular schema introspection
 
-    def perform_create(self, serializer):
-        from apps.properties.models import Unit
-        lease = serializer.save()
-        lease.unit.status = Unit.Status.OCCUPIED
-        lease.unit.save(update_fields=["status"])
-
-    def perform_update(self, serializer):
-        from apps.properties.models import Unit
-        lease = serializer.save()
-        if lease.status in [Lease.Status.TERMINATED, Lease.Status.EXPIRED]:
-            lease.unit.status = Unit.Status.VACANT
-            lease.unit.save(update_fields=["status"])
+    # WHY: unit-status sync used to live here AND in apps.tenants.signals.sync_unit_status.
+    # Two sources of truth on the same write path is a maintenance trap — if either
+    # changes its logic, drift is invisible. The signal handles every Lease.save()
+    # (create + update via the API or admin or shell), so it stays as the single
+    # source of truth. Do not re-add perform_create / perform_update hooks.
 
     def get_queryset(self):
         user = self.request.user
@@ -57,9 +51,13 @@ class LeaseViewSet(viewsets.ModelViewSet):
         # ── 1. Generate PDF ───────────────────────────────────────────────────
         try:
             pdf_bytes = generate_lease_pdf(lease)
-        except Exception as e:
+        except Exception:
+            # WHY: don't echo reportlab/internal exception text to clients.
             logger.exception("PDF generation failed for lease %s", lease.id)
-            return Response({"detail": f"PDF generation failed: {e}"}, status=500)
+            return Response(
+                {"detail": "Lease PDF generation failed. Please try again or contact support."},
+                status=500,
+            )
 
         # ── 2. Upload to MinIO ────────────────────────────────────────────────
         filename = f"leases/lease_{lease.id}_{lease.tenant.phone_number.replace('+', '')}.pdf"
@@ -83,9 +81,13 @@ class LeaseViewSet(viewsets.ModelViewSet):
             # Build public URL (MinIO public bucket)
             endpoint = settings.AWS_S3_ENDPOINT_URL.rstrip("/")
             pdf_url = f"{endpoint}/{bucket}/{filename}"
-        except Exception as e:
+        except Exception:
+            # WHY: boto3 errors include endpoint URL + bucket name — never expose.
             logger.exception("MinIO upload failed for lease %s", lease.id)
-            return Response({"detail": f"File storage failed: {e}"}, status=500)
+            return Response(
+                {"detail": "File storage failed. Please try again or contact support."},
+                status=500,
+            )
 
         # ── 3. Save URL on the lease (notes field as lightweight store) ───────
         lease.notes = (lease.notes or "") + f"\n[Lease PDF] {pdf_url}"
@@ -139,6 +141,7 @@ class MaintenanceRequestViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["status", "priority"]
+    queryset = MaintenanceRequest.objects.none()  # for drf-spectacular schema introspection
 
     def get_queryset(self):
         user = self.request.user

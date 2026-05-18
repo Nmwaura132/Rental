@@ -10,6 +10,10 @@ class PropertyViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["county", "town"]
+    # WHY: drf-spectacular introspects with AnonymousUser. Setting an empty queryset
+    # at class level lets it derive the model for schema gen without invoking
+    # get_queryset() (which calls user.is_landlord and crashes on AnonymousUser).
+    queryset = Property.objects.none()
 
     def get_queryset(self):
         user = self.request.user
@@ -48,6 +52,7 @@ class PropertyChargeViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["property", "charge_type", "is_active"]
+    queryset = PropertyCharge.objects.none()  # for drf-spectacular schema introspection
 
     def get_queryset(self):
         user = self.request.user
@@ -63,6 +68,7 @@ class UnitViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["status", "unit_type", "property"]
+    queryset = Unit.objects.none()  # for drf-spectacular schema introspection
 
     def get_queryset(self):
         user = self.request.user

@@ -30,7 +30,9 @@ class InvoiceLineItemSerializer(serializers.ModelSerializer):
 
 
 class InvoiceSerializer(serializers.ModelSerializer):
-    balance = serializers.ReadOnlyField()
+    # WHY: explicit DecimalField so drf-spectacular can derive a concrete schema type.
+    # ReadOnlyField alone defaults to "string" because the source is a @property.
+    balance = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     payments = PaymentSerializer(many=True, read_only=True)
     line_items = InvoiceLineItemSerializer(many=True, required=False)
     tenant_name = serializers.CharField(source="lease.tenant.get_full_name", read_only=True)

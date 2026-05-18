@@ -44,14 +44,23 @@ def send_sms(self, recipient_id, message, phone_number=None):
         raise self.retry(exc=exc)
 
 
-@shared_task
-def send_payment_receipt_sms(payment_id):
-    """Send a payment receipt SMS to the tenant after M-Pesa confirmation."""
+@shared_task(bind=True, max_retries=5, default_retry_delay=5)
+def send_payment_receipt_sms(self, payment_id):
+    """Send a payment receipt SMS to the tenant after M-Pesa confirmation.
+
+    Retries when the Payment row isn't visible yet (the caller's transaction
+    may still be committing when this task dequeues) and on transient DB errors.
+    """
     from apps.payments.models import Payment
 
-    payment = Payment.objects.select_related(
-        "invoice__lease__tenant", "invoice__lease__unit__property"
-    ).get(id=payment_id)
+    try:
+        payment = Payment.objects.select_related(
+            "invoice__lease__tenant", "invoice__lease__unit__property"
+        ).get(id=payment_id)
+    except Payment.DoesNotExist as exc:
+        # WHY: parent transaction may not have committed before this task ran.
+        logger.warning("Payment %s not yet visible — retrying.", payment_id)
+        raise self.retry(exc=exc, countdown=5)
 
     tenant = payment.invoice.lease.tenant
     unit = payment.invoice.lease.unit

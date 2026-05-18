@@ -85,9 +85,10 @@ services:
   minio:
     image: minio/minio:latest
     restart: unless-stopped
+    # WHY: 9000 stays public for media serving; 9001 (admin console) is intentionally
+    # NOT exposed — access via `ssh -L 9001:localhost:9001 vps` only.
     ports:
       - "9000:9000"
-      - "9001:9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
@@ -113,8 +114,38 @@ services:
       /usr/bin/mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
       /usr/bin/mc mb local/${MINIO_BUCKET_NAME} 2>/dev/null || true;
       /usr/bin/mc anonymous set public local/${MINIO_BUCKET_NAME} || true;
+      /usr/bin/mc mb local/kasa-backups 2>/dev/null || true;
       exit 0;
       "
+
+  db-backup:
+    # WHY: mysql_data is a single Docker volume on a single VPS. Daily dump to
+    # a separate MinIO bucket gives one-machine-disaster recovery. For true
+    # off-site, an operator should run `mc mirror` from this bucket to an
+    # external S3 weekly.
+    build:
+      context: ./backup
+    restart: unless-stopped
+    environment:
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      BACKUP_BUCKET: kasa-backups
+      BACKUP_HOUR: "2"        # 02:00 EAT — quiet hour
+      RETENTION_DAYS: "30"
+      TZ: Africa/Nairobi
+    depends_on:
+      db:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   mysql_data:

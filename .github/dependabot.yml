@@ -1,0 +1,72 @@
+version: 2
+
+updates:
+  # Backend Python deps — weekly to keep CVE load manageable. We pin urllib3 for
+  # africastalking compat; Dependabot will still open PRs but reviewers must
+  # verify the SMS pipeline before merging that one.
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Africa/Nairobi
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - python
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      django-and-drf:
+        patterns:
+          - "Django"
+          - "djangorestframework*"
+          - "django-*"
+          - "drf-*"
+
+  # Flutter / Dart deps — same cadence.
+  - package-ecosystem: pub
+    directory: /mobile
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Africa/Nairobi
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - flutter
+    commit-message:
+      prefix: chore(deps)
+
+  # GitHub Actions themselves — keep workflow actions current.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: chore(ci)
+
+  # Docker base images — catches new Python/MySQL/Redis security patches.
+  - package-ecosystem: docker
+    directory: /backend
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    labels:
+      - dependencies
+      - docker
+
+  - package-ecosystem: docker
+    directory: /mysql
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 1
+    labels:
+      - dependencies
+      - docker

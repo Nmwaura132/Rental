@@ -1,5 +1,5 @@
 # ── Core ──────────────────────────────────────────────────────────────────────
-Django==5.1.4
+Django==5.1.15
 djangorestframework==3.15.2
 django-environ==0.11.2
 phonenumbers==8.13.52            # Python port of Google's libphonenumber
@@ -8,7 +8,7 @@ phonenumbers==8.13.52            # Python port of Google's libphonenumber
 mysqlclient==2.2.4               # C extension — fastest MySQL driver for Django
 
 # ── Auth & Security ───────────────────────────────────────────────────────────
-djangorestframework-simplejwt==5.3.1
+djangorestframework-simplejwt==5.5.1
 django-cors-headers==4.4.0
 django-axes==7.0.0               # brute-force login protection
 
@@ -23,14 +23,14 @@ django-filter==24.3              # filter querysets in DRF views
 drf-spectacular==0.27.2          # OpenAPI / Swagger docs
 
 # ── Payments ──────────────────────────────────────────────────────────────────
-requests==2.32.3                 # M-Pesa Daraja API calls
+requests==2.32.4                 # M-Pesa Daraja API calls — 2.32.4 fixes CVE-2024-47081
 urllib3==1.26.20                 # pin to version africastalking expects (avoids RequestsDependencyWarning)
 
 # ── Notifications ─────────────────────────────────────────────────────────────
 africastalking==1.2.5            # SMS + WhatsApp
 
 # ── Files & PDFs ─────────────────────────────────────────────────────────────
-Pillow==11.0.0                   # image handling (maintenance photos)
+Pillow==12.2.0                   # image handling (maintenance photos) — 12.x requires Python 3.10+ (we use 3.12)
 reportlab==4.2.5                 # PDF receipts & lease documents
 django-storages[s3]==1.14.4
 boto3==1.35.91
