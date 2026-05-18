@@ -34,6 +34,15 @@ class MaintenanceNoteSerializer(serializers.ModelSerializer):
 
 class MaintenanceRequestSerializer(serializers.ModelSerializer):
     notes_count = serializers.IntegerField(source="notes.count", read_only=True)
+    # WHY: the mobile list tile destructures these for the landlord-side badges
+    # (so the landlord knows whose unit a request belongs to without tapping in).
+    # The model only has `lease` FK; we expose the joined names as read-only
+    # fields so a single GET /maintenance/ call covers the list view's needs.
+    tenant_name = serializers.CharField(source="lease.tenant.get_full_name", read_only=True)
+    tenant_phone = serializers.CharField(source="lease.tenant.phone_number", read_only=True)
+    unit_number = serializers.CharField(source="lease.unit.unit_number", read_only=True)
+    property_name = serializers.CharField(source="lease.unit.property.name", read_only=True)
+    property_id = serializers.IntegerField(source="lease.unit.property_id", read_only=True)
 
     class Meta:
         model = MaintenanceRequest

@@ -57,15 +57,43 @@ class MaintenanceScreen extends ConsumerStatefulWidget {
   ConsumerState<MaintenanceScreen> createState() => _MaintenanceScreenState();
 }
 
+enum _SortBy { newest, oldest, priority }
+
 class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen> {
-  String? _selectedStatus; // null = show all
+  String? _selectedStatus;   // null = show all statuses
+  String? _selectedPriority; // null = show all priorities
+  _SortBy _sortBy = _SortBy.newest;
 
   bool get _isTenant =>
       ref.watch(userRoleProvider).valueOrNull == 'tenant';
 
+  // WHY: ordered priority severity for the priority-sort path. Higher index = more urgent.
+  static const _priorityRank = {'low': 0, 'medium': 1, 'high': 2, 'urgent': 3};
+
   List<Map<String, dynamic>> _filtered(List<Map<String, dynamic>> all) {
-    if (_selectedStatus == null) return all;
-    return all.where((r) => r['status'] == _selectedStatus).toList();
+    final filtered = all.where((r) {
+      if (_selectedStatus != null && r['status'] != _selectedStatus) return false;
+      if (_selectedPriority != null && r['priority'] != _selectedPriority) return false;
+      return true;
+    }).toList();
+
+    int compare(Map<String, dynamic> a, Map<String, dynamic> b) {
+      switch (_sortBy) {
+        case _SortBy.newest:
+          return (b['created_at'] ?? '').toString().compareTo((a['created_at'] ?? '').toString());
+        case _SortBy.oldest:
+          return (a['created_at'] ?? '').toString().compareTo((b['created_at'] ?? '').toString());
+        case _SortBy.priority:
+          final pa = _priorityRank[a['priority']] ?? -1;
+          final pb = _priorityRank[b['priority']] ?? -1;
+          if (pa != pb) return pb.compareTo(pa);
+          // Tie-break on newest first
+          return (b['created_at'] ?? '').toString().compareTo((a['created_at'] ?? '').toString());
+      }
+    }
+
+    filtered.sort(compare);
+    return filtered;
   }
 
   @override
@@ -97,6 +125,29 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen> {
                     ),
                   ),
                   const Spacer(),
+                  // Sort menu — newest / oldest / priority
+                  PopupMenuButton<_SortBy>(
+                    tooltip: 'Sort',
+                    icon: Icon(Icons.sort, size: 22, color: cs.onSurface),
+                    onSelected: (v) => setState(() => _sortBy = v),
+                    itemBuilder: (_) => [
+                      CheckedPopupMenuItem(
+                        value: _SortBy.newest,
+                        checked: _sortBy == _SortBy.newest,
+                        child: const Text('Newest first'),
+                      ),
+                      CheckedPopupMenuItem(
+                        value: _SortBy.oldest,
+                        checked: _sortBy == _SortBy.oldest,
+                        child: const Text('Oldest first'),
+                      ),
+                      CheckedPopupMenuItem(
+                        value: _SortBy.priority,
+                        checked: _sortBy == _SortBy.priority,
+                        child: const Text('Priority (high → low)'),
+                      ),
+                    ],
+                  ),
                   IconButton(
                     icon: Icon(Icons.refresh, size: 22, color: cs.onSurface),
                     tooltip: 'Refresh',
@@ -110,10 +161,10 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen> {
             ),
           ),
 
-          // ── Filter chips ─────────────────────────────────────────────────
+          // ── Status filter chips ──────────────────────────────────────────
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
             child: Row(
               children: [
                 GestureDetector(
@@ -133,6 +184,39 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen> {
                       label: e.value.toUpperCase(),
                       variant: _selectedStatus == e.key
                           ? KasaChipVariant.secondary
+                          : KasaChipVariant.neutral,
+                    ),
+                  ),
+                )),
+              ],
+            ),
+          ),
+
+          // ── Priority filter chips ───────────────────────────────────────
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+            child: Row(
+              children: [
+                GestureDetector(
+                  onTap: () => setState(() => _selectedPriority = null),
+                  child: KasaChip(
+                    label: 'ANY',
+                    // WHY: tertiary variant distinguishes the priority row from
+                    // the status row visually without adding a label.
+                    variant: _selectedPriority == null
+                        ? KasaChipVariant.tertiary
+                        : KasaChipVariant.neutral,
+                  ),
+                ),
+                ..._priorityLabels.entries.map((e) => Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: GestureDetector(
+                    onTap: () => setState(() => _selectedPriority = e.key),
+                    child: KasaChip(
+                      label: e.value.toUpperCase(),
+                      variant: _selectedPriority == e.key
+                          ? KasaChipVariant.tertiary
                           : KasaChipVariant.neutral,
                     ),
                   ),
@@ -184,7 +268,7 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen> {
                     itemBuilder: (_, i) => _RequestTile(
                       request: items[i],
                       isLandlord: !_isTenant,
-                      onStatusChanged: () => ref.invalidate(maintenanceListProvider),
+                      onChanged: () => ref.invalidate(maintenanceListProvider),
                     ),
                   ),
                 );
@@ -233,12 +317,14 @@ class _RequestTile extends ConsumerWidget {
   const _RequestTile({
     required this.request,
     required this.isLandlord,
-    required this.onStatusChanged,
+    required this.onChanged,
   });
 
   final Map<String, dynamic> request;
   final bool isLandlord;
-  final VoidCallback onStatusChanged;
+  // WHY: fires after edit/delete/status-change in the detail sheet. Drives
+  // the parent's ref.invalidate(maintenanceListProvider) so the list refreshes.
+  final VoidCallback onChanged;
 
   static final _fmt = DateFormat('dd MMM y');
 
@@ -250,6 +336,8 @@ class _RequestTile extends ConsumerWidget {
     final title = request['title'] as String? ?? '—';
     final description = request['description'] as String? ?? '';
     final rawDate = request['created_at'];
+    final tenantName = request['tenant_name'] as String? ?? '';
+    final unitNumber = request['unit_number'] as String? ?? '';
 
     String dateStr = '';
     if (rawDate != null) {
@@ -277,9 +365,10 @@ class _RequestTile extends ConsumerWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
       child: GestureDetector(
-        onTap: isLandlord
-            ? () => _showStatusUpdateDialog(context, ref)
-            : () => _showDetailSheet(context),
+        // WHY: both roles now open the full detail sheet. Landlord-specific
+        // actions (status change, edit, delete) live INSIDE the sheet so the
+        // landlord sees full context (description, photo, replies) before acting.
+        onTap: () => _showDetailSheet(context),
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(KasaRadius.md),
@@ -332,6 +421,24 @@ class _RequestTile extends ConsumerWidget {
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                   ),
+                                  // WHY: landlord needs to know whose unit a request is for
+                                  // without tapping in. Tenants only see their own requests
+                                  // so this row would be redundant for them.
+                                  if (isLandlord && (tenantName.isNotEmpty || unitNumber.isNotEmpty)) ...[
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      [
+                                        if (unitNumber.isNotEmpty) 'UNIT $unitNumber',
+                                        if (tenantName.isNotEmpty) tenantName.toUpperCase(),
+                                      ].join(' · '),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: GoogleFonts.spaceGrotesk(
+                                        fontSize: 10, fontWeight: FontWeight.w700,
+                                        letterSpacing: 0.04, color: cs.kasaTextSub,
+                                      ),
+                                    ),
+                                  ],
                                   if (description.isNotEmpty) ...[
                                     const SizedBox(height: 3),
                                     Text(
@@ -383,21 +490,10 @@ class _RequestTile extends ConsumerWidget {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) => _DetailSheet(request: request),
-    );
-  }
-
-  void _showStatusUpdateDialog(BuildContext context, WidgetRef ref) {
-    final currentStatus = request['status'] as String? ?? 'open';
-    showDialog(
-      context: context,
-      useRootNavigator: true,
-      builder: (ctx) => _StatusUpdateDialog(
-        requestId: request['id'] as int,
-        currentStatus: currentStatus,
-        title: request['title'] as String? ?? '',
-        ref: ref,
-        onUpdated: onStatusChanged,
+      builder: (_) => _DetailSheet(
+        request: request,
+        isLandlord: isLandlord,
+        onChanged: onChanged,
       ),
     );
   }
@@ -461,11 +557,18 @@ class _PriorityBadge extends StatelessWidget {
   }
 }
 
-// ─── Detail Sheet (tenant — view + reply) ────────────────────────────────────
+// ─── Detail Sheet (shared — landlord sees edit/delete/status; tenant sees view+reply) ─
 
 class _DetailSheet extends ConsumerStatefulWidget {
-  const _DetailSheet({required this.request});
+  const _DetailSheet({
+    required this.request,
+    required this.isLandlord,
+    required this.onChanged,
+  });
+
   final Map<String, dynamic> request;
+  final bool isLandlord;
+  final VoidCallback onChanged;
 
   @override
   ConsumerState<_DetailSheet> createState() => _DetailSheetState();
@@ -479,22 +582,147 @@ class _DetailSheetState extends ConsumerState<_DetailSheet> {
   bool _sending = false;
   final _replyCtrl = TextEditingController();
 
+  // Local mutable snapshot of the request so edits + status changes reflect
+  // immediately without waiting for the parent list to refresh.
+  late Map<String, dynamic> _req;
+  bool _saving = false;          // PATCH-in-flight flag for edit/status mutations
+  bool _editMode = false;        // landlord-only inline edit
+  TextEditingController? _editTitleCtrl;
+  TextEditingController? _editDescCtrl;
+  String? _editPriority;
+
   @override
   void initState() {
     super.initState();
+    _req = Map<String, dynamic>.from(widget.request);
     _loadNotes();
   }
 
   @override
   void dispose() {
     _replyCtrl.dispose();
+    _editTitleCtrl?.dispose();
+    _editDescCtrl?.dispose();
     super.dispose();
+  }
+
+  // ── Landlord-only mutations ────────────────────────────────────────────────
+
+  Future<void> _patch(Map<String, dynamic> body) async {
+    setState(() => _saving = true);
+    try {
+      final dio = ref.read(dioProvider);
+      final resp = await dio.patch(
+        '/api/v1/tenants/maintenance/${_req['id']}/',
+        data: body,
+      );
+      if (mounted) {
+        setState(() {
+          _req = Map<String, dynamic>.from(resp.data as Map);
+          _saving = false;
+        });
+        widget.onChanged();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(apiError(e)),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ));
+      }
+    }
+  }
+
+  Future<void> _changeStatus(String newStatus) async {
+    if (newStatus == _req['status']) return;
+    await _patch({'status': newStatus});
+  }
+
+  void _enterEditMode() {
+    setState(() {
+      _editMode = true;
+      _editTitleCtrl = TextEditingController(text: _req['title'] as String? ?? '');
+      _editDescCtrl = TextEditingController(text: _req['description'] as String? ?? '');
+      _editPriority = _req['priority'] as String? ?? 'medium';
+    });
+  }
+
+  void _cancelEdit() {
+    setState(() {
+      _editMode = false;
+      _editTitleCtrl?.dispose();
+      _editDescCtrl?.dispose();
+      _editTitleCtrl = null;
+      _editDescCtrl = null;
+      _editPriority = null;
+    });
+  }
+
+  Future<void> _saveEdit() async {
+    final title = _editTitleCtrl?.text.trim() ?? '';
+    final desc = _editDescCtrl?.text.trim() ?? '';
+    if (title.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Title cannot be empty.')),
+      );
+      return;
+    }
+    await _patch({
+      'title': title,
+      'description': desc,
+      'priority': _editPriority,
+    });
+    if (mounted) _cancelEdit();
+  }
+
+  Future<void> _confirmDelete() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      useRootNavigator: true,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete request?'),
+        content: Text(
+          'This will permanently delete "${_req['title'] ?? 'this request'}" and all its replies.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(ctx).colorScheme.error,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _saving = true);
+    try {
+      final dio = ref.read(dioProvider);
+      await dio.delete('/api/v1/tenants/maintenance/${_req['id']}/');
+      widget.onChanged();
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(apiError(e)),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ));
+      }
+    }
   }
 
   Future<void> _loadNotes() async {
     try {
       final dio = ref.read(dioProvider);
-      final resp = await dio.get('/api/v1/tenants/maintenance/${widget.request['id']}/notes/');
+      final resp = await dio.get('/api/v1/tenants/maintenance/${_req['id']}/notes/');
       final data = resp.data;
       if (mounted) {
         setState(() {
@@ -514,7 +742,7 @@ class _DetailSheetState extends ConsumerState<_DetailSheet> {
     try {
       final dio = ref.read(dioProvider);
       final resp = await dio.post(
-        '/api/v1/tenants/maintenance/${widget.request['id']}/notes/',
+        '/api/v1/tenants/maintenance/${_req['id']}/notes/',
         data: {'body': body},
       );
       _replyCtrl.clear();
@@ -546,12 +774,15 @@ class _DetailSheetState extends ConsumerState<_DetailSheet> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final status = widget.request['status'] as String? ?? '';
-    final priority = widget.request['priority'] as String? ?? '';
-    final rawPhoto = widget.request['photo'];
+    final status = _req['status'] as String? ?? '';
+    final priority = _req['priority'] as String? ?? '';
+    final rawPhoto = _req['photo'];
     final photoUrl = rawPhoto != null && (rawPhoto as String).isNotEmpty
         ? AppConstants.resolveMediaUrl(rawPhoto)
         : null;
+    final tenantName = _req['tenant_name'] as String? ?? '';
+    final unitNumber = _req['unit_number'] as String? ?? '';
+    final propertyName = _req['property_name'] as String? ?? '';
 
     return DraggableScrollableSheet(
       expand: false,
@@ -577,27 +808,167 @@ class _DetailSheetState extends ConsumerState<_DetailSheet> {
               controller: scrollCtrl,
               padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
               children: [
-                // Title + badges
-                Text(
-                  (widget.request['title'] as String? ?? '—').toUpperCase(),
-                  style: GoogleFonts.spaceGrotesk(
-                    fontSize: 20, fontWeight: FontWeight.w700,
-                    letterSpacing: -0.4, color: cs.onSurface,
-                  ),
+                // Title row — title + landlord overflow menu (edit/delete)
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: _editMode
+                          ? TextField(
+                              controller: _editTitleCtrl,
+                              style: GoogleFonts.spaceGrotesk(
+                                fontSize: 20, fontWeight: FontWeight.w700,
+                                letterSpacing: -0.4, color: cs.onSurface,
+                              ),
+                              decoration: const InputDecoration(
+                                isDense: true,
+                                hintText: 'Title',
+                              ),
+                            )
+                          : Text(
+                              (_req['title'] as String? ?? '—').toUpperCase(),
+                              style: GoogleFonts.spaceGrotesk(
+                                fontSize: 20, fontWeight: FontWeight.w700,
+                                letterSpacing: -0.4, color: cs.onSurface,
+                              ),
+                            ),
+                    ),
+                    if (widget.isLandlord && !_editMode)
+                      PopupMenuButton<String>(
+                        tooltip: 'More',
+                        icon: Icon(Icons.more_vert, color: cs.onSurface),
+                        onSelected: (v) {
+                          switch (v) {
+                            case 'edit':
+                              _enterEditMode();
+                              break;
+                            case 'delete':
+                              _confirmDelete();
+                              break;
+                          }
+                        },
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(
+                            value: 'edit',
+                            child: ListTile(
+                              leading: Icon(Icons.edit_outlined),
+                              title: Text('Edit'),
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                          ),
+                          PopupMenuItem(
+                            value: 'delete',
+                            child: ListTile(
+                              leading: Icon(Icons.delete_outline),
+                              title: Text('Delete'),
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 10),
+
+                // Tenant / unit context — landlord only (tenant already knows their own)
+                if (widget.isLandlord && (tenantName.isNotEmpty || unitNumber.isNotEmpty)) ...[
+                  Text(
+                    [
+                      if (propertyName.isNotEmpty) propertyName,
+                      if (unitNumber.isNotEmpty) 'Unit $unitNumber',
+                      if (tenantName.isNotEmpty) tenantName,
+                    ].join(' · '),
+                    style: GoogleFonts.spaceGrotesk(
+                      fontSize: 12, fontWeight: FontWeight.w600,
+                      letterSpacing: 0.02, color: cs.kasaTextSub,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                ],
+
+                // Status + priority badges (read-only display; status is editable below)
                 Row(children: [
                   _StatusBadge(status: status),
                   const SizedBox(width: 8),
-                  _PriorityBadge(priority: priority),
+                  if (_editMode)
+                    // In edit mode, priority becomes a dropdown
+                    DropdownButton<String>(
+                      value: _editPriority,
+                      underline: const SizedBox.shrink(),
+                      items: _priorityLabels.entries
+                          .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
+                          .toList(),
+                      onChanged: (v) {
+                        if (v != null) setState(() => _editPriority = v);
+                      },
+                    )
+                  else
+                    _PriorityBadge(priority: priority),
                 ]),
                 const SizedBox(height: 14),
 
+                // Landlord-only status switcher
+                if (widget.isLandlord && !_editMode) ...[
+                  const _SectionLabel('CHANGE STATUS'),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: _statusLabels.entries.map((e) {
+                      final selected = e.key == status;
+                      return GestureDetector(
+                        onTap: _saving || selected ? null : () => _changeStatus(e.key),
+                        child: KasaChip(
+                          label: e.value.toUpperCase(),
+                          variant: selected
+                              ? KasaChipVariant.secondary
+                              : KasaChipVariant.neutral,
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  if (_saving) ...[
+                    const SizedBox(height: 6),
+                    LinearProgressIndicator(minHeight: 2, color: cs.secondary),
+                  ],
+                  const SizedBox(height: 14),
+                ],
+
                 // Description
-                if ((widget.request['description'] as String? ?? '').isNotEmpty) ...[
+                if (_editMode) ...[
                   const _SectionLabel('DESCRIPTION'),
                   const SizedBox(height: 4),
-                  Text(widget.request['description'] as String,
+                  TextField(
+                    controller: _editDescCtrl,
+                    maxLines: 4,
+                    style: GoogleFonts.inter(fontSize: 14, color: cs.onSurface),
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      hintText: 'Describe the issue',
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: _saving ? null : _cancelEdit,
+                        child: const Text('Cancel'),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: _saving ? null : _saveEdit,
+                        child: _saving
+                            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Text('Save'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                ] else if ((_req['description'] as String? ?? '').isNotEmpty) ...[
+                  const _SectionLabel('DESCRIPTION'),
+                  const SizedBox(height: 4),
+                  Text(_req['description'] as String,
                       style: GoogleFonts.inter(fontSize: 14, color: cs.onSurface)),
                   const SizedBox(height: 14),
                 ],
@@ -649,8 +1020,13 @@ class _DetailSheetState extends ConsumerState<_DetailSheet> {
                 ],
 
                 // Meta
-                _InfoRow(label: 'Submitted', value: _fmtDate(widget.request['created_at'])),
-                _InfoRow(label: 'Last updated', value: _fmtDate(widget.request['updated_at'])),
+                _InfoRow(label: 'Submitted', value: _fmtDate(_req['created_at'])),
+                _InfoRow(label: 'Last updated', value: _fmtDate(_req['updated_at'])),
+                // WHY: only show resolved_at when the API actually returned one
+                // (not "—" placeholder). Closed/in_progress requests with no
+                // resolved_at would otherwise show a misleading dash.
+                if (_req['resolved_at'] != null)
+                  _InfoRow(label: 'Resolved', value: _fmtDate(_req['resolved_at'])),
                 const SizedBox(height: 20),
 
                 // Notes / replies
@@ -854,105 +1230,6 @@ class _InfoRow extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-// ─── Status Update Dialog (landlord/caretaker) ────────────────────────────────
-
-class _StatusUpdateDialog extends ConsumerStatefulWidget {
-  const _StatusUpdateDialog({
-    required this.requestId,
-    required this.currentStatus,
-    required this.title,
-    required this.ref,
-    required this.onUpdated,
-  });
-
-  final int requestId;
-  final String currentStatus;
-  final String title;
-  final WidgetRef ref;
-  final VoidCallback onUpdated;
-
-  @override
-  ConsumerState<_StatusUpdateDialog> createState() => _StatusUpdateDialogState();
-}
-
-class _StatusUpdateDialogState extends ConsumerState<_StatusUpdateDialog> {
-  late String _status;
-  bool _loading = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _status = widget.currentStatus;
-  }
-
-  Future<void> _save() async {
-    setState(() => _loading = true);
-    try {
-      final dio = ref.read(dioProvider);
-      await dio.patch(
-        '/api/v1/tenants/maintenance/${widget.requestId}/',
-        data: {'status': _status},
-      );
-      widget.onUpdated();
-      if (mounted) Navigator.pop(context);
-    } catch (e) {
-      setState(() => _loading = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(apiError(e)),
-          backgroundColor: Theme.of(context).colorScheme.error,
-        ));
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Update Status'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(widget.title,
-              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-          const SizedBox(height: 14),
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: _statusLabels.entries.map(
-              (e) => RadioListTile<String>(
-                title: Text(e.value),
-                value: e.key,
-                // ignore: deprecated_member_use
-                groupValue: _status,
-                // ignore: deprecated_member_use
-                onChanged: (v) => setState(() => _status = v!),
-                dense: true,
-                visualDensity: VisualDensity.compact,
-              ),
-            ).toList(),
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: _loading ? null : () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        ElevatedButton(
-          onPressed: _loading || _status == widget.currentStatus ? null : _save,
-          child: _loading
-              ? const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2))
-              : const Text('Update'),
-        ),
-      ],
     );
   }
 }
