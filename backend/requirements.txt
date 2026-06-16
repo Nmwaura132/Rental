@@ -13,7 +13,7 @@ django-cors-headers==4.4.0
 django-axes==7.0.0               # brute-force login protection
 
 # ── Async tasks ───────────────────────────────────────────────────────────────
-celery==5.4.0
+celery==5.6.3
 django-celery-beat==2.7.0        # DB-backed periodic tasks
 django-celery-results==2.5.1     # store task results in DB
 redis==5.2.0
