@@ -31,7 +31,7 @@ africastalking==1.2.5            # SMS + WhatsApp
 
 # ── Files & PDFs ─────────────────────────────────────────────────────────────
 Pillow==12.2.0                   # image handling (maintenance photos) — 12.x requires Python 3.10+ (we use 3.12)
-reportlab==4.2.5                 # PDF receipts & lease documents
+reportlab==4.5.1                 # PDF receipts & lease documents
 django-storages[s3]==1.14.4
 boto3==1.35.91
 
