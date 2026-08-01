@@ -21,10 +21,19 @@ class Lease(models.Model):
     deposit_paid = models.BooleanField(default=False)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE, db_index=True)
     notes = models.TextField(blank=True)
+    document_key = models.CharField(max_length=500, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = "leases"
+        constraints = [
+            models.CheckConstraint(condition=models.Q(rent_amount__gt=0), name="lease_rent_positive"),
+            models.CheckConstraint(condition=models.Q(deposit_amount__gte=0), name="lease_deposit_nonnegative"),
+            models.CheckConstraint(
+                condition=models.Q(end_date__isnull=True) | models.Q(end_date__gte=models.F("start_date")),
+                name="lease_dates_valid",
+            ),
+        ]
         indexes = [
             models.Index(fields=["status", "end_date"]),
             models.Index(fields=["tenant", "status"]),
@@ -34,7 +43,7 @@ class Lease(models.Model):
         return f"{self.tenant} — {self.unit} ({self.status})"
 
 
-from apps.core.storage_backends import PublicMediaStorage
+from apps.core.storage_backends import private_media_storage
 
 class MaintenanceRequest(models.Model):
     class Priority(models.TextChoices):
@@ -57,11 +66,7 @@ class MaintenanceRequest(models.Model):
         upload_to="maintenance/%Y/%m/",
         null=True,
         blank=True,
-        # WHY: pass the class, not an instance. S3Boto3Storage's __init__
-        # constructs a boto3 client eagerly — instantiating at class-definition
-        # time crashes Django import when S3 env vars are unset (e.g. in CI
-        # or during migrations without S3 wired). Django instantiates lazily.
-        storage=PublicMediaStorage if settings.USE_S3 else None,
+        storage=private_media_storage,
     )
     resolved_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

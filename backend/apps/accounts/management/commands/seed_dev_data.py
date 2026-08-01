@@ -2,8 +2,7 @@
 Management command: seed the database with dev users and sample data.
 
 Creates:
-  • Landlord  — +254100368483 / DevLandlord@2026
-  • Tenant     — +254722870015 / DevTenant@2026  (Nelson Mwaura)
+  • Landlord and tenant credentials from DEV_* environment variables
   • Property   — Whitty Apartments (Nairobi)
   • 4 Units    — 101, 102, 201, 202
   • Lease      — Nelson in Unit 201, active Jan–Dec 2026
@@ -14,11 +13,12 @@ Safe to re-run — uses get_or_create throughout.
 Usage:
     docker compose exec api python manage.py seed_dev_data
 """
+import os
 import uuid
 from datetime import date
 from decimal import Decimal
 
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.contrib.auth import get_user_model
 from django.conf import settings
 
@@ -33,9 +33,30 @@ class Command(BaseCommand):
         from apps.tenants.models import Lease
         from apps.payments.models import Invoice, Payment
 
+        if not settings.DEBUG:
+            raise CommandError("seed_dev_data is disabled when DEBUG=False.")
+
+        credential_names = (
+            "DEV_LANDLORD_PHONE",
+            "DEV_LANDLORD_PASSWORD",
+            "DEV_TENANT_PHONE",
+            "DEV_TENANT_PASSWORD",
+        )
+        credentials = {name: os.environ.get(name) for name in credential_names}
+        missing = [name for name, value in credentials.items() if not value]
+        if missing:
+            raise CommandError(
+                f"Missing required development credentials: {', '.join(missing)}"
+            )
+
+        landlord_phone = credentials["DEV_LANDLORD_PHONE"]
+        landlord_password = credentials["DEV_LANDLORD_PASSWORD"]
+        tenant_phone = credentials["DEV_TENANT_PHONE"]
+        tenant_password = credentials["DEV_TENANT_PASSWORD"]
+
         # ── Users ─────────────────────────────────────────────────────────────
         landlord, created = User.objects.get_or_create(
-            phone_number="+254100368483",
+            phone_number=landlord_phone,
             defaults={
                 "first_name": "Dev",
                 "last_name": "Landlord",
@@ -45,14 +66,15 @@ class Command(BaseCommand):
             },
         )
         if created:
-            landlord.set_password("DevLandlord@2026")
-            landlord.save(update_fields=["password"])
-            self.stdout.write(self.style.SUCCESS("  Created landlord +254100368483"))
+            self.stdout.write(self.style.SUCCESS("  Created landlord development account"))
         else:
             self.stdout.write("  Landlord already exists — skipping")
 
+        landlord.set_password(landlord_password)
+        landlord.save(update_fields=["password"])
+
         tenant, created = User.objects.get_or_create(
-            phone_number="+254722870015",
+            phone_number=tenant_phone,
             defaults={
                 "first_name": "Nelson",
                 "last_name": "Mwaura",
@@ -61,13 +83,14 @@ class Command(BaseCommand):
             },
         )
         if created:
-            tenant.set_password("DevTenant@2026")
-            tenant.save(update_fields=["password"])
-            self.stdout.write(self.style.SUCCESS("  Created tenant +254722870015 (Nelson Mwaura)"))
+            self.stdout.write(self.style.SUCCESS("  Created tenant development account"))
         else:
             self.stdout.write("  Tenant already exists — skipping")
 
         # ── Property ──────────────────────────────────────────────────────────
+        tenant.set_password(tenant_password)
+        tenant.save(update_fields=["password"])
+
         prop, created = Property.objects.get_or_create(
             owner=landlord,
             name="Whitty Apartments",
@@ -167,7 +190,7 @@ class Command(BaseCommand):
                 status=Payment.Status.CONFIRMED,
                 amount=Decimal("28000"),
                 mpesa_receipt_number="PB12345678",
-                mpesa_phone="+254722870015",
+                mpesa_phone=tenant_phone,
                 mpesa_account_ref=unit201.unit_number,
                 idempotency_key=f"seed:feb2026:{uuid.uuid4().hex[:8]}",
                 paid_at=date(2026, 2, 6),
@@ -187,7 +210,7 @@ class Command(BaseCommand):
                 status=Payment.Status.CONFIRMED,
                 amount=Decimal("28000"),
                 mpesa_receipt_number="PB23456789",
-                mpesa_phone="+254722870015",
+                mpesa_phone=tenant_phone,
                 mpesa_account_ref=unit201.unit_number,
                 idempotency_key=f"seed:mar2026:{uuid.uuid4().hex[:8]}",
                 paid_at=date(2026, 3, 6),
@@ -206,9 +229,6 @@ class Command(BaseCommand):
         self.stdout.write("")
         self.stdout.write(self.style.SUCCESS("Dev data seeded successfully."))
         self.stdout.write("")
-        self.stdout.write(f"  Landlord : +254100368483 / DevLandlord@2026")
-        self.stdout.write(f"  Tenant   : +254722870015 / DevTenant@2026 (Nelson Mwaura)")
         self.stdout.write(f"  Property : Whitty Apartments")
         self.stdout.write(f"  Unit     : {unit201.unit_number} (Nelson's unit)")
         self.stdout.write("")
-        self.stdout.write("  Update dev_picker_screen.dart sublabel to match the unit number above if needed.")

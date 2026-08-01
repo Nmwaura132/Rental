@@ -43,6 +43,13 @@ class User(AbstractBaseUser, PermissionsMixin):
     first_name = models.CharField(max_length=60)
     last_name = models.CharField(max_length=60)
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.TENANT, db_index=True)
+    created_by = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        related_name="created_accounts",
+        null=True,
+        blank=True,
+    )
 
     # Kenya-specific identity fields
     national_id = models.CharField(max_length=20, blank=True, null=True, unique=True)
@@ -59,8 +66,8 @@ class User(AbstractBaseUser, PermissionsMixin):
     )
 
     # ID document photos (stored in MinIO)
-    id_front_photo = models.URLField(max_length=500, blank=True, null=True)
-    id_back_photo = models.URLField(max_length=500, blank=True, null=True)
+    id_front_photo = models.CharField(max_length=500, blank=True, null=True)
+    id_back_photo = models.CharField(max_length=500, blank=True, null=True)
 
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)

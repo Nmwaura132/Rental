@@ -1,12 +1,28 @@
 import logging
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
+from apps.core.permissions import IsLandlordOrCaretaker
 from .models import Lease, MaintenanceRequest, MaintenanceNote
 from .serializers import LeaseSerializer, MaintenanceRequestSerializer, MaintenanceNoteSerializer
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_managed_tenant(user, tenant):
+    if tenant.created_by_id == user.id:
+        return
+    if user.is_landlord and tenant.leases.filter(
+        unit__property__owner=user
+    ).exists():
+        return
+    if user.is_caretaker and tenant.leases.filter(
+        unit__property__caretaker=user
+    ).exists():
+        return
+    raise PermissionDenied("You cannot create leases for this tenant.")
 
 
 class LeaseViewSet(viewsets.ModelViewSet):
@@ -15,6 +31,11 @@ class LeaseViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["status", "tenant", "unit"]
     queryset = Lease.objects.none()  # for drf-spectacular schema introspection
+
+    def get_permissions(self):
+        if self.action in {"create", "update", "partial_update", "destroy", "send_lease"}:
+            return [IsLandlordOrCaretaker()]
+        return super().get_permissions()
 
     # WHY: unit-status sync used to live here AND in apps.tenants.signals.sync_unit_status.
     # Two sources of truth on the same write path is a maintenance trap — if either
@@ -25,14 +46,49 @@ class LeaseViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         if user.is_landlord:
-            return Lease.objects.filter(
+            queryset = Lease.objects.filter(
                 unit__property__owner=user
             ).select_related("tenant", "unit", "unit__property", "unit__property__owner")
-        if user.is_caretaker:
-            return Lease.objects.filter(
+        elif user.is_caretaker:
+            queryset = Lease.objects.filter(
                 unit__property__caretaker=user
             ).select_related("tenant", "unit", "unit__property", "unit__property__owner")
-        return Lease.objects.filter(tenant=user).select_related("unit", "unit__property", "unit__property__owner")
+        else:
+            queryset = Lease.objects.filter(tenant=user).select_related(
+                "unit", "unit__property", "unit__property__owner"
+            )
+        property_id = self.request.query_params.get("property")
+        if property_id:
+            queryset = queryset.filter(unit__property_id=property_id)
+        return queryset
+
+    def perform_create(self, serializer):
+        unit = serializer.validated_data["unit"]
+        tenant = serializer.validated_data["tenant"]
+        user = self.request.user
+        if user.is_landlord and unit.property.owner_id != user.id:
+            raise PermissionDenied("You cannot create leases for this unit.")
+        if user.is_caretaker and unit.property.caretaker_id != user.id:
+            raise PermissionDenied("You cannot create leases for this unit.")
+        _validate_managed_tenant(user, tenant)
+        serializer.save()
+
+    def perform_update(self, serializer):
+        unit = serializer.validated_data.get("unit", serializer.instance.unit)
+        tenant = serializer.validated_data.get("tenant", serializer.instance.tenant)
+        user = self.request.user
+        if user.is_landlord and unit.property.owner_id != user.id:
+            raise PermissionDenied("You cannot move leases to this unit.")
+        if user.is_caretaker and unit.property.caretaker_id != user.id:
+            raise PermissionDenied("You cannot move leases to this unit.")
+        _validate_managed_tenant(user, tenant)
+        serializer.save()
+
+    def destroy(self, request, *args, **kwargs):
+        return Response(
+            {"error": "Leases are legal records and cannot be deleted."},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
 
     @action(detail=True, methods=["post"], url_path="send-lease")
     def send_lease(self, request, pk=None):
@@ -41,10 +97,8 @@ class LeaseViewSet(viewsets.ModelViewSet):
         Returns the download URL.
         """
         from .lease_pdf import generate_lease_pdf
-        from django.core.files.base import ContentFile
         from django.conf import settings
-        import boto3
-        from botocore.client import Config
+        from apps.core.private_files import private_file_url, upload_private_file
 
         lease = self.get_object()
 
@@ -62,25 +116,13 @@ class LeaseViewSet(viewsets.ModelViewSet):
         # ── 2. Upload to MinIO ────────────────────────────────────────────────
         filename = f"leases/lease_{lease.id}_{lease.tenant.phone_number.replace('+', '')}.pdf"
         try:
-            s3 = boto3.client(
-                "s3",
-                endpoint_url=settings.AWS_S3_ENDPOINT_URL,
-                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-                config=Config(signature_version="s3v4"),
-                region_name="us-east-1",
+            stored_key = upload_private_file(
+                filename,
+                pdf_bytes,
+                "application/pdf",
+                content_disposition=f'attachment; filename="lease_{lease.id}.pdf"',
             )
-            bucket = settings.AWS_STORAGE_BUCKET_NAME
-            s3.put_object(
-                Bucket=bucket,
-                Key=filename,
-                Body=pdf_bytes,
-                ContentType="application/pdf",
-                ContentDisposition=f'attachment; filename="lease_{lease.id}.pdf"',
-            )
-            # Build public URL (MinIO public bucket)
-            endpoint = settings.AWS_S3_ENDPOINT_URL.rstrip("/")
-            pdf_url = f"{endpoint}/{bucket}/{filename}"
+            pdf_url = private_file_url(stored_key)
         except Exception:
             # WHY: boto3 errors include endpoint URL + bucket name — never expose.
             logger.exception("MinIO upload failed for lease %s", lease.id)
@@ -90,8 +132,8 @@ class LeaseViewSet(viewsets.ModelViewSet):
             )
 
         # ── 3. Save URL on the lease (notes field as lightweight store) ───────
-        lease.notes = (lease.notes or "") + f"\n[Lease PDF] {pdf_url}"
-        lease.save(update_fields=["notes"])
+        lease.document_key = stored_key
+        lease.save(update_fields=["document_key"])
 
         # ── 4. SMS the tenant with the download link ──────────────────────────
         sms_sent = False
@@ -143,6 +185,11 @@ class MaintenanceRequestViewSet(viewsets.ModelViewSet):
     filterset_fields = ["status", "priority"]
     queryset = MaintenanceRequest.objects.none()  # for drf-spectacular schema introspection
 
+    def get_permissions(self):
+        if self.action in {"update", "partial_update", "destroy"}:
+            return [IsLandlordOrCaretaker()]
+        return super().get_permissions()
+
     def get_queryset(self):
         user = self.request.user
         if user.is_landlord:
@@ -154,6 +201,17 @@ class MaintenanceRequestViewSet(viewsets.ModelViewSet):
                 lease__unit__property__caretaker=user
             ).select_related("lease__tenant", "lease__unit")
         return MaintenanceRequest.objects.filter(lease__tenant=user).select_related("lease__unit__property")
+
+    def perform_create(self, serializer):
+        lease = serializer.validated_data["lease"]
+        user = self.request.user
+        if user.is_tenant and lease.tenant_id != user.id:
+            raise PermissionDenied("You cannot create requests for this lease.")
+        if user.is_landlord and lease.unit.property.owner_id != user.id:
+            raise PermissionDenied("You cannot create requests for this lease.")
+        if user.is_caretaker and lease.unit.property.caretaker_id != user.id:
+            raise PermissionDenied("You cannot create requests for this lease.")
+        serializer.save()
 
     @action(detail=True, methods=["get", "post"], url_path="notes")
     def notes(self, request, pk=None):

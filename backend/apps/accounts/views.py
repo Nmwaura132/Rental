@@ -1,6 +1,8 @@
 import logging
 
 from django.contrib.auth import get_user_model
+from django.db.models import Q
+from django.utils.crypto import constant_time_compare, salted_hmac
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -8,6 +10,8 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from drf_spectacular.utils import extend_schema
 
 logger = logging.getLogger(__name__)
+
+from apps.core.permissions import IsLandlordOrCaretaker
 
 from .serializers import (
     CustomTokenObtainPairSerializer,
@@ -17,6 +21,27 @@ from .serializers import (
 
 User = get_user_model()
 
+
+def _password_reset_otp_digest(phone_number, otp):
+    return salted_hmac(
+        "kasa.password-reset",
+        f"{phone_number}:{otp}",
+    ).hexdigest()
+
+
+def _tenant_qs_for_manager(user):
+    tenants = User.objects.filter(role=User.Role.TENANT, is_active=True)
+    if user.is_landlord:
+        return tenants.filter(
+            Q(created_by=user) | Q(leases__unit__property__owner=user)
+        ).distinct()
+    if user.is_caretaker:
+        return tenants.filter(
+            Q(created_by=user) | Q(leases__unit__property__caretaker=user)
+        ).distinct()
+    return User.objects.none()
+
+
 class TenantListView(generics.ListAPIView):
     """List all active tenants — for landlords/caretakers to select when creating leases."""
     serializer_class = UserProfileSerializer
@@ -24,24 +49,21 @@ class TenantListView(generics.ListAPIView):
     queryset = User.objects.none()  # for drf-spectacular schema introspection
 
     def get_queryset(self):
-        user = self.request.user
-        if not (user.is_landlord or user.is_caretaker):
-            return User.objects.none()
-        return User.objects.filter(role=User.Role.TENANT, is_active=True).order_by(
+        return _tenant_qs_for_manager(self.request.user).order_by(
             "first_name", "last_name"
         )
 
 
 class RegisterView(generics.CreateAPIView):
     serializer_class = UserRegistrationSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [IsLandlordOrCaretaker]
     # WHY: cap account creation per IP to slow bulk-account abuse.
     throttle_classes = [__import__('apps.core.throttles', fromlist=['RegisterThrottle']).RegisterThrottle]
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        user = serializer.save()
+        user = serializer.save(created_by=request.user)
         return Response(
             {"message": "Account created successfully.", "phone_number": user.phone_number},
             status=status.HTTP_201_CREATED,
@@ -98,7 +120,12 @@ class PasswordResetRequestView(APIView):
         # after enough password-reset requests.
         otp = f"{secrets.randbelow(900000) + 100000}"
         cache_key = f"pwd_reset_otp:{phone_number}"
-        cache.set(cache_key, otp, timeout=300)  # 5 minutes
+        cache.set(
+            cache_key,
+            _password_reset_otp_digest(phone_number, otp),
+            timeout=300,
+        )
+        cache.delete(f"pwd_reset_attempts:{phone_number}")
 
         from apps.notifications.tasks import send_sms
         send_sms.delay(
@@ -142,7 +169,16 @@ class PasswordResetView(APIView):
         cache_key = f"pwd_reset_otp:{phone_number}"
         stored_otp = cache.get(cache_key)
 
-        if not stored_otp or stored_otp != otp:
+        submitted_digest = _password_reset_otp_digest(phone_number, otp)
+        if not stored_otp or not constant_time_compare(stored_otp, submitted_digest):
+            attempts_key = f"pwd_reset_attempts:{phone_number}"
+            try:
+                attempts = cache.incr(attempts_key)
+            except ValueError:
+                cache.set(attempts_key, 1, timeout=300)
+                attempts = 1
+            if attempts >= 5:
+                cache.delete(cache_key)
             return Response({"error": "Invalid or expired OTP."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
@@ -158,9 +194,13 @@ class PasswordResetView(APIView):
         except ValidationError as e:
             return Response({"error": e.messages}, status=status.HTTP_400_BAD_REQUEST)
 
+        consume_key = f"pwd_reset_consumed:{phone_number}:{stored_otp}"
+        if not cache.add(consume_key, True, timeout=300):
+            return Response({"error": "Invalid or expired OTP."}, status=status.HTTP_400_BAD_REQUEST)
+        cache.delete(cache_key)
+        cache.delete(f"pwd_reset_attempts:{phone_number}")
         user.set_password(new_password)
         user.save(update_fields=["password"])
-        cache.delete(cache_key)  # invalidate OTP immediately after use
         return Response({"message": "Password reset successfully."})
 
 
@@ -175,9 +215,7 @@ class UploadIdPhotoView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-        import boto3
-        from botocore.client import Config
-        from django.conf import settings as django_settings
+        from apps.core.private_files import private_file_url, upload_private_file
 
         user = request.user
         if not (user.is_landlord or user.is_caretaker):
@@ -208,7 +246,7 @@ class UploadIdPhotoView(APIView):
         try:
             from apps.core.utils.phone import normalize_phone
             tenant_phone = normalize_phone(tenant_phone)
-            tenant = User.objects.get(phone_number=tenant_phone, role=User.Role.TENANT)
+            tenant = _tenant_qs_for_manager(user).get(phone_number=tenant_phone)
         except User.DoesNotExist:
             return Response({"error": "Tenant not found."}, status=404)
         except Exception:
@@ -220,23 +258,12 @@ class UploadIdPhotoView(APIView):
         key = f"tenant-ids/{phone_clean}/id_{side}.{ext}"
 
         try:
-            s3 = boto3.client(
-                "s3",
-                endpoint_url=django_settings.AWS_S3_ENDPOINT_URL,
-                aws_access_key_id=django_settings.AWS_ACCESS_KEY_ID,
-                aws_secret_access_key=django_settings.AWS_SECRET_ACCESS_KEY,
-                config=Config(signature_version="s3v4"),
-                region_name="us-east-1",
-            )
-            bucket = django_settings.AWS_STORAGE_BUCKET_NAME
-            s3.upload_fileobj(
-                photo,
-                bucket,
+            stored_key = upload_private_file(
                 key,
-                ExtraArgs={"ContentType": photo.content_type},
+                photo,
+                photo.content_type,
             )
-            endpoint = django_settings.AWS_S3_ENDPOINT_URL.rstrip("/")
-            photo_url = f"{endpoint}/{bucket}/{key}"
+            photo_url = private_file_url(stored_key)
         except Exception:
             # WHY: never expose boto3/S3 exception text to clients — it leaks
             # endpoint URLs, bucket names, and IAM identifiers. Log the full
@@ -247,11 +274,10 @@ class UploadIdPhotoView(APIView):
                 status=500,
             )
 
-        # Save URL on tenant
         if side == "front":
-            tenant.id_front_photo = photo_url
+            tenant.id_front_photo = stored_key
         else:
-            tenant.id_back_photo = photo_url
+            tenant.id_back_photo = stored_key
         tenant.save(update_fields=[f"id_{side}_photo"])
 
         return Response({"url": photo_url, "side": side})

@@ -47,7 +47,7 @@ class Unit(models.Model):
         MAINTENANCE = "maintenance", "Under Maintenance"
 
     property = models.ForeignKey(Property, on_delete=models.CASCADE, related_name="units")
-    unit_number = models.CharField(max_length=20)
+    unit_number = models.CharField(max_length=20, unique=True)
     unit_type = models.CharField(max_length=20, choices=UnitType.choices)
     rent_amount = models.DecimalField(max_digits=10, decimal_places=2)
     deposit_amount = models.DecimalField(max_digits=10, decimal_places=2)
@@ -57,8 +57,11 @@ class Unit(models.Model):
 
     class Meta:
         db_table = "units"
-        unique_together = ("property", "unit_number")
         ordering = ["floor", "unit_number"]
+        constraints = [
+            models.CheckConstraint(condition=models.Q(rent_amount__gt=0), name="unit_rent_positive"),
+            models.CheckConstraint(condition=models.Q(deposit_amount__gte=0), name="unit_deposit_nonnegative"),
+        ]
         indexes = [
             models.Index(fields=["property", "status"]),
         ]
@@ -103,6 +106,9 @@ class PropertyCharge(models.Model):
         db_table = "property_charges"
         unique_together = ("property", "charge_type")
         ordering = ["charge_type"]
+        constraints = [
+            models.CheckConstraint(condition=models.Q(unit_price__gte=0), name="property_charge_price_nonnegative"),
+        ]
 
     def __str__(self):
         return f"{self.property.name} — {self.name}"

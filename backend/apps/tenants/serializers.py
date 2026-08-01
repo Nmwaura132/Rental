@@ -8,6 +8,7 @@ class LeaseSerializer(serializers.ModelSerializer):
     unit_number = serializers.CharField(source="unit.unit_number", read_only=True)
     property_name = serializers.CharField(source="unit.property.name", read_only=True)
     property_id = serializers.IntegerField(source="unit.property_id", read_only=True)
+    lease_pdf_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Lease
@@ -15,8 +16,20 @@ class LeaseSerializer(serializers.ModelSerializer):
             "id", "tenant", "unit", "start_date", "end_date", "rent_amount",
             "deposit_amount", "deposit_paid", "status", "notes", "created_at",
             "tenant_name", "tenant_phone", "unit_number", "property_name", "property_id",
+            "lease_pdf_url",
         ]
-        read_only_fields = ["id", "created_at"]
+        read_only_fields = ["id", "document_key", "lease_pdf_url", "created_at"]
+
+    def get_lease_pdf_url(self, obj) -> str | None:
+        if not obj.document_key:
+            return None
+        from django.conf import settings
+
+        if not settings.USE_S3:
+            return None
+        from apps.core.private_files import private_file_url
+
+        return private_file_url(obj.document_key)
 
 
 class MaintenanceNoteSerializer(serializers.ModelSerializer):
@@ -33,6 +46,7 @@ class MaintenanceNoteSerializer(serializers.ModelSerializer):
 
 
 class MaintenanceRequestSerializer(serializers.ModelSerializer):
+    photo = serializers.ImageField(required=False, allow_null=True)
     notes_count = serializers.IntegerField(source="notes.count", read_only=True)
     # WHY: the mobile list tile destructures these for the landlord-side badges
     # (so the landlord knows whose unit a request belongs to without tapping in).
@@ -48,3 +62,20 @@ class MaintenanceRequestSerializer(serializers.ModelSerializer):
         model = MaintenanceRequest
         fields = "__all__"
         read_only_fields = ["id", "created_at", "updated_at", "resolved_at"]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["photo"] = self._photo_url(instance)
+        return data
+
+    def _photo_url(self, obj):
+        if not obj.photo:
+            return None
+        from django.conf import settings
+
+        if settings.USE_S3:
+            from apps.core.private_files import private_file_url
+
+            return private_file_url(obj.photo.name)
+        request = self.context.get("request")
+        return request.build_absolute_uri(obj.photo.url) if request else obj.photo.url

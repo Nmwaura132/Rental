@@ -12,14 +12,19 @@ import hashlib
 import hmac
 import logging
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
 from django.utils import timezone as dj_timezone
 from rest_framework import permissions, serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.pagination import PageNumberPagination
 from drf_spectacular.utils import extend_schema
+from django.db.models import Q
 
+from apps.core.permissions import IsLandlord
+from apps.properties.models import Unit
 from .models import BankPaymentNotification, Invoice, Payment
 from .bank_reconcile import reconcile_bank_notification
 
@@ -107,19 +112,24 @@ class KCBIPNView(APIView):
             return Response({"ResultCode": 1, "ResultDesc": "Missing TransID"}, status=400)
 
         # Idempotency — ignore if already stored
-        if BankPaymentNotification.objects.filter(transaction_ref=transaction_ref).exists():
+        if BankPaymentNotification.objects.filter(
+            bank=BankPaymentNotification.Bank.KCB,
+            transaction_ref=transaction_ref,
+        ).exists():
             logger.info("KCB IPN duplicate ignored: %s", transaction_ref)
             return Response({"ResultCode": 0, "ResultDesc": "OK"})
 
         try:
             amount_str = str(data.get("TransAmount", "0")).replace(",", "")
-            amount = float(amount_str)
+            amount = Decimal(amount_str)
+            if amount <= 0:
+                raise ValueError
             trans_time = data.get("TransTime", "")  # "20250101120000"
             credited_at = (
                 datetime.strptime(trans_time, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
                 if trans_time else dj_timezone.now()
             )
-        except (ValueError, TypeError) as exc:
+        except (ValueError, TypeError, InvalidOperation) as exc:
             logger.error("KCB IPN parse error: %s — payload: %s", exc, data)
             return Response({"ResultCode": 1, "ResultDesc": "Parse error"}, status=400)
 
@@ -219,18 +229,23 @@ class EquityIPNView(APIView):
             logger.info("Equity IPN: non-success status %s for %s — ignored.", txn_status, transaction_ref)
             return Response({"status": "IGNORED"})
 
-        if BankPaymentNotification.objects.filter(transaction_ref=transaction_ref).exists():
+        if BankPaymentNotification.objects.filter(
+            bank=BankPaymentNotification.Bank.EQUITY,
+            transaction_ref=transaction_ref,
+        ).exists():
             logger.info("Equity IPN duplicate ignored: %s", transaction_ref)
             return Response({"status": "OK"})
 
         try:
-            amount = float(txn.get("amount", 0))
+            amount = Decimal(str(txn.get("amount", 0)))
+            if amount <= 0:
+                raise ValueError
             date_str = txn.get("date", "")
             credited_at = (
                 datetime.fromisoformat(date_str).replace(tzinfo=timezone.utc)
                 if date_str else dj_timezone.now()
             )
-        except (ValueError, TypeError) as exc:
+        except (ValueError, TypeError, InvalidOperation) as exc:
             logger.error("Equity IPN parse error: %s — payload: %s", exc, data)
             return Response({"status": "PARSE_ERROR"}, status=400)
 
@@ -261,12 +276,9 @@ class EquityStatementPollView(APIView):
     Useful to catch direct EFTs that didn't come through the Jenga payment gateway.
     Body (optional): { "date_from": "YYYY-MM-DD", "date_to": "YYYY-MM-DD" }
     """
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsLandlord]
 
     def post(self, request):
-        if not request.user.is_landlord:
-            return Response({"error": "Landlords only."}, status=403)
-
         date_from = request.data.get("date_from")
         date_to = request.data.get("date_to")
 
@@ -284,13 +296,20 @@ class BankNotificationListView(APIView):
     GET /api/v1/payments/bank/notifications/?status=unmatched&bank=kcb
     List bank payment notifications. Landlords / caretakers only.
     """
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsLandlord]
 
     def get(self, request):
-        if request.user.is_tenant:
-            return Response({"error": "Not allowed."}, status=403)
-
-        qs = BankPaymentNotification.objects.all()
+        owned_invoice_refs = Invoice.objects.filter(
+            lease__unit__property__owner=request.user
+        ).values("invoice_number")
+        owned_unit_refs = Unit.objects.filter(
+            property__owner=request.user
+        ).values("unit_number")
+        qs = BankPaymentNotification.objects.filter(
+            Q(payment__invoice__lease__unit__property__owner=request.user)
+            | Q(payment_ref__in=owned_invoice_refs)
+            | Q(payment_ref__in=owned_unit_refs)
+        ).distinct()
 
         status_filter = request.query_params.get("status")
         bank_filter = request.query_params.get("bank")
@@ -299,8 +318,12 @@ class BankNotificationListView(APIView):
         if bank_filter:
             qs = qs.filter(bank=bank_filter)
 
-        qs = qs.select_related("payment__invoice").order_by("-credited_at")[:100]
-        return Response(BankNotificationSerializer(qs, many=True).data)
+        qs = qs.select_related("payment__invoice").order_by("-credited_at")
+        paginator = PageNumberPagination()
+        page = paginator.paginate_queryset(qs, request, view=self)
+        return paginator.get_paginated_response(
+            BankNotificationSerializer(page, many=True).data
+        )
 
 
 # ─── Manual Match ─────────────────────────────────────────────────────────────
@@ -312,14 +335,21 @@ class BankNotificationMatchView(APIView):
     Manually link an UNMATCHED notification to a specific invoice.
     Body: { "invoice_id": 42 }
     """
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsLandlord]
 
     def post(self, request, pk):
-        if request.user.is_tenant:
-            return Response({"error": "Not allowed."}, status=403)
-
+        owned_invoice_refs = Invoice.objects.filter(
+            lease__unit__property__owner=request.user
+        ).values("invoice_number")
+        owned_unit_refs = Unit.objects.filter(
+            property__owner=request.user
+        ).values("unit_number")
         try:
-            notification = BankPaymentNotification.objects.get(pk=pk)
+            notification = BankPaymentNotification.objects.filter(
+                Q(payment__invoice__lease__unit__property__owner=request.user)
+                | Q(payment_ref__in=owned_invoice_refs)
+                | Q(payment_ref__in=owned_unit_refs)
+            ).distinct().get(pk=pk)
         except BankPaymentNotification.DoesNotExist:
             return Response({"error": "Notification not found."}, status=404)
 
@@ -339,11 +369,7 @@ class BankNotificationMatchView(APIView):
         if invoice.status == Invoice.Status.PAID:
             return Response({"error": "Invoice is already fully paid."}, status=400)
 
-        # Override payment_ref to force a match through reconcile
-        notification.payment_ref = invoice.invoice_number
-        notification.save(update_fields=["payment_ref"])
-
-        matched = reconcile_bank_notification(notification)
+        matched = reconcile_bank_notification(notification, invoice_id=invoice.pk)
         if matched:
             return Response({"message": "Matched successfully.", "invoice_number": invoice.invoice_number})
         return Response({"error": "Could not reconcile — check amounts."}, status=400)

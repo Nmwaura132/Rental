@@ -37,13 +37,34 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
+    id_front_photo_url = serializers.SerializerMethodField()
+    id_back_photo_url = serializers.SerializerMethodField()
+
     class Meta:
         model = User
         fields = [
             "id", "phone_number", "email", "first_name", "last_name",
             "role", "national_id", "kra_pin", "is_verified", "date_joined",
+            "id_front_photo_url", "id_back_photo_url",
         ]
         read_only_fields = ["id", "phone_number", "role", "is_verified", "date_joined"]
+
+    def get_id_front_photo_url(self, obj) -> str | None:
+        return self._document_url(obj.id_front_photo)
+
+    def get_id_back_photo_url(self, obj) -> str | None:
+        return self._document_url(obj.id_back_photo)
+
+    def _document_url(self, key):
+        if not key:
+            return None
+        from django.conf import settings
+
+        if not settings.USE_S3:
+            return None
+        from apps.core.private_files import private_file_url
+
+        return private_file_url(key)
 
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):

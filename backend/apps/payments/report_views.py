@@ -5,38 +5,25 @@ GET /api/v1/payments/reports/?type=<pnl|aged|ledger|rent_roll>&...
 import logging
 from datetime import date
 
-import boto3
-from botocore.config import Config
-from django.conf import settings
 from django.utils import timezone
 from rest_framework import permissions
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from drf_spectacular.utils import extend_schema
 
+from apps.core.private_files import private_file_url, upload_private_file
+
 logger = logging.getLogger(__name__)
 
 
 def _upload_pdf(pdf_bytes: bytes, key: str) -> str:
-    """Upload PDF bytes to MinIO; return public URL."""
-    s3 = boto3.client(
-        "s3",
-        endpoint_url=settings.AWS_S3_ENDPOINT_URL,
-        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-        config=Config(signature_version="s3v4"),
-        region_name="us-east-1",
+    stored_key = upload_private_file(
+        key,
+        pdf_bytes,
+        "application/pdf",
+        content_disposition=f'inline; filename="{key.split("/")[-1]}"',
     )
-    bucket = settings.AWS_STORAGE_BUCKET_NAME
-    s3.put_object(
-        Bucket=bucket,
-        Key=key,
-        Body=pdf_bytes,
-        ContentType="application/pdf",
-        ContentDisposition=f'inline; filename="{key.split("/")[-1]}"',
-    )
-    endpoint = settings.AWS_S3_ENDPOINT_URL.rstrip("/")
-    return f"{endpoint}/{bucket}/{key}"
+    return private_file_url(stored_key)
 
 
 @extend_schema(exclude=True)  # WHY: ad-hoc query params; returns PDF URL — document in handoff.md
@@ -124,18 +111,18 @@ class ReportsView(APIView):
         from .reports import generate_monthly_pnl
         try:
             pdf_bytes = generate_monthly_pnl(prop, year, month)
-        except Exception as e:
+        except Exception:
             logger.exception("P&L PDF generation failed")
-            return Response({"error": f"PDF generation failed: {e}"}, status=500)
+            return Response({"error": "PDF generation failed."}, status=500)
 
         import calendar
         month_label = date(year, month, 1).strftime('%Y-%m')
         key = f"reports/pnl/{prop.id}/{month_label}.pdf"
         try:
             pdf_url = _upload_pdf(pdf_bytes, key)
-        except Exception as e:
+        except Exception:
             logger.exception("MinIO upload failed for P&L report")
-            return Response({"error": f"File upload failed: {e}"}, status=500)
+            return Response({"error": "File upload failed."}, status=500)
 
         return Response({
             "pdf_url": pdf_url,
@@ -155,17 +142,17 @@ class ReportsView(APIView):
         from .reports import generate_aged_receivables
         try:
             pdf_bytes = generate_aged_receivables(prop)
-        except Exception as e:
+        except Exception:
             logger.exception("Aged receivables PDF generation failed")
-            return Response({"error": f"PDF generation failed: {e}"}, status=500)
+            return Response({"error": "PDF generation failed."}, status=500)
 
         today = date.today().strftime('%Y-%m-%d')
         key = f"reports/aged/{prop.id}/{today}.pdf"
         try:
             pdf_url = _upload_pdf(pdf_bytes, key)
-        except Exception as e:
+        except Exception:
             logger.exception("MinIO upload failed for aged receivables report")
-            return Response({"error": f"File upload failed: {e}"}, status=500)
+            return Response({"error": "File upload failed."}, status=500)
 
         return Response({
             "pdf_url": pdf_url,
@@ -185,20 +172,22 @@ class ReportsView(APIView):
             date_to = date.fromisoformat(date_to_str) if date_to_str else date.today()
         except ValueError:
             return Response({"error": "date_from and date_to must be ISO dates (YYYY-MM-DD)."}, status=400)
+        if date_from > date_to:
+            return Response({"error": "date_from cannot be after date_to."}, status=400)
 
         from .reports import generate_tenant_ledger
         try:
             pdf_bytes = generate_tenant_ledger(lease, date_from, date_to)
-        except Exception as e:
+        except Exception:
             logger.exception("Tenant ledger PDF generation failed")
-            return Response({"error": f"PDF generation failed: {e}"}, status=500)
+            return Response({"error": "PDF generation failed."}, status=500)
 
         key = f"reports/ledger/{lease.id}/{date_from}_{date_to}.pdf"
         try:
             pdf_url = _upload_pdf(pdf_bytes, key)
-        except Exception as e:
+        except Exception:
             logger.exception("MinIO upload failed for ledger report")
-            return Response({"error": f"File upload failed: {e}"}, status=500)
+            return Response({"error": "File upload failed."}, status=500)
 
         return Response({
             "pdf_url": pdf_url,
@@ -219,17 +208,17 @@ class ReportsView(APIView):
         from .reports import generate_rent_roll
         try:
             pdf_bytes = generate_rent_roll(prop)
-        except Exception as e:
+        except Exception:
             logger.exception("Rent roll PDF generation failed")
-            return Response({"error": f"PDF generation failed: {e}"}, status=500)
+            return Response({"error": "PDF generation failed."}, status=500)
 
         today = date.today().strftime('%Y-%m-%d')
         key = f"reports/rent_roll/{prop.id}/{today}.pdf"
         try:
             pdf_url = _upload_pdf(pdf_bytes, key)
-        except Exception as e:
+        except Exception:
             logger.exception("MinIO upload failed for rent roll report")
-            return Response({"error": f"File upload failed: {e}"}, status=500)
+            return Response({"error": "File upload failed."}, status=500)
 
         return Response({
             "pdf_url": pdf_url,

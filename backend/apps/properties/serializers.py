@@ -36,6 +36,11 @@ class PropertySerializer(serializers.ModelSerializer):
     def get_vacant_count(self, obj) -> int:
         return len([u for u in obj.units.all() if u.status == "vacant"])
 
+    def validate_caretaker(self, value):
+        if value is not None and not value.is_caretaker:
+            raise serializers.ValidationError("The selected user is not a caretaker.")
+        return value
+
     def create(self, validated_data):
         validated_data["owner"] = self.context["request"].user
         return super().create(validated_data)

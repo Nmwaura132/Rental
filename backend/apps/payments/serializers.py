@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.db import transaction
 from .models import Invoice, Payment, InvoiceLineItem
 
 
@@ -30,6 +31,14 @@ class InvoiceLineItemSerializer(serializers.ModelSerializer):
 
 
 class InvoiceSerializer(serializers.ModelSerializer):
+    FINANCIAL_FIELDS = {
+        "lease",
+        "amount_due",
+        "due_date",
+        "period_start",
+        "period_end",
+        "line_items",
+    }
     # WHY: explicit DecimalField so drf-spectacular can derive a concrete schema type.
     # ReadOnlyField alone defaults to "string" because the source is a @property.
     balance = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
@@ -49,6 +58,30 @@ class InvoiceSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "invoice_number", "amount_paid", "status", "created_at"]
 
+    def validate(self, attrs):
+        if (
+            self.instance
+            and self.instance.payments.exists()
+            and self.FINANCIAL_FIELDS.intersection(self.initial_data)
+        ):
+            raise serializers.ValidationError(
+                "Financial fields cannot be changed after a payment is recorded."
+            )
+        period_start = attrs.get(
+            "period_start",
+            self.instance.period_start if self.instance else None,
+        )
+        period_end = attrs.get(
+            "period_end",
+            self.instance.period_end if self.instance else None,
+        )
+        if period_start and period_end and period_end < period_start:
+            raise serializers.ValidationError(
+                {"period_end": "Period end must be on or after period start."}
+            )
+        return attrs
+
+    @transaction.atomic
     def create(self, validated_data):
         import uuid
         line_items_data = validated_data.pop("line_items", [])
@@ -61,4 +94,22 @@ class InvoiceSerializer(serializers.ModelSerializer):
         invoice = Invoice.objects.create(**validated_data)
         for item in line_items_data:
             InvoiceLineItem.objects.create(invoice=invoice, **item)
+        return invoice
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        line_items_data = validated_data.pop("line_items", None)
+        if line_items_data is not None:
+            validated_data["amount_due"] = sum(
+                item["amount"] for item in line_items_data
+            )
+        invoice = super().update(instance, validated_data)
+        if line_items_data is not None:
+            invoice.line_items.all().delete()
+            InvoiceLineItem.objects.bulk_create(
+                [
+                    InvoiceLineItem(invoice=invoice, **item)
+                    for item in line_items_data
+                ]
+            )
         return invoice

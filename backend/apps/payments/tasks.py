@@ -7,8 +7,17 @@ from django.utils import timezone
 
 from .models import Invoice, Payment, BankPaymentNotification
 from .mpesa import make_idempotency_key
+from .services import apply_confirmed_payment
 
 logger = logging.getLogger(__name__)
+
+
+@shared_task
+def mark_overdue_invoices():
+    return Invoice.objects.filter(
+        due_date__lt=timezone.localdate(),
+        status__in=[Invoice.Status.PENDING, Invoice.Status.PARTIALLY_PAID],
+    ).update(status=Invoice.Status.OVERDUE)
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
@@ -65,29 +74,21 @@ def process_mpesa_payment(self, receipt_number, amount, account_ref, phone, idem
                 logger.warning("No open invoice for lease=%s receipt=%s", lease.id, receipt_number)
                 return
 
-            # Idempotency belt-and-suspenders: skip if this receipt already recorded.
-            if Payment.objects.filter(idempotency_key=idempotency_key).exists():
-                logger.info("Idempotent skip for receipt=%s", receipt_number)
-                return
-
-            payment = Payment.objects.create(
-                invoice=invoice,
+            payment, created = apply_confirmed_payment(
+                invoice_id=invoice.pk,
                 method=Payment.Method.MPESA,
-                status=Payment.Status.CONFIRMED,
                 amount=amount_dec,
-                mpesa_receipt_number=receipt_number,
-                mpesa_phone=normalized_phone,
-                mpesa_account_ref=account_ref,
                 idempotency_key=idempotency_key,
                 paid_at=timezone.now(),
+                payment_fields={
+                    "mpesa_receipt_number": receipt_number,
+                    "mpesa_phone": normalized_phone,
+                    "mpesa_account_ref": account_ref,
+                },
             )
-
-            invoice.amount_paid = (invoice.amount_paid or Decimal("0")) + payment.amount
-            invoice.status = (
-                Invoice.Status.PAID if invoice.amount_paid >= invoice.amount_due
-                else Invoice.Status.PARTIALLY_PAID
-            )
-            invoice.save(update_fields=["amount_paid", "status"])
+            if not created:
+                logger.info("Idempotent skip for receipt=%s", receipt_number)
+                return
 
         # Send SMS receipt (after commit — task can be retried if the row isn't visible yet)
         from apps.notifications.tasks import send_payment_receipt_sms
@@ -135,7 +136,10 @@ def process_stk_callback(self, payload: dict):
                 logger.warning("STK callback for unknown CheckoutRequestID: %s", checkout_id)
                 return
 
-            if req.status != MpesaSTKRequest.Status.PENDING:
+            if req.status not in [
+                MpesaSTKRequest.Status.PENDING,
+                MpesaSTKRequest.Status.REQUIRES_REVIEW,
+            ]:
                 logger.info("STK callback already processed for %s, skipping.", checkout_id)
                 return
 
@@ -151,6 +155,26 @@ def process_stk_callback(self, payload: dict):
                 receipt = str(items.get("MpesaReceiptNumber", ""))
                 paid_amount = items.get("Amount")
                 phone = str(items.get("PhoneNumber", req.phone))
+
+                if not receipt or paid_amount is None:
+                    req.status = MpesaSTKRequest.Status.REQUIRES_REVIEW
+                    req.save()
+                    logger.warning(
+                        "Successful STK result for %s had no verifiable receipt metadata.",
+                        checkout_id,
+                    )
+                    return
+                try:
+                    amount_dec = Decimal(str(paid_amount))
+                except (TypeError, ValueError, InvalidOperation):
+                    req.status = MpesaSTKRequest.Status.REQUIRES_REVIEW
+                    req.save()
+                    logger.error(
+                        "Invalid STK amount %r for receipt=%s",
+                        paid_amount,
+                        receipt,
+                    )
+                    return
 
                 # Deduplicate by receipt number
                 if MpesaSTKRequest.objects.filter(mpesa_receipt_number=receipt).exists():
@@ -176,35 +200,25 @@ def process_stk_callback(self, payload: dict):
                             .select_related("lease__tenant", "lease__unit__property__owner")
                             .get(pk=req.invoice_id)
                         )
-                        try:
-                            amount_dec = Decimal(str(paid_amount if paid_amount is not None else req.amount))
-                        except (TypeError, ValueError, InvalidOperation):
-                            logger.error("Invalid STK amount %r for receipt=%s", paid_amount, receipt)
-                            return
-
-                        payment = Payment.objects.create(
-                            invoice=invoice,
+                        payment, created = apply_confirmed_payment(
+                            invoice_id=invoice.pk,
                             method=Payment.Method.MPESA,
-                            status=Payment.Status.CONFIRMED,
                             amount=amount_dec,
-                            mpesa_receipt_number=receipt,
-                            mpesa_phone=phone,
-                            mpesa_account_ref=req.account_ref,
                             idempotency_key=idempotency_key,
                             paid_at=timezone.now(),
+                            payment_fields={
+                                "mpesa_receipt_number": receipt,
+                                "mpesa_phone": phone,
+                                "mpesa_account_ref": req.account_ref,
+                            },
                         )
-                        invoice.amount_paid = (invoice.amount_paid or Decimal("0")) + payment.amount
-                        invoice.status = (
-                            Invoice.Status.PAID if invoice.amount_paid >= invoice.amount_due
-                            else Invoice.Status.PARTIALLY_PAID
-                        )
-                        invoice.save(update_fields=["amount_paid", "status"])
 
-                        payment_id_for_sms = payment.id
-                        cache_keys_to_invalidate = [
-                            f"dashboard:{invoice.lease.tenant_id}",
-                            f"dashboard:{invoice.lease.unit.property.owner_id}",
-                        ]
+                        if created:
+                            payment_id_for_sms = payment.id
+                            cache_keys_to_invalidate = [
+                                f"dashboard:{invoice.lease.tenant_id}",
+                                f"dashboard:{invoice.lease.unit.property.owner_id}",
+                            ]
             else:
                 # User cancelled (1032), timeout (1037), insufficient funds (1), etc.
                 req.status = MpesaSTKRequest.Status.CANCELLED if result_code == 1032 \
@@ -248,6 +262,19 @@ def reconcile_pending_stk_transactions():
             result = stk_query(req.checkout_request_id)
             result_code = result.get("ResultCode")
             if result_code is not None and str(result_code) != "":
+                if int(result_code) == 0:
+                    MpesaSTKRequest.objects.filter(
+                        pk=req.pk,
+                        status=MpesaSTKRequest.Status.PENDING,
+                    ).update(
+                        status=MpesaSTKRequest.Status.REQUIRES_REVIEW,
+                        result_code=0,
+                        result_desc=result.get(
+                            "ResultDesc",
+                            "Successful query result awaiting receipt verification",
+                        ),
+                    )
+                    continue
                 # Build a synthetic callback payload and process it
                 synthetic = {
                     "Body": {
@@ -323,7 +350,10 @@ def poll_equity_statement(date_from: str | None = None, date_to: str | None = No
         if debit_credit and debit_credit not in ("C", "CREDIT", "CR"):
             continue  # skip debits
 
-        if BankPaymentNotification.objects.filter(transaction_ref=ref).exists():
+        if BankPaymentNotification.objects.filter(
+            bank=BankPaymentNotification.Bank.EQUITY,
+            transaction_ref=ref,
+        ).exists():
             continue  # already processed
 
         try:
@@ -386,18 +416,18 @@ def generate_monthly_invoices():
     created = 0
 
     for lease in active_leases:
-        # Skip if already invoiced this period
-        if Invoice.objects.filter(lease=lease, period_start=period_start).exists():
-            continue
-        Invoice.objects.create(
+        _, was_created = Invoice.objects.get_or_create(
             lease=lease,
-            invoice_number=f"INV-{period_start.strftime('%Y%m')}-{uuid.uuid4().hex[:6].upper()}",
-            amount_due=lease.rent_amount,
-            due_date=due_date,
             period_start=period_start,
-            period_end=period_end,
+            defaults={
+                "invoice_number": f"INV-{period_start.strftime('%Y%m')}-{uuid.uuid4().hex[:6].upper()}",
+                "amount_due": lease.rent_amount,
+                "due_date": due_date,
+                "period_end": period_end,
+            },
         )
-        created += 1
+        if was_created:
+            created += 1
 
     logger.info("Generated %d invoices for period %s", created, period_start)
     return created

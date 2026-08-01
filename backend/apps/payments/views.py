@@ -1,18 +1,21 @@
 import logging
 import uuid
 from decimal import Decimal, InvalidOperation
-from django.db import transaction as db_transaction
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 from django.db.models import Sum, Count, Q
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from drf_spectacular.utils import extend_schema
 
+from apps.core.permissions import IsLandlord
 from .models import Invoice, Payment, MpesaSTKRequest
 from .serializers import InvoiceSerializer, PaymentSerializer
 from .mpesa import make_idempotency_key
+from .services import apply_confirmed_payment
 
 logger = logging.getLogger(__name__)
 
@@ -39,12 +42,23 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     filterset_fields = ["status", "lease"]
     queryset = Invoice.objects.none()  # for drf-spectacular schema introspection
 
+    def get_permissions(self):
+        if self.action in {"create", "update", "partial_update", "destroy"}:
+            return [IsLandlord()]
+        return super().get_permissions()
+
     def get_queryset(self):
         return _invoice_qs_for_user(self.request.user).select_related(
             "lease__tenant", "lease__unit"
         ).prefetch_related("line_items", "payments")
 
     def perform_create(self, serializer):
+        lease = serializer.validated_data["lease"]
+        user = self.request.user
+        if user.is_landlord and lease.unit.property.owner_id != user.id:
+            raise PermissionDenied("You cannot create invoices for this lease.")
+        if user.is_caretaker and lease.unit.property.caretaker_id != user.id:
+            raise PermissionDenied("You cannot create invoices for this lease.")
         super().perform_create(serializer)
         invoice = Invoice.objects.select_related(
             "lease__tenant", "lease__unit__property"
@@ -63,10 +77,32 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         )
         send_sms.delay(tenant.id, msg)
 
-    def perform_destroy(self, instance):
-        # Payment.invoice uses PROTECT — delete payments first
-        instance.payments.all().delete()
-        instance.delete()
+    def perform_update(self, serializer):
+        lease = serializer.validated_data.get("lease", serializer.instance.lease)
+        user = self.request.user
+        if user.is_landlord and lease.unit.property.owner_id != user.id:
+            raise PermissionDenied("You cannot move invoices to this lease.")
+        if user.is_caretaker and lease.unit.property.caretaker_id != user.id:
+            raise PermissionDenied("You cannot move invoices to this lease.")
+        serializer.save()
+
+    def destroy(self, request, *args, **kwargs):
+        return Response(
+            {"error": "Invoices are financial records and cannot be deleted."},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
+
+    @action(detail=True, methods=["post"], permission_classes=[IsLandlord])
+    def cancel(self, request, pk=None):
+        invoice = self.get_object()
+        if invoice.payments.exists() or invoice.amount_paid:
+            return Response(
+                {"error": "An invoice with payments cannot be cancelled."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        invoice.status = Invoice.Status.CANCELLED
+        invoice.save(update_fields=["status", "updated_at"])
+        return Response(self.get_serializer(invoice).data)
 
 
 class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
@@ -81,18 +117,12 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
         )
 
     @action(detail=False, methods=["post"], url_path="record",
-            permission_classes=[permissions.IsAuthenticated])
+            permission_classes=[IsLandlord])
     def record_payment(self, request):
         """
         Manually record a cash or bank payment — landlords/caretakers only.
         Tenants pay via STK Push. Body: { invoice, method, amount }
         """
-        if request.user.is_tenant:
-            return Response(
-                {"error": "Tenants cannot record manual payments. Use M-Pesa STK Push to pay."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
         invoice_id = request.data.get("invoice")
         method = request.data.get("method")
         amount = request.data.get("amount")
@@ -123,38 +153,20 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
                 "bank_branch": (request.data.get("bank_branch") or "").strip() or None,
             }
 
-        # WHY: lock the invoice row, then create the payment and update totals in
-        # one transaction. A landlord could otherwise record two payments at the
-        # same time and stomp each other's amount_paid update.
         try:
-            with db_transaction.atomic():
-                invoice = (
-                    _invoice_qs_for_user(request.user)
-                    .select_for_update()
-                    .get(id=invoice_id)
-                )
-
-                if invoice.status == Invoice.Status.PAID:
-                    return Response({"error": "Invoice is already fully paid."}, status=status.HTTP_400_BAD_REQUEST)
-
-                payment = Payment.objects.create(
-                    invoice=invoice,
-                    method=method,
-                    status=Payment.Status.CONFIRMED,
-                    amount=amount,
-                    idempotency_key=f"{method}:{uuid.uuid4().hex}",
-                    paid_at=timezone.now(),
-                    **bank_fields,
-                )
-
-                invoice.amount_paid = (invoice.amount_paid or Decimal("0")) + payment.amount
-                invoice.status = (
-                    Invoice.Status.PAID if invoice.amount_paid >= invoice.amount_due
-                    else Invoice.Status.PARTIALLY_PAID
-                )
-                invoice.save(update_fields=["amount_paid", "status"])
+            invoice = _invoice_qs_for_user(request.user).get(id=invoice_id)
+            payment, _ = apply_confirmed_payment(
+                invoice_id=invoice.pk,
+                method=method,
+                amount=amount,
+                idempotency_key=f"{method}:{uuid.uuid4().hex}",
+                paid_at=timezone.now(),
+                payment_fields=bank_fields,
+            )
         except Invoice.DoesNotExist:
             return Response({"error": "Invoice not found."}, status=status.HTTP_404_NOT_FOUND)
+        except DjangoValidationError as exc:
+            return Response({"error": exc.messages[0]}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(PaymentSerializer(payment).data, status=status.HTTP_201_CREATED)
 
@@ -364,7 +376,9 @@ class MpesaSTKStatusView(APIView):
             return Response({"error": "checkout_request_id is required."}, status=400)
 
         try:
-            req = MpesaSTKRequest.objects.get(checkout_request_id=checkout_id)
+            req = MpesaSTKRequest.objects.filter(
+                invoice__in=_invoice_qs_for_user(request.user)
+            ).get(checkout_request_id=checkout_id)
         except MpesaSTKRequest.DoesNotExist:
             return Response({"error": "Request not found."}, status=404)
 

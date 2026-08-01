@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import models
 from apps.tenants.models import Lease
 
@@ -25,6 +26,12 @@ class Invoice(models.Model):
     class Meta:
         db_table = "invoices"
         ordering = ["-due_date"]
+        constraints = [
+            models.CheckConstraint(condition=models.Q(amount_due__gt=0), name="invoice_amount_due_positive"),
+            models.CheckConstraint(condition=models.Q(amount_paid__gte=0), name="invoice_amount_paid_nonnegative"),
+            models.CheckConstraint(condition=models.Q(period_end__gte=models.F("period_start")), name="invoice_period_valid"),
+            models.UniqueConstraint(fields=["lease", "period_start"], name="invoice_lease_period_unique"),
+        ]
         indexes = [
             models.Index(fields=["status", "due_date"]),
             models.Index(fields=["lease", "status"]),
@@ -77,6 +84,13 @@ class Payment(models.Model):
 
     class Meta:
         db_table = "payments"
+        constraints = [
+            models.CheckConstraint(condition=models.Q(amount__gt=0), name="payment_amount_positive"),
+            models.CheckConstraint(
+                condition=~models.Q(status="confirmed") | models.Q(paid_at__isnull=False),
+                name="confirmed_payment_has_paid_at",
+            ),
+        ]
         indexes = [
             models.Index(fields=["method", "status"]),
             models.Index(fields=["mpesa_receipt_number"]),
@@ -84,6 +98,19 @@ class Payment(models.Model):
 
     def __str__(self):
         return f"{self.method} — KES {self.amount} ({self.status})"
+
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            persisted_status = type(self).objects.only("status").get(pk=self.pk).status
+            if persisted_status == self.Status.CONFIRMED:
+                raise ValidationError("Confirmed payment records are immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if self.status == self.Status.CONFIRMED:
+            raise ValidationError("Confirmed payment records cannot be deleted.")
+        return super().delete(*args, **kwargs)
 
 
 class MpesaSTKRequest(models.Model):
@@ -94,6 +121,7 @@ class MpesaSTKRequest(models.Model):
         SUCCESS = "success", "Success"
         FAILED = "failed", "Failed"
         CANCELLED = "cancelled", "Cancelled by User"
+        REQUIRES_REVIEW = "requires_review", "Requires Review"
 
     # Populated on initiation
     checkout_request_id = models.CharField(max_length=100, unique=True, db_index=True)
@@ -118,6 +146,9 @@ class MpesaSTKRequest(models.Model):
     class Meta:
         db_table = "mpesa_stk_requests"
         ordering = ["-created_at"]
+        constraints = [
+            models.CheckConstraint(condition=models.Q(amount__gt=0), name="stk_amount_positive"),
+        ]
 
     def __str__(self):
         return f"STK {self.checkout_request_id[:20]} — {self.status}"
@@ -136,7 +167,7 @@ class BankPaymentNotification(models.Model):
         DUPLICATE = "duplicate", "Duplicate"
 
     bank = models.CharField(max_length=10, choices=Bank.choices, db_index=True)
-    transaction_ref = models.CharField(max_length=100, unique=True, db_index=True)
+    transaction_ref = models.CharField(max_length=100, db_index=True)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     payer_name = models.CharField(max_length=120, blank=True)
     payer_account = models.CharField(max_length=60, blank=True)  # sender's account / phone
@@ -152,6 +183,13 @@ class BankPaymentNotification(models.Model):
     class Meta:
         db_table = "bank_payment_notifications"
         ordering = ["-credited_at"]
+        constraints = [
+            models.CheckConstraint(condition=models.Q(amount__gt=0), name="bank_notification_amount_positive"),
+            models.UniqueConstraint(
+                fields=["bank", "transaction_ref"],
+                name="bank_transaction_reference_unique",
+            ),
+        ]
         indexes = [
             models.Index(fields=["bank", "status"]),
             models.Index(fields=["credited_at"]),
@@ -175,6 +213,15 @@ class InvoiceLineItem(models.Model):
     class Meta:
         db_table = "invoice_line_items"
         ordering = ["id"]
+        constraints = [
+            models.CheckConstraint(condition=models.Q(amount__gte=0), name="invoice_line_amount_nonnegative"),
+            models.CheckConstraint(
+                condition=models.Q(previous_reading__isnull=True)
+                | models.Q(current_reading__isnull=True)
+                | models.Q(current_reading__gte=models.F("previous_reading")),
+                name="invoice_line_meter_readings_valid",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.description} — KES {self.amount}"
