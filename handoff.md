@@ -168,9 +168,41 @@ docker exec $(docker ps --format '{{.Names}}' | grep '^minio-') \
   mc ls local/kasa-backups | tail -5
 ```
 
+### Restore procedure (rehearsed 2026-08-01)
+
+Restore into a throwaway container first — never straight over the live database.
+The dump carries no `CREATE DATABASE`/`USE`, so it loads into any schema name.
+
+```bash
+# 1. Pull the archive you want (or use a local /tmp copy).
+docker exec $(docker ps --format '{{.Names}}' | grep '^minio-') \
+  mc cp local/kasa-backups/<file>.sql.gz /tmp/restore.sql.gz
+docker cp $(docker ps --format '{{.Names}}' | grep '^minio-'):/tmp/restore.sql.gz /tmp/
+
+# 2. Boot an isolated database on the same image as prod.
+IMG=$(docker inspect $(docker ps --format '{{.Names}}' | grep '^db-ul2jfl') --format '{{.Config.Image}}')
+docker run -d --name kasa-restore-check --network none \
+  -e MYSQL_ROOT_PASSWORD=temp -e MYSQL_DATABASE=restore_test "$IMG"
+
+# 3. Load it.
+zcat /tmp/restore.sql.gz | docker exec -i kasa-restore-check mysql -u root -ptemp restore_test
+
+# 4. Verify against prod before trusting it — row counts and migration count must match.
+docker exec kasa-restore-check mysql -u root -ptemp -N -D restore_test \
+  -e 'select count(*) from django_migrations; select role,count(*) from users group by role;'
+
+# 5. Tear down.
+docker rm -f kasa-restore-check && rm -f /tmp/restore.sql.gz
+```
+
+Last rehearsal (2026-08-01) restored a 94,501-byte / 36-table dump and matched
+production exactly: 89 migrations, 1 landlord, 3 tenants, identical row counts.
+
 Still outstanding:
-- Weekly off-site copy (S3 or rclone to a remote) — the bucket lives on the same VPS.
-- A documented, rehearsed restore procedure.
+- Weekly off-site copy (S3 or rclone to a remote) — the bucket lives on the same
+  VPS as the database it protects, so one machine loss takes both.
+- No alerting. The empty-backup fault ran silently for ~2 months; a dump-size
+  floor check that pages someone would have caught it on day one.
 
 ## Who to ask
 
