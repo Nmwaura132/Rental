@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import 'package:dio/dio.dart' show FormData, MultipartFile;
 
 import '../../core/api/api_client.dart';
+import '../../core/api/pagination.dart';
 import '../../core/constants.dart';
 import '../../core/providers/user_role_provider.dart';
 import '../../core/utils/api_error.dart';
@@ -21,13 +22,8 @@ import '../../core/widgets/kasa_primitives.dart';
 final maintenanceListProvider =
     FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
   final dio = ref.watch(dioProvider);
-  final resp = await dio.get('/api/v1/tenants/maintenance/');
-  final data = resp.data;
-  if (data is List) return List<Map<String, dynamic>>.from(data);
-  if (data is Map && data['results'] is List) {
-    return List<Map<String, dynamic>>.from(data['results'] as List);
-  }
-  return [];
+  final data = await fetchAllPages(dio, '/api/v1/tenants/maintenance/');
+  return List<Map<String, dynamic>>.from(data);
 });
 
 
@@ -1273,14 +1269,11 @@ class _CreateRequestSheetState extends ConsumerState<_CreateRequestSheet> {
   Future<void> _loadLease() async {
     try {
       final dio = ref.read(dioProvider);
-      final resp = await dio.get('/api/v1/tenants/leases/', queryParameters: {'status': 'active'});
-      final data = resp.data;
-      List<dynamic> leases = [];
-      if (data is List) {
-        leases = data;
-      } else if (data is Map && data['results'] is List) {
-        leases = data['results'] as List;
-      }
+      final leases = await fetchAllPages(
+        dio,
+        '/api/v1/tenants/leases/',
+        queryParameters: {'status': 'active'},
+      );
       if (leases.isNotEmpty) {
         final first = leases.first as Map<String, dynamic>;
         final unitNum = first['unit_number'] ?? first['unit'] ?? '';

@@ -5,17 +5,13 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
+import '../../core/api/pagination.dart';
 import '../../core/widgets/kasa_primitives.dart';
 import '../../core/theme/kasa_tokens.dart';
 
 final notificationsProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
   final dio = ref.watch(dioProvider);
-  final resp = await dio.get('/api/v1/notifications/');
-  // API may return a list or a paginated object
-  final data = resp.data;
-  if (data is List) return data;
-  if (data is Map && data['results'] is List) return data['results'] as List<dynamic>;
-  return [];
+  return fetchAllPages(dio, '/api/v1/notifications/');
 });
 
 const _channelIcon = {

@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:dio/dio.dart';
 import '../../core/api/api_client.dart';
+import '../../core/api/pagination.dart';
 import '../../core/constants.dart';
 import '../../core/theme/kasa_tokens.dart';
 import '../../core/utils/api_error.dart';
@@ -13,11 +14,7 @@ import '../../shared/widgets/shimmer_loading.dart';
 
 final leasesProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
   final dio = ref.read(dioProvider);
-  final resp = await dio.get('/api/v1/tenants/leases/');
-  final data = resp.data;
-  if (data is List) return data;
-  if (data is Map && data['results'] is List) return data['results'] as List<dynamic>;
-  return [];
+  return fetchAllPages(dio, '/api/v1/tenants/leases/');
 });
 
 // Returns display status: 'active', 'ending', 'past'
@@ -1017,19 +1014,13 @@ class _AddLeaseDialogState extends ConsumerState<_AddLeaseDialog> {
     try {
       final dio = ref.read(dioProvider);
       final results = await Future.wait([
-        dio.get('/api/v1/auth/tenants/'),
-        dio.get('/api/v1/properties/'),
+        fetchAllPages(dio, '/api/v1/auth/tenants/'),
+        fetchAllPages(dio, '/api/v1/properties/'),
       ]);
       if (!mounted) return;
 
-      List<dynamic> unwrap(dynamic data) {
-        if (data is List) return data;
-        if (data is Map && data['results'] is List) return data['results'] as List<dynamic>;
-        return [];
-      }
-
-      final tenantList = unwrap(results[0].data);
-      final propList = unwrap(results[1].data);
+      final tenantList = results[0];
+      final propList = results[1];
       setState(() {
         _tenants = tenantList.cast<Map<String, dynamic>>();
         _properties = propList.cast<Map<String, dynamic>>();

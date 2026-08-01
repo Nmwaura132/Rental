@@ -473,7 +473,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                               size: 18, color: Colors.amber.shade700),
                           const SizedBox(width: 8),
                           Text(
-                            'SWITCH ROLE (DEV)',
+                            'SWITCH ACCOUNT',
                             style: GoogleFonts.spaceGrotesk(
                               fontSize: 14,
                               fontWeight: FontWeight.w700,

@@ -6,7 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 
-import '../features/auth/dev_picker_screen.dart';
+import '../features/auth/login_screen.dart';
 import '../features/dashboard/dashboard_screen.dart';
 import '../features/properties/properties_screen.dart';
 import '../features/properties/property_detail_screen.dart';
@@ -45,7 +45,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       return null;
     },
     routes: [
-      GoRoute(path: '/login', builder: (_, __) => const DevPickerScreen()),
+      GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
       // Global routes without Bottom Nav
       GoRoute(path: '/notifications', builder: (_, __) => const NotificationsScreen()),
       GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),

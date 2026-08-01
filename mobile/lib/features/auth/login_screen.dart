@@ -5,7 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:dio/dio.dart';
-import '../../core/providers/server_url_provider.dart';
+import '../../core/api/api_client.dart';
 import '../../core/widgets/kasa_logo.dart';
 
 const _storage = FlutterSecureStorage();
@@ -50,14 +50,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     setState(() => _loading = true);
 
     try {
-      final baseUrl = ref.read(serverUrlProvider);
-      final dio = Dio(BaseOptions(
-        baseUrl: baseUrl,
-        headers: {
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': 'true',
-        },
-      ));
+      final dio = ref.read(publicDioProvider);
       final resp = await dio.post('/api/v1/auth/login/', data: {
         'phone_number': _phoneCtrl.text.trim(),
         'password': _passCtrl.text,
@@ -421,18 +414,50 @@ class _ForgotPasswordPage extends ConsumerStatefulWidget {
 class _ForgotPasswordPageState extends ConsumerState<_ForgotPasswordPage> {
   final _formKey = GlobalKey<FormState>();
   final _phoneCtrl = TextEditingController();
+  final _otpCtrl = TextEditingController();
   final _newPassCtrl = TextEditingController();
   final _confirmPassCtrl = TextEditingController();
   bool _loading = false;
+  bool _otpRequested = false;
   bool _obscureNew = true;
   bool _obscureConfirm = true;
 
   @override
   void dispose() {
     _phoneCtrl.dispose();
+    _otpCtrl.dispose();
     _newPassCtrl.dispose();
     _confirmPassCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _requestOtp() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _loading = true);
+
+    try {
+      final dio = ref.read(publicDioProvider);
+      await dio.post('/api/v1/auth/password-reset/request/', data: {
+        'phone_number': _phoneCtrl.text.trim(),
+      });
+      if (mounted) {
+        setState(() => _otpRequested = true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('If the number is registered, a reset code was sent.')),
+        );
+      }
+    } on DioException {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Could not request a reset code. Try again.'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   Future<void> _reset() async {
@@ -440,17 +465,11 @@ class _ForgotPasswordPageState extends ConsumerState<_ForgotPasswordPage> {
     setState(() => _loading = true);
 
     try {
-      final baseUrl = ref.read(serverUrlProvider);
-      final dio = Dio(BaseOptions(
-        baseUrl: baseUrl,
-        headers: {
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': 'true',
-        },
-      ));
+      final dio = ref.read(publicDioProvider);
 
       await dio.post('/api/v1/auth/password-reset/', data: {
         'phone_number': _phoneCtrl.text.trim(),
+        'otp': _otpCtrl.text.trim(),
         'new_password': _newPassCtrl.text,
       });
 
@@ -489,7 +508,7 @@ class _ForgotPasswordPageState extends ConsumerState<_ForgotPasswordPage> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const Text(
-                'Enter your phone number and a new password.',
+                'Enter your phone number to receive a one-time reset code.',
                 style: TextStyle(color: Colors.grey),
               ),
               const SizedBox(height: 24),
@@ -506,6 +525,19 @@ class _ForgotPasswordPageState extends ConsumerState<_ForgotPasswordPage> {
                     : null,
               ),
               const SizedBox(height: 16),
+              if (_otpRequested) ...[
+                TextFormField(
+                  controller: _otpCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Reset Code',
+                    prefixIcon: Icon(Icons.pin_outlined),
+                  ),
+                  validator: (v) =>
+                      v == null || v.length != 6 ? 'Enter the 6-digit code' : null,
+                ),
+                const SizedBox(height: 16),
+              ],
               TextFormField(
                 controller: _newPassCtrl,
                 obscureText: _obscureNew,
@@ -520,6 +552,7 @@ class _ForgotPasswordPageState extends ConsumerState<_ForgotPasswordPage> {
                   ),
                 ),
                 validator: (v) {
+                  if (!_otpRequested) return null;
                   if (v == null || v.isEmpty) return 'Password is required';
                   if (v.length < 8) return 'Minimum 8 characters';
                   return null;
@@ -541,11 +574,14 @@ class _ForgotPasswordPageState extends ConsumerState<_ForgotPasswordPage> {
                   ),
                 ),
                 validator: (v) =>
-                    v != _newPassCtrl.text ? 'Passwords do not match' : null,
+                    _otpRequested && v != _newPassCtrl.text
+                        ? 'Passwords do not match'
+                        : null,
               ),
               const SizedBox(height: 28),
               ElevatedButton(
-                onPressed: _loading ? null : _reset,
+                onPressed:
+                    _loading ? null : (_otpRequested ? _reset : _requestOtp),
                 child: _loading
                     ? const SizedBox(
                         height: 20,
@@ -553,7 +589,7 @@ class _ForgotPasswordPageState extends ConsumerState<_ForgotPasswordPage> {
                         child: CircularProgressIndicator(
                             color: Colors.white, strokeWidth: 2),
                       )
-                    : const Text('Reset Password'),
+                    : Text(_otpRequested ? 'Reset Password' : 'Send Reset Code'),
               ),
             ],
           ),

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api/api_client.dart';
+import '../../core/api/pagination.dart';
 import '../../core/utils/api_error.dart';
 
 // ─── Providers ────────────────────────────────────────────────────────────────
@@ -11,13 +12,19 @@ import '../../core/utils/api_error.dart';
 final _propertiesProvider =
     FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
   final dio = ref.watch(dioProvider);
-  final resp = await dio.get('/api/v1/properties/properties/');
-  final data = resp.data;
-  if (data is List) return List<Map<String, dynamic>>.from(data);
-  if (data is Map && data['results'] is List) {
-    return List<Map<String, dynamic>>.from(data['results'] as List);
-  }
-  return [];
+  final data = await fetchAllPages(dio, '/api/v1/properties/');
+  return List<Map<String, dynamic>>.from(data);
+});
+
+final _leasesProvider = FutureProvider.autoDispose
+    .family<List<Map<String, dynamic>>, int>((ref, propertyId) async {
+  final dio = ref.watch(dioProvider);
+  final data = await fetchAllPages(
+    dio,
+    '/api/v1/tenants/leases/',
+    queryParameters: {'property': propertyId},
+  );
+  return List<Map<String, dynamic>>.from(data);
 });
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
@@ -31,6 +38,7 @@ class ReportsScreen extends ConsumerStatefulWidget {
 
 class _ReportsScreenState extends ConsumerState<ReportsScreen> {
   Map<String, dynamic>? _selectedProperty;
+  Map<String, dynamic>? _selectedLease;
 
   // State per report card: null = idle, 'loading' = generating, URL = done
   final Map<String, String?> _results = {
@@ -60,17 +68,26 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
       );
       return;
     }
+    if (type == 'ledger' && _selectedLease == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a tenant lease first.')),
+      );
+      return;
+    }
     setState(() => _loading[type] = true);
     try {
       final dio = ref.read(dioProvider);
-      final params = <String, dynamic>{'type': type, 'property': prop['id']};
+      final params = <String, dynamic>{'type': type};
+      if (type == 'ledger') {
+        params['lease'] = _selectedLease!['id'];
+      } else {
+        params['property'] = prop['id'];
+      }
       if (type == 'pnl') {
         params['year'] = _pnlYear.toString();
         params['month'] = _pnlMonth.toString();
       }
       if (type == 'ledger') {
-        // For ledger, use the first active lease of the property (landlord context)
-        // endpoint accepts `property` param; we pass date range
         params['date_from'] = DateFormat('yyyy-MM-dd').format(_ledgerFrom);
         params['date_to'] = DateFormat('yyyy-MM-dd').format(_ledgerTo);
       }
@@ -114,7 +131,13 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
             );
           }
 
-          _selectedProperty ??= props.first;
+          final selectedPropertyId = _selectedProperty?['id'];
+          _selectedProperty = props.cast<Map<String, dynamic>?>().firstWhere(
+                (property) => property?['id'] == selectedPropertyId,
+                orElse: () => props.first,
+              );
+          final propertyId = _selectedProperty!['id'] as int;
+          final leasesAsync = ref.watch(_leasesProvider(propertyId));
 
           return ListView(
             padding: const EdgeInsets.all(16),
@@ -136,6 +159,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                           .toList(),
                       onChanged: (p) => setState(() {
                         _selectedProperty = p;
+                        _selectedLease = null;
                         // Clear stale results on property change
                         for (final k in _results.keys) {
                           _results[k] = null;
@@ -162,6 +186,44 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                 extra: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    const SizedBox(height: 8),
+                    leasesAsync.when(
+                      loading: () => const LinearProgressIndicator(),
+                      error: (e, _) => Text(apiError(e)),
+                      data: (leases) {
+                        if (leases.isEmpty) {
+                          return const Text(
+                            'No leases are available for this property.',
+                          );
+                        }
+                        final selectedLeaseId = _selectedLease?['id'];
+                        _selectedLease =
+                            leases.cast<Map<String, dynamic>?>().firstWhere(
+                                  (lease) => lease?['id'] == selectedLeaseId,
+                                  orElse: () => leases.first,
+                                );
+                        return DropdownButtonFormField<Map<String, dynamic>>(
+                          initialValue: _selectedLease,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Tenant lease',
+                            isDense: true,
+                          ),
+                          items: leases
+                              .map(
+                                (lease) => DropdownMenuItem(
+                                  value: lease,
+                                  child: Text(
+                                    '${lease['tenant_name']} — ${lease['unit_number']}',
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (lease) =>
+                              setState(() => _selectedLease = lease),
+                        );
+                      },
+                    ),
                     const SizedBox(height: 8),
                     Row(children: [
                       Expanded(

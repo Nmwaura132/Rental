@@ -1,4 +1,4 @@
-package com.example.rental_manager
+package com.kasa.rentalmanager
 
 import io.flutter.embedding.android.FlutterActivity
 

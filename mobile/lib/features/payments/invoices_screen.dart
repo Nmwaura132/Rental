@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
+import '../../core/api/pagination.dart';
 import '../../core/constants.dart';
 import '../../core/providers/user_role_provider.dart';
 import '../../core/theme/kasa_tokens.dart';
@@ -16,11 +17,7 @@ final _displayDate = DateFormat('dd MMM yyyy');
 
 final invoicesProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
   final dio = ref.watch(dioProvider);
-  final resp = await dio.get('/api/v1/payments/invoices/');
-  final data = resp.data;
-  if (data is List) return data;
-  if (data is Map && data['results'] is List) return data['results'] as List<dynamic>;
-  return [];
+  return fetchAllPages(dio, '/api/v1/payments/invoices/');
 });
 
 // ─── Line Item Entry (mutable state for one invoice line item) ────────────────
@@ -102,7 +99,7 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
   Widget build(BuildContext context) {
     final invoices = ref.watch(invoicesProvider);
     final role = ref.watch(userRoleProvider).valueOrNull;
-    final isLandlord = role == 'landlord' || role == 'caretaker';
+    final isLandlord = role == 'landlord';
     final cs = Theme.of(context).colorScheme;
 
     return Scaffold(
@@ -274,10 +271,9 @@ class _InvoiceCard extends ConsumerWidget {
     final balance = double.tryParse((invoice['balance'] ?? '0').toString()) ?? 0;
     final isPaid = status == 'paid';
     final canEdit = status == 'pending' || status == 'overdue';
-    final canDelete = status == 'pending' || status == 'cancelled';
-    final canVoid = status == 'paid' || status == 'partially_paid';
+    final canVoid = status == 'pending' || status == 'overdue';
     final role = ref.watch(userRoleProvider).valueOrNull;
-    final isLandlord = role == 'landlord' || role == 'caretaker';
+    final isLandlord = role == 'landlord';
     final cs = Theme.of(context).colorScheme;
 
     // Status chip variant mapping
@@ -318,7 +314,7 @@ class _InvoiceCard extends ConsumerWidget {
                 ),
                 const Spacer(),
                 KasaChip(label: chipLabel, variant: chipVariant, small: true),
-                if (isLandlord && (!isPaid || canEdit || canDelete || canVoid))
+                if (isLandlord && (!isPaid || canEdit || canVoid))
                   PopupMenuButton<String>(
                     icon: Icon(Icons.more_vert,
                         size: 20, color: cs.kasaTextSub),
@@ -355,24 +351,11 @@ class _InvoiceCard extends ConsumerWidget {
                             dense: true,
                           ),
                         ),
-                      if (canDelete)
-                        const PopupMenuItem(
-                          value: 'delete',
-                          child: ListTile(
-                            leading: Icon(Icons.delete_outline,
-                                color: Colors.red),
-                            title: Text('Delete',
-                                style: TextStyle(color: Colors.red)),
-                            contentPadding: EdgeInsets.zero,
-                            dense: true,
-                          ),
-                        ),
                     ],
                     onSelected: (v) {
                       if (v == 'pay') _showRecordPayment(context);
                       if (v == 'edit') _showEdit(context);
                       if (v == 'void') _confirmVoid(context, ref);
-                      if (v == 'delete') _confirmDelete(context, ref);
                     },
                   ),
               ],
@@ -505,50 +488,6 @@ class _InvoiceCard extends ConsumerWidget {
     );
   }
 
-  Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      useRootNavigator: true,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete Invoice'),
-        content: Text(
-            'Delete invoice ${invoice['invoice_number']}? This cannot be undone.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red, foregroundColor: Colors.white),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !context.mounted) return;
-    try {
-      final dio = ref.read(dioProvider);
-      await dio.delete('/api/v1/payments/invoices/${invoice['id']}/');
-      onChanged();
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Invoice deleted.'),
-              backgroundColor: Colors.green),
-        );
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(apiError(e)),
-          backgroundColor: Theme.of(context).colorScheme.error,
-        ));
-      }
-    }
-  }
-
   Future<void> _confirmVoid(BuildContext context, WidgetRef ref) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -557,7 +496,7 @@ class _InvoiceCard extends ConsumerWidget {
         title: const Text('Void Invoice'),
         content: Text(
             'Mark ${invoice['invoice_number']} as cancelled? '
-            'This will reverse the paid status.'),
+            'No payments or ledger entries will be deleted.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -575,8 +514,7 @@ class _InvoiceCard extends ConsumerWidget {
     if (confirmed != true || !context.mounted) return;
     try {
       final dio = ref.read(dioProvider);
-      await dio.patch('/api/v1/payments/invoices/${invoice['id']}/',
-          data: {'status': 'cancelled'});
+      await dio.post('/api/v1/payments/invoices/${invoice['id']}/cancel/');
       onChanged();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -681,6 +619,17 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
             ));
           }
           return;
+        } else if (stkStatus == 'requires_review') {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text(
+                'M-Pesa reported success, but the receipt still needs verification. '
+                'Do not pay again; contact your landlord if it remains pending.',
+              ),
+              backgroundColor: Colors.orange,
+            ));
+          }
+          return;
         }
       } catch (_) {
         // ignore poll errors silently
@@ -742,11 +691,10 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
     final status = invoice['status'] as String;
     final isPaid = status == 'paid';
     final canEdit = status == 'pending' || status == 'overdue';
-    final canDelete = status == 'pending' || status == 'cancelled';
-    final canVoid = status == 'paid' || status == 'partially_paid';
+    final canVoid = status == 'pending' || status == 'overdue';
     final payments = invoice['payments'] as List<dynamic>? ?? [];
     final role = ref.watch(userRoleProvider).valueOrNull;
-    final isLandlord = role == 'landlord' || role == 'manager';
+    final isLandlord = role == 'landlord';
 
     final chipVariant = switch (status) {
       'paid'           => KasaChipVariant.primary,
@@ -1082,7 +1030,7 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
                         title: const Text('Void Invoice'),
                         content: Text(
                             'Mark ${invoice['invoice_number']} as cancelled? '
-                            'This will reverse the paid status.'),
+                            'No payments or ledger entries will be deleted.'),
                         actions: [
                           TextButton(
                             onPressed: () => Navigator.pop(ctx, false),
@@ -1101,67 +1049,13 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
                     if (confirmed != true || !context.mounted) return;
                     try {
                       final dio = ref.read(dioProvider);
-                      await dio.patch(
-                          '/api/v1/payments/invoices/${invoice['id']}/',
-                          data: {'status': 'cancelled'});
+                      await dio.post(
+                          '/api/v1/payments/invoices/${invoice['id']}/cancel/');
                       onChanged();
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                           content: Text('Invoice voided.'),
                           backgroundColor: Colors.orange,
-                        ));
-                      }
-                    } catch (e) {
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                          content: Text(apiError(e)),
-                          backgroundColor: Theme.of(context).colorScheme.error,
-                        ));
-                      }
-                    }
-                  },
-                ),
-              ],
-              if (canDelete) ...[
-                const SizedBox(height: 8),
-                KasaButton(
-                  label: 'DELETE INVOICE',
-                  variant: KasaButtonVariant.ghost,
-                  leading: Icon(Icons.delete_outline, size: 16, color: cs.error),
-                  onTap: () async {
-                    Navigator.pop(context);
-                    await Future.delayed(const Duration(milliseconds: 350));
-                    if (!context.mounted) return;
-                    final confirmed = await showDialog<bool>(
-                      context: context,
-                      builder: (ctx) => AlertDialog(
-                        title: const Text('Delete Invoice'),
-                        content: Text(
-                            'Delete ${invoice['invoice_number']}? This cannot be undone.'),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(ctx, false),
-                            child: const Text('Cancel'),
-                          ),
-                          ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.red,
-                                foregroundColor: Colors.white),
-                            onPressed: () => Navigator.pop(ctx, true),
-                            child: const Text('Delete'),
-                          ),
-                        ],
-                      ),
-                    );
-                    if (confirmed != true || !context.mounted) return;
-                    try {
-                      final dio = ref.read(dioProvider);
-                      await dio.delete('/api/v1/payments/invoices/${invoice['id']}/');
-                      onChanged();
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                          content: Text('Invoice deleted.'),
-                          backgroundColor: Colors.green,
                         ));
                       }
                     } catch (e) {
@@ -2053,20 +1947,12 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
   Future<void> _loadLeases() async {
     try {
       final dio = ref.read(dioProvider);
-      final resp = await dio.get(
+      final raw = await fetchAllPages(
+        dio,
         '/api/v1/tenants/leases/',
         queryParameters: {'status': 'active'},
       );
       if (!mounted) return;
-      final data = resp.data;
-      List<dynamic> raw;
-      if (data is List) {
-        raw = data;
-      } else if (data is Map && data['results'] is List) {
-        raw = data['results'] as List<dynamic>;
-      } else {
-        raw = [];
-      }
       setState(() {
         _leases = raw.cast<Map<String, dynamic>>();
         _initialLoading = false;
@@ -2087,16 +1973,12 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
     try {
       if (propertyId != null) {
         final dio = ref.read(dioProvider);
-        final resp = await dio.get(
+        final data = await fetchAllPages(
+          dio,
           '/api/v1/properties/charges/',
           queryParameters: {'property': propertyId, 'is_active': 'true'},
         );
-        final data = resp.data;
-        if (data is List) {
-          charges = data.cast<Map<String, dynamic>>();
-        } else if (data is Map && data['results'] is List) {
-          charges = (data['results'] as List).cast<Map<String, dynamic>>();
-        }
+        charges = data.cast<Map<String, dynamic>>();
       }
     } catch (e) {
       if (mounted) {

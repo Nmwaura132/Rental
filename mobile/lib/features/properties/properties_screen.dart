@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/api/api_client.dart';
+import '../../core/api/pagination.dart';
 import '../../core/constants.dart';
+import '../../core/providers/user_role_provider.dart';
 import '../../core/theme/kasa_tokens.dart';
 import '../../core/utils/api_error.dart';
 import '../../core/widgets/kasa_primitives.dart';
@@ -11,11 +13,7 @@ import '../../shared/widgets/shimmer_loading.dart';
 
 final propertiesProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
   final dio = ref.watch(dioProvider);
-  final resp = await dio.get('/api/v1/properties/');
-  final data = resp.data;
-  if (data is List) return data;
-  if (data is Map && data['results'] is List) return data['results'] as List<dynamic>;
-  return [];
+  return fetchAllPages(dio, '/api/v1/properties/');
 });
 
 class PropertiesScreen extends ConsumerWidget {
@@ -24,6 +22,7 @@ class PropertiesScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final props = ref.watch(propertiesProvider);
+    final canManage = ref.watch(userRoleProvider).valueOrNull == 'landlord';
     final cs = Theme.of(context).colorScheme;
 
     void openAddProperty() => Navigator.of(context, rootNavigator: true).push(
@@ -64,13 +63,14 @@ class PropertiesScreen extends ConsumerWidget {
                     ),
                   ),
                   const Spacer(),
-                  KasaButton(
-                    variant: KasaButtonVariant.primary,
-                    fullWidth: false,
-                    label: 'ADD',
-                    leading: Icon(Icons.add, size: 14, color: cs.onPrimary),
-                    onTap: openAddProperty,
-                  ),
+                  if (canManage)
+                    KasaButton(
+                      variant: KasaButtonVariant.primary,
+                      fullWidth: false,
+                      label: 'ADD',
+                      leading: Icon(Icons.add, size: 14, color: cs.onPrimary),
+                      onTap: openAddProperty,
+                    ),
                 ],
               ),
             ),
@@ -224,10 +224,12 @@ class PropertiesScreen extends ConsumerWidget {
                                           }
                                         }
                                       },
-                                      itemBuilder: (_) => const [
-                                        PopupMenuItem(value: 'open', child: ListTile(leading: Icon(Icons.open_in_new), title: Text('Open'), dense: true, contentPadding: EdgeInsets.zero)),
-                                        PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Edit'), dense: true, contentPadding: EdgeInsets.zero)),
-                                        PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline, color: Colors.red), title: Text('Delete', style: TextStyle(color: Colors.red)), dense: true, contentPadding: EdgeInsets.zero)),
+                                      itemBuilder: (_) => [
+                                        const PopupMenuItem(value: 'open', child: ListTile(leading: Icon(Icons.open_in_new), title: Text('Open'), dense: true, contentPadding: EdgeInsets.zero)),
+                                        if (canManage)
+                                          const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Edit'), dense: true, contentPadding: EdgeInsets.zero)),
+                                        if (canManage)
+                                          const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline, color: Colors.red), title: Text('Delete', style: TextStyle(color: Colors.red)), dense: true, contentPadding: EdgeInsets.zero)),
                                       ],
                                     ),
                                   ],

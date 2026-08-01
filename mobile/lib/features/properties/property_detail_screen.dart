@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/api/api_client.dart';
 import '../../core/constants.dart';
+import '../../core/providers/user_role_provider.dart';
 import '../../core/theme/kasa_tokens.dart';
 import '../../core/utils/api_error.dart';
 import '../../core/utils/currency.dart';
@@ -85,6 +86,7 @@ class _PropertyDetailView extends ConsumerWidget {
     final unitCount = data['unit_count'] as int? ?? units.length;
     final vacantCount = data['vacant_count'] as int? ?? 0;
     final occupiedCount = unitCount - vacantCount;
+    final canManage = ref.watch(userRoleProvider).valueOrNull == 'landlord';
 
     return Scaffold(
       backgroundColor: cs.kasaBg,
@@ -113,7 +115,7 @@ class _PropertyDetailView extends ConsumerWidget {
                 ),
                 onPressed: () => Navigator.of(context).pop(),
               ),
-              actions: [
+              actions: canManage ? [
                 Padding(
                   padding: const EdgeInsets.only(right: 16),
                   child: KasaButton(
@@ -128,7 +130,7 @@ class _PropertyDetailView extends ConsumerWidget {
                     ),
                   ),
                 ),
-              ],
+              ] : null,
             ),
 
             // ── Property summary card ──────────────────────────────────────
@@ -242,6 +244,7 @@ class _PropertyDetailView extends ConsumerWidget {
                         child: _UnitCard(
                           unit: u,
                           status: uStatus,
+                          canManage: canManage,
                           onEdit: () => showDialog(
                             context: context,
                             barrierDismissible: false,
@@ -354,11 +357,13 @@ class _UnitCard extends StatelessWidget {
   const _UnitCard({
     required this.unit,
     required this.status,
+    required this.canManage,
     required this.onEdit,
     required this.onDelete,
   });
   final Map<String, dynamic> unit;
   final String status;
+  final bool canManage;
   final VoidCallback onEdit, onDelete;
 
   @override
@@ -425,7 +430,8 @@ class _UnitCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                PopupMenuButton<String>(
+                if (canManage)
+                  PopupMenuButton<String>(
                   icon: Icon(Icons.more_vert, color: cs.kasaTextSub, size: 20),
                   onSelected: (action) {
                     if (action == 'edit') onEdit();

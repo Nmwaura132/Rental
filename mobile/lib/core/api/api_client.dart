@@ -8,6 +8,21 @@ import '../providers/server_url_provider.dart';
 
 const _storage = FlutterSecureStorage();
 
+final publicDioProvider = Provider<Dio>((ref) {
+  final baseUrl = ref.watch(serverUrlProvider);
+  return Dio(
+    BaseOptions(
+      baseUrl: baseUrl,
+      connectTimeout: const Duration(seconds: 10),
+      receiveTimeout: const Duration(seconds: 15),
+      headers: {
+        'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
+      },
+    ),
+  );
+});
+
 /// Base Dio instance with JWT auth interceptor.
 /// Rebuilt whenever the server URL changes.
 final dioProvider = Provider<Dio>((ref) {

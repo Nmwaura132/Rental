@@ -16,10 +16,22 @@ flutter pub get
 flutter run
 ```
 
-> **API URL**: Edit `lib/core/constants.dart`
-> - Android emulator: `http://10.0.2.2:8020`
-> - iOS simulator: `http://localhost:8020`
-> - Physical device: use your computer's local IP e.g. `http://192.168.x.x:8020`
+The Android emulator defaults to `http://10.0.2.2:8020`. Override endpoints at
+build time instead of editing source:
+
+```bash
+flutter run \
+  --dart-define=API_BASE_URL=http://192.168.1.10:8020 \
+  --dart-define=MEDIA_BASE_URL=http://192.168.1.10:9000
+```
+
+For a production Android build:
+
+```bash
+flutter build appbundle --release \
+  --dart-define=API_BASE_URL=https://api.example.com \
+  --dart-define=MEDIA_BASE_URL=https://files.example.com
+```
 
 ## Architecture
 
