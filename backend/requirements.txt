@@ -9,11 +9,13 @@ mysqlclient==2.2.4               # C extension — fastest MySQL driver for Djan
 
 # ── Auth & Security ───────────────────────────────────────────────────────────
 djangorestframework-simplejwt==5.5.1
+pyjwt==2.13.0                    # simplejwt's signer — pinned directly; 2.12.1 carries 8 CVEs
 django-cors-headers==4.4.0
 django-axes==7.0.0               # brute-force login protection
 
 # ── Async tasks ───────────────────────────────────────────────────────────────
 celery==5.4.0
+msgpack==1.2.1                   # celery serializer — pinned to clear GHSA-6v7p-g79w-8964
 django-celery-beat==2.7.0        # DB-backed periodic tasks
 django-celery-results==2.5.1     # store task results in DB
 redis==5.2.0
@@ -23,14 +25,14 @@ django-filter==24.3              # filter querysets in DRF views
 drf-spectacular==0.27.2          # OpenAPI / Swagger docs
 
 # ── Payments ──────────────────────────────────────────────────────────────────
-requests==2.32.4                 # M-Pesa Daraja API calls — 2.32.4 fixes CVE-2024-47081
-urllib3==1.26.20                 # pin to version africastalking expects (avoids RequestsDependencyWarning)
+requests==2.33.0
+urllib3==2.7.0
 
 # ── Notifications ─────────────────────────────────────────────────────────────
-africastalking==1.2.5            # SMS + WhatsApp
+africastalking==2.0.2            # SMS + WhatsApp
 
 # ── Files & PDFs ─────────────────────────────────────────────────────────────
-Pillow==12.2.0                   # image handling (maintenance photos) — 12.x requires Python 3.10+ (we use 3.12)
+Pillow==12.3.0                   # image handling (maintenance photos)
 reportlab==4.2.5                 # PDF receipts & lease documents
 django-storages[s3]==1.14.4
 boto3==1.35.91
@@ -41,5 +43,5 @@ gevent==24.11.1
 
 # ── Dev / Testing ─────────────────────────────────────────────────────────────
 pytest-django==4.9.0
-pytest==8.3.4
+pytest==9.0.3
 factory-boy==3.3.1               # test data factories

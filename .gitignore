@@ -8,6 +8,7 @@
 .env.*
 *.env
 !.env.example
+.secrets/
 
 # Claude Code / gstack — local-only state (per-machine), never push
 .claude/settings.local.json

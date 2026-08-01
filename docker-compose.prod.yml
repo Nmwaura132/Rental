@@ -6,6 +6,7 @@ services:
     restart: unless-stopped
     volumes:
       - mysql_data:/var/lib/mysql
+    env_file: ${ENV_FILE:-.env.production}
     environment:
       MYSQL_DATABASE: ${DB_NAME}
       MYSQL_USER: ${DB_USER}
@@ -23,6 +24,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    env_file: ${ENV_FILE:-.env.production}
     command: redis-server --requirepass ${REDIS_PASSWORD} --maxmemory 256mb --maxmemory-policy allkeys-lru
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
@@ -40,6 +42,7 @@ services:
     volumes:
       - static_files:/app/staticfiles
       - media_files:/app/mediafiles
+    env_file: ${ENV_FILE:-.env.production}
     expose:
       - "8000"
     depends_on:
@@ -54,17 +57,33 @@ services:
     security_opt:
       - no-new-privileges:true
 
-  celery:
+  celery-payments:
     build:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    env_file: ${ENV_FILE:-.env.production}
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: celery -A config worker -l info --concurrency=4
+    command: celery -A config worker -l info --concurrency=2 -Q payments
+    security_opt:
+      - no-new-privileges:true
+
+  celery-notifications:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: ${ENV_FILE:-.env.production}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A config worker -l info --concurrency=2 -Q notifications
     security_opt:
       - no-new-privileges:true
 
@@ -73,6 +92,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    env_file: ${ENV_FILE:-.env.production}
     depends_on:
       db:
         condition: service_healthy
@@ -85,10 +105,15 @@ services:
   minio:
     image: minio/minio:latest
     restart: unless-stopped
-    # WHY: 9000 stays public for media serving; 9001 (admin console) is intentionally
-    # NOT exposed — access via `ssh -L 9001:localhost:9001 vps` only.
-    ports:
-      - "9000:9000"
+    env_file: ${ENV_FILE:-.env.production}
+    # WHY expose rather than publish: signed URLs for national ID photos and lease
+    # PDFs must not be served over plain HTTP. Publishing 9000 put MinIO on the
+    # host at http://<ip>:9000 with no TLS, so the signature and the document both
+    # travelled in the clear. Traefik now terminates TLS in front of it and reaches
+    # 9000 over the internal network only. 9001 (admin console) stays unreachable —
+    # use `ssh -L 9001:localhost:9001 vps`.
+    expose:
+      - "9000"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
@@ -106,6 +131,7 @@ services:
   create-buckets:
     image: minio/mc
     restart: "no"
+    env_file: ${ENV_FILE:-.env.production}
     depends_on:
       minio:
         condition: service_healthy
@@ -113,7 +139,7 @@ services:
       /bin/sh -c "
       /usr/bin/mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
       /usr/bin/mc mb local/${MINIO_BUCKET_NAME} 2>/dev/null || true;
-      /usr/bin/mc anonymous set public local/${MINIO_BUCKET_NAME} || true;
+      /usr/bin/mc anonymous set none local/${MINIO_BUCKET_NAME} || true;
       /usr/bin/mc mb local/kasa-backups 2>/dev/null || true;
       exit 0;
       "
@@ -126,6 +152,7 @@ services:
     build:
       context: ./backup
     restart: unless-stopped
+    env_file: ${ENV_FILE:-.env.production}
     environment:
       DB_HOST: db
       DB_PORT: "3306"

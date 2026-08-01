@@ -9,7 +9,7 @@ Env.read_env('.env')
 username = env('AT_USERNAME', default='sandbox')
 api_key = env('AT_API_KEY', default='')
 
-test_phone = "+254100368483"
+test_phone = env("AT_TEST_PHONE")
 message = "Rental Manager: JSON API test."
 
 def test_endpoint(name, url, user):

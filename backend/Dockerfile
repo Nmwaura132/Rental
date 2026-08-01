@@ -21,8 +21,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN groupadd -r django && useradd -r -g django django
 
 # Install Python dependencies first (layer cache friendly)
+# WHY upgrade pip: the pip shipped in python:3.12-slim carries its own CVEs, and
+# CI runs pip-audit over the built image — a stale installer fails the audit even
+# when every application dependency is clean.
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt
 
 # Copy project
 COPY --chown=django:django . .

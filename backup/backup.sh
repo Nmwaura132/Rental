@@ -48,30 +48,57 @@ while true; do
   sleep "$secs"
 
   STAMP=$(date +%Y%m%d-%H%M%S)
+  RAW_FILE="/tmp/${DB_NAME}-${STAMP}.sql"
   DUMP_FILE="/tmp/${DB_NAME}-${STAMP}.sql.gz"
   echo "[backup] dumping ${DB_NAME} -> ${DUMP_FILE}"
 
   # WHY --single-transaction: dumps InnoDB tables without table locks (safe
   # against live writes). --routines + --triggers preserve stored procs.
-  # --set-gtid-purged=OFF avoids GTID-restore complications on MySQL 8.
-  if mysqldump \
+  #
+  # WHY no --set-gtid-purged: Debian's default-mysql-client is MariaDB's
+  # mysqldump, which rejects that Oracle-only flag outright ("unknown variable").
+  #
+  # WHY --ssl-verify-server-cert=0: the MariaDB client verifies certificates by
+  # default and the MySQL server presents a self-signed cert, so the connection
+  # is refused. The link is container-to-container on a private Docker network;
+  # this keeps the traffic encrypted but skips chain validation.
+  #
+  # WHY --no-tablespaces: the backup role is a plain app user without the
+  # PROCESS privilege that tablespace introspection requires.
+  #
+  # WHY dump to an uncompressed file first: `mysqldump | gzip > f` reports the
+  # exit status of gzip, not mysqldump, so a failed dump still looked like a
+  # success and shipped a 20-byte empty archive every night. Writing the raw
+  # dump first lets us test mysqldump's own status.
+  if ! mysqldump \
       --host="$DB_HOST" --port="$DB_PORT" \
       --user="$DB_USER" --password="$DB_PASSWORD" \
+      --ssl-verify-server-cert=0 --no-tablespaces \
       --single-transaction --quick --routines --triggers \
-      --set-gtid-purged=OFF \
-      "$DB_NAME" | gzip -c > "$DUMP_FILE"; then
-    SIZE=$(stat -c%s "$DUMP_FILE")
-    echo "[backup] dump OK (${SIZE} bytes), uploading..."
-    if mc cp "$DUMP_FILE" "local/$BACKUP_BUCKET/$(basename "$DUMP_FILE")"; then
-      echo "[backup] uploaded to local/$BACKUP_BUCKET/$(basename "$DUMP_FILE")"
-    else
-      echo "[backup] ERROR: upload failed; keeping local dump for next attempt" >&2
-    fi
-    rm -f "$DUMP_FILE"
-  else
-    echo "[backup] ERROR: mariadb-dump failed" >&2
-    rm -f "$DUMP_FILE"
+      "$DB_NAME" > "$RAW_FILE"; then
+    echo "[backup] ERROR: mysqldump failed" >&2
+    rm -f "$RAW_FILE"
+    continue
   fi
+
+  # WHY check the trailer: mysqldump can exit 0 having written a truncated dump
+  # (killed mid-stream, disk full). It always ends with this marker when whole.
+  if ! tail -c 512 "$RAW_FILE" | grep -q "Dump completed"; then
+    echo "[backup] ERROR: dump incomplete (no 'Dump completed' trailer); discarding" >&2
+    rm -f "$RAW_FILE"
+    continue
+  fi
+
+  gzip -c "$RAW_FILE" > "$DUMP_FILE"
+  rm -f "$RAW_FILE"
+  SIZE=$(stat -c%s "$DUMP_FILE")
+  echo "[backup] dump OK (${SIZE} bytes), uploading..."
+  if mc cp "$DUMP_FILE" "local/$BACKUP_BUCKET/$(basename "$DUMP_FILE")"; then
+    echo "[backup] uploaded to local/$BACKUP_BUCKET/$(basename "$DUMP_FILE")"
+  else
+    echo "[backup] ERROR: upload failed; keeping local dump for next attempt" >&2
+  fi
+  rm -f "$DUMP_FILE"
 
   # Retention sweep — drop dumps older than RETENTION_DAYS.
   echo "[backup] retention sweep (older than ${RETENTION_DAYS}d)..."

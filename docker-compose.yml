@@ -60,7 +60,7 @@ services:
     security_opt:
       - no-new-privileges:true
 
-  celery:
+  celery-payments:
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -73,7 +73,24 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: celery -A config worker -l info --concurrency=4
+    command: celery -A config worker -l info --concurrency=2 -Q payments
+    security_opt:
+      - no-new-privileges:true
+
+  celery-notifications:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    volumes:
+      - ./backend:/app
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A config worker -l info --concurrency=2 -Q notifications
     security_opt:
       - no-new-privileges:true
 
@@ -125,7 +142,7 @@ services:
       /bin/sh -c "
       /usr/bin/mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
       /usr/bin/mc mb local/${MINIO_BUCKET_NAME} 2>/dev/null || true;
-      /usr/bin/mc anonymous set public local/${MINIO_BUCKET_NAME} || true;
+      /usr/bin/mc anonymous set none local/${MINIO_BUCKET_NAME} || true;
       exit 0;
       "
 

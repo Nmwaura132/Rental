@@ -10,8 +10,7 @@ username = env('AT_USERNAME', default='sandbox')
 api_key = env('AT_API_KEY', default='')
 sender_id = env('AT_SENDER_ID', default=None)
 
-# The test number you provided
-test_phone = "+254100368483" 
+test_phone = env("AT_TEST_PHONE")
 
 print(f"--- AT SMS Test ---")
 print(f"Username: {username}")
