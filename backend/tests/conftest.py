@@ -15,6 +15,14 @@ from django.contrib.auth import get_user_model
 User = get_user_model()
 
 
+@pytest.fixture(autouse=True)
+def isolate_external_celery_tasks(monkeypatch):
+    from apps.notifications.tasks import send_payment_receipt_sms, send_sms
+
+    monkeypatch.setattr(send_payment_receipt_sms, "delay", lambda *args, **kwargs: None)
+    monkeypatch.setattr(send_sms, "delay", lambda *args, **kwargs: None)
+
+
 @pytest.fixture
 def landlord(db):
     return User.objects.create_user(
@@ -34,6 +42,17 @@ def tenant(db):
         first_name="Test",
         last_name="Tenant",
         role=User.Role.TENANT,
+    )
+
+
+@pytest.fixture
+def caretaker(db):
+    return User.objects.create_user(
+        phone_number="+254700111222",
+        password="Caretaker@Test1",
+        first_name="Test",
+        last_name="Caretaker",
+        role=User.Role.CARETAKER,
     )
 
 
@@ -76,7 +95,7 @@ def invoice(db, lease):
         invoice_number="INV-TEST-000001",
         amount_due=lease.rent_amount,
         amount_paid=Decimal("0"),
-        due_date=period_start + timedelta(days=7),
+        due_date=date.today() + timedelta(days=7),
         period_start=period_start,
         period_end=period_start + timedelta(days=30),
     )

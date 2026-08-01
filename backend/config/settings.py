@@ -137,6 +137,11 @@ if USE_S3:
     AWS_S3_USE_SSL = env.bool("S3_USE_SSL", default=False)
     AWS_S3_SIGNATURE_VERSION = "s3v4"
     AWS_S3_FILE_OVERWRITE = False
+    AWS_S3_PUBLIC_ENDPOINT_URL = env(
+        "S3_PUBLIC_ENDPOINT_URL",
+        default=AWS_S3_ENDPOINT_URL,
+    ).rstrip("/")
+    AWS_QUERYSTRING_EXPIRE = env.int("S3_SIGNED_URL_EXPIRES", default=3600)
     
     # Custom domain / public URL for media
     MEDIA_URL = env("S3_PUBLIC_URL", default=f"{AWS_S3_ENDPOINT_URL}/{AWS_STORAGE_BUCKET_NAME}/public/")
@@ -178,6 +183,10 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
+CELERY_TASK_ROUTES = {
+    "apps.payments.tasks.*": {"queue": "payments"},
+    "apps.notifications.tasks.*": {"queue": "notifications"},
+}
 
 # ── Celery Beat periodic schedule ─────────────────────────────────────────────
 from celery.schedules import crontab
@@ -192,6 +201,10 @@ CELERY_BEAT_SCHEDULE = {
     "send-rent-reminders": {
         "task": "apps.notifications.tasks.send_rent_reminders",
         "schedule": crontab(hour=8, minute=0),
+    },
+    "mark-overdue-invoices": {
+        "task": "apps.payments.tasks.mark_overdue_invoices",
+        "schedule": crontab(hour=0, minute=5),
     },
     # Reconcile pending STK Push transactions every 5 minutes
     "reconcile-stk-transactions": {
@@ -249,6 +262,7 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(days=30),  # 30-day sessions
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
+    "CHECK_REVOKE_TOKEN": True,
     "ALGORITHM": "HS256",
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
