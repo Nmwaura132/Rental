@@ -5,7 +5,8 @@
 Kasa is a Kenya-focused rental property management system. Django REST API + Flutter mobile app.
 Three roles: **Landlord**, **Caretaker**, **Tenant**. Auth uses phone number (E.164) as username, not email.
 
-**Status**: In development. NOT YET LIVE. `DevPickerScreen` is the currently-routed login — must be swapped to `LoginScreen` before any real user.
+**Status**: In development. Phone/password login is wired; production release
+configuration is documented in `PRODUCTION.md`.
 
 ## Stack
 
@@ -23,13 +24,13 @@ docker compose exec api python manage.py migrate
 docker compose exec api python manage.py createsuperuser
 
 # Prod
-docker compose -f docker-compose.prod.yml up -d
+ENV_FILE=.env.production docker compose --env-file .env.production -f docker-compose.prod.yml up -d
 
 # Mobile
 cd mobile && flutter pub get && flutter run
-cd mobile && flutter build apk --release
+cd mobile && flutter build appbundle --release --dart-define=API_BASE_URL=https://api.example.com --dart-define=MEDIA_BASE_URL=https://files.example.com
 
-# Backend tests (NONE EXIST YET — see Known Issues)
+# Backend tests
 cd backend && pytest
 ```
 
@@ -46,7 +47,7 @@ cd backend && pytest
 - `apps/payments/tasks.py` — money path. Known race condition in `process_mpesa_payment` and `process_stk_callback` (non-atomic `invoice.amount_paid` updates). Fix before scaling.
 - `apps/payments/views.py` — M-Pesa webhook contract. Do NOT change response shape; Safaricom expects `{"ResultCode": 0, "ResultDesc": "..."}`.
 - `apps/core/middleware.py` — Safaricom IP allowlist. Skipped when `DEBUG=True`. Production-critical.
-- `mobile/lib/core/api/api_client.dart` — JWT refresh has a known rotation bug at line ~109 (new refresh token not persisted after rotation). Every user gets logged out after first 30-min expiry.
+- `mobile/lib/core/api/api_client.dart` — JWT access and rotated refresh tokens are persisted in secure storage.
 
 ## Skill routing
 
@@ -67,26 +68,22 @@ cd backend && pytest
 
 When the user's request matches a skill, invoke it. When in doubt, invoke the skill.
 
-## Known critical issues (see `handoff.md` for full list)
+## Resolved launch blockers (see `handoff.md` for historical context)
 
-1. Mobile uses `DevPickerScreen` instead of `LoginScreen` — `mobile/lib/core/router.dart`
-2. Refresh token rotation bug — `mobile/lib/core/api/api_client.dart:109` doesn't save new refresh token
-3. Invoice `amount_paid` race condition — `backend/apps/payments/tasks.py` (two functions)
-4. OTP uses `random.randint` (not crypto-secure) — `backend/apps/accounts/views.py:PasswordResetRequestView`
-5. Raw exceptions in 500 responses — `UploadIdPhotoView`, `send_lease`
-6. MinIO console port 9001 publicly exposed — `docker-compose.prod.yml`
-7. Hardcoded credentials in mobile — `mobile/lib/core/constants.dart`
-8. Swagger `/api/docs/` accessible in production — `backend/config/urls.py`
+The May 2026 blockers covering login, refresh rotation, payment races, OTP
+entropy, error leakage, MinIO exposure, embedded credentials, and production
+Swagger access have been addressed. Authorization and private signed document
+storage were hardened in July 2026.
 
 Full review: `~/.gstack/projects/Nmwaura132-Rental/main-autoplan-20260516.md`
 
 ## Don't
 
 - Don't add `Co-Authored-By: Claude` or any Claude/Anthropic authorship to commit messages.
-- Don't ship `DevPickerScreen` — swap to `LoginScreen` first.
+- Don't add development account pickers or embedded credentials to the mobile app.
 - Don't expose Swagger (`/api/docs/`) in production — gate behind `if settings.DEBUG`.
 - Don't use `float()` on monetary values. Use `Decimal(str(value))`.
-- Don't bypass the storage backend — use `default_storage` or the `PublicMediaStorage` class, not inline `boto3.client(...)`.
+- Don't bypass `apps.core.private_files` for identity documents, lease PDFs, reports, or maintenance photos.
 - Don't modify existing migrations — always create new ones.
 - Don't commit `.env` files (already in `.gitignore`).
 - Don't bind MinIO port 9001 publicly in production.

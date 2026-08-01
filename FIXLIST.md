@@ -14,9 +14,9 @@ Source reports:
 - P1-8 (OTP via secrets), P1-9 (KCB/Equity fail-CLOSED), P1-10 (sanitized 500 bodies), P1-11 (MinIO 9001 off), P1-12 (sslip.io gate), P1-13 (16 pytest tests pass), P1-14 (daily mysqldump backup), P1-15 (auth throttles), P1-16 (OpenAPI schema), P1-17 (CI/CD + Dependabot)
 - P2-18 (float→Decimal in 3 sites), P2-19 (retry on receipt SMS), P2-20 (PublicMediaStorage lazy), P2-21 (Swagger DEBUG-only), P2-22 (Redis port off), P2-23 (MFA plan doc), P2-24 (single source for unit-status), P2-25 (invoice due-date 8th)
 
-**Deferred until 2026-05-19 (Tuesday post-demo):**
-- P0-1 (PII → private MinIO + signed URLs) — demo uses ID upload + lease PDF flow
-- P0-2 (DevPickerScreen → LoginScreen) — kept for Monday demo
+**Completed 2026-07-29:**
+- P0-1 (PII → private MinIO + signed URLs)
+- P0-2 (DevPickerScreen → LoginScreen)
 - P2-26 (error response shape) — mobile parser coordination needed
 
 **Verified:**
@@ -25,6 +25,44 @@ Source reports:
 - Django check --deploy: 42 → 6 warnings (remaining 6 are DEBUG-only security warnings; production sets them via `if not DEBUG:`)
 - pytest: 16/16 passing in 7.25s
 - OpenAPI: spectacular --validate clean, schema generates 2669 lines
+
+## Session 2026-07-31 — build repair
+
+**Fixed:**
+- **Dev API crash loop.** `payments/0007` had half-applied: MySQL does not roll
+  back DDL, so when its `invoice_lease_period_unique` step hit duplicate rows the
+  four already-created CHECK constraints survived while `django_migrations` stayed
+  at `0006`. Every restart then died on "Duplicate check constraint name". Dropped
+  the orphans and added a `RunPython` dedupe as 0007's *first* operation, so a
+  failure now aborts before any DDL runs instead of recreating the trap. The
+  dedupe only removes duplicates carrying no payment and zero `amount_paid`;
+  anything holding money raises and asks for a human.
+- **Env-dependent migration state.** `MaintenanceRequest.photo` used
+  `storage=PrivateMediaStorage if settings.USE_S3 else None`, so the deconstructed
+  field — and therefore `makemigrations --check` — differed by environment. Replaced
+  with the module-level callable `private_media_storage`; drift check is now
+  identical with `USE_S3` true or false.
+- **Backups were empty for ~2 months.** Every archive in `kasa-backups` was 20
+  bytes. Two causes, both in `backup/backup.sh`: MariaDB's `mysqldump` (what
+  Debian's `default-mysql-client` provides) rejects Oracle-only
+  `--set-gtid-purged=OFF`, and `mysqldump | gzip > f` yields gzip's exit status so
+  the failure looked like success. Verified a repaired run produces an 86,980-byte
+  dump / 16 KiB archive covering 36 tables. Also needed
+  `--ssl-verify-server-cert=0` (MySQL's self-signed cert) and `--no-tablespaces`
+  (backup user lacks PROCESS) — both latent failures the flag fix alone would have
+  exposed.
+- **Stale image + unpinned CVEs.** requirements.txt already pinned fixed urllib3 /
+  requests / Pillow, but the running image predated them; `pyjwt` (simplejwt's
+  signer) and `msgpack` were unpinned. Pinned both, upgraded pip in the Dockerfile.
+  pip-audit: **43 vulns / 7 packages → 6 / 1** (then 0 after the pip bump).
+
+**Verified this session:**
+- pytest: **45 passed, 0 skipped** against MySQL — includes both row-lock
+  concurrency tests that skip on SQLite and had never actually run.
+- `makemigrations --check`: clean under `USE_S3=True` and `USE_S3=False`.
+- Django check: 0 issues. `flutter analyze`: no issues. `flutter test`: 4 passed.
+- Production VPS: api/celery/beat/db/redis/minio all up; DB holds 4 users, 10
+  units and **zero** leases/invoices/payments, so 0007 applies there cleanly.
 
 ---
 
@@ -117,15 +155,48 @@ Source reports:
 
 ---
 
+## P0 (new) — found 2026-07-31
+
+34. **Production `SECRET_KEY` is insecure.** `manage.py check --deploy` on the live
+    api container reports `security.W009` with `DEBUG=False`. simplejwt signs
+    HS256 tokens with `SECRET_KEY`, so a guessable key means forgeable access
+    tokens. Generate a 50+ char random key, set it in `.env.production`, redeploy.
+    Rotating invalidates existing sessions and refresh tokens — fine pre-launch.
+
+35. **Nightly backups were silently empty.** Every dump in `kasa-backups` from
+    ~May through 2026-07-31 is a 20-byte empty gzip. Two compounding causes,
+    both fixed in `backup/backup.sh`: MariaDB's `mysqldump` rejects the
+    Oracle-only `--set-gtid-purged=OFF`, and `mysqldump | gzip > f` returns
+    gzip's exit status, so the failure read as success. Needs a redeploy, then
+    confirm the next dump is kilobytes rather than 20 bytes.
+
+36. **Signed document URLs would be served over plain HTTP.** The live api has
+    `S3_PUBLIC_URL=http://37.221.93.219:9000/rental-assets` and no
+    `S3_PUBLIC_ENDPOINT_URL` at all, so MinIO is reached directly on port 9000
+    over HTTP at a bare IP. Harmless today only because prod still runs
+    pre-hardening code; the moment `apps.core.private_files` deploys, national ID
+    photos and lease PDFs travel unencrypted with their signatures in the query
+    string. Set both to an HTTPS host behind Traefik (per `PRODUCTION.md`) and
+    stop publishing 9000 before that deploy. `S3_SIGNED_URL_EXPIRES` is also
+    unset — it wants an explicit value.
+
+37. **`.sslip.io` wildcard is in production `ALLOWED_HOSTS`.** P1-12 gated the
+    code path behind `ALLOW_SSLIP_HOSTS`, but the deployed env lists `.sslip.io`
+    literally, which accepts any sslip.io subdomain — i.e. any host that resolves
+    to an arbitrary IP. Fine for staging, wrong once real tenants exist; pin to
+    the actual domain.
+
+---
+
 ## P3 — Strategic / product gaps
 
 27. **No tenant/landlord onboarding flow** — CEO finding from autoplan. Can't ship without it.
-28. **No lease creation UI in mobile** — backend API exists, no UI wired.
-29. **Jenga/bank reconciliation is dead code** — remove or feature-flag until live credentials exist.
-30. **Caretaker role under-tested** — no documented or tested flow for what caretakers can/cannot do.
-31. **No push notifications** — SMS-only erodes once Africa's Talking credits run out.
-32. **No rent receipt PDF** — autoplan-flagged; tenants in Kenya expect a printable receipt.
-33. **No late fee logic** — Kenyan leases universally charge late fees.
+28. ~~**No lease creation UI in mobile**~~ — DONE. `tenants_screen.dart` posts to `/api/v1/tenants/leases/`.
+29. **Jenga/bank reconciliation is dead code** — remove or feature-flag until live credentials exist. Now fails closed and has `tests/test_bank_reconciliation.py`, but still dormant.
+30. ~~**Caretaker role under-tested**~~ — DONE. `tests/test_authorization.py` (349 lines) covers the role matrix; `docs/api-permission-matrix.md` documents it.
+31. **No push notifications** — `firebase_core` / `firebase_messaging` are declared in `pubspec.yaml` but unused in `mobile/lib`, and the backend has no device-token or FCM dispatch path. Dependency only, not an implementation.
+32. **No rent receipt PDF** — autoplan-flagged; tenants in Kenya expect a printable receipt. (SMS receipts exist; PDF does not.)
+33. **No late fee logic** — Kenyan leases universally charge late fees. No code anywhere.
 
 ---
 

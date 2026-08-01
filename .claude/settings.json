@@ -10,7 +10,32 @@
       "Bash(tasklist /FI \"PID eq 20668\")",
       "Bash(cmd /c \"tasklist /FI \"\"PID eq 11052\"\" && tasklist /FI \"\"PID eq 20668\"\"\")",
       "Bash(cmd /c \"netstat -ano | findstr :3307\")",
-      "Bash(\"C:/Users/user/Flutter/flutter/bin/dart.bat\" analyze:*)"
+      "Bash(\"C:/Users/user/Flutter/flutter/bin/dart.bat\" analyze:*)",
+      "WebFetch(domain:developer.safaricom.co.ke)",
+      "Skill(autoplan)",
+      "Skill(autoplan:*)",
+      "Skill(plan-ceo-review)",
+      "Skill(plan-ceo-review:*)",
+      "Skill(cso)",
+      "Skill(cso:*)",
+      "Skill(health)",
+      "Skill(health:*)",
+      "Bash(echo \"EXIT_CODE=$?\")",
+      "Bash(MSYS_NO_PATHCONV=1 docker compose exec -T api python manage.py spectacular --validate --file /tmp/schema.yml)",
+      "Bash(MSYS_NO_PATHCONV=1 docker compose exec -T api wc -l /tmp/schema.yml)",
+      "Read(//c/Users/user/personal/Rental Management system/**)",
+      "Bash(C:/Users/user/AppData/Local/Android/Sdk/emulator/emulator.exe -avd Medium_Phone_API_36.1 -no-snapshot-save -no-boot-anim -gpu host)",
+      "Bash(C:/Users/user/AppData/Local/Android/Sdk/platform-tools/adb.exe shell *)",
+      "Bash(C:/Users/user/AppData/Local/Android/Sdk/platform-tools/adb.exe devices *)",
+      "Bash(C:/Users/user/AppData/Local/Android/Sdk/platform-tools/adb.exe install *)",
+      "Bash(\"C:/Users/user/AppData/Local/Android/Sdk/platform-tools/adb.exe\" logcat *)",
+      "Bash(git check-ignore *)",
+      "Bash(mkdir -p /tmp/kasa-commit-msgs)",
+      "Bash(git log *)",
+      "Bash(git reset *)",
+      "Bash(git restore *)",
+      "Bash(curl -sS -o /dev/null -w '  HTTP=%{http_code}  total=%{time_total}s\\\\n' --max-time 10 https://rwrwarkqwn77gwu6zbky1ppo.37.221.93.219.sslip.io/api/v1/auth/login/ -H 'Content-Type: application/json' -X POST -d '{}')",
+      "Bash(grep -qE \"^\\\\\\\\s*$|exit code|naming to|FAILED|DONE|writing image|=> ERROR\" /c/Users/user/AppData/Local/Temp/claude/c--Users-user-personal-Rental-Management-system/4bd9cecb-ffc0-4a74-a00c-fa37171daafd/tasks/bx5i8ldhn.output)"
     ]
   }
 }

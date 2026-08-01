@@ -1,6 +1,6 @@
 # Kasa — Developer Handoff
 
-Last updated: 2026-05-16 | Branch: main | Commit: 893d930
+Last updated: 2026-07-29 | Branch: main
 
 ## What is this?
 
@@ -13,11 +13,36 @@ Kasa is a rental property management system for the Kenyan informal landlord mar
 
 **In development. NOT YET LIVE in production for real users.**
 
-A staging instance runs on a single VPS at `37.221.93.219` via Coolify + Docker Compose. The mobile app currently routes `/login` to `DevPickerScreen` (one-tap login as landlord or tenant using hardcoded dev credentials) — this is the biggest launch blocker.
+A staging instance runs on a single VPS via Coolify + Docker Compose. The mobile
+app routes `/login` to the real phone/password login screen. API and media
+endpoints are injected with `--dart-define`; no account credentials are embedded
+in the app.
 
-## Critical issues blocking launch
+The July security hardening added role and ownership authorization, manager-owned
+tenant registration, private signed document URLs, a private MinIO bucket,
+environment-only development seed credentials, and explicit production env-file
+injection. See `PRODUCTION.md` for the release commands.
 
-Severity-ordered list (consolidated from `/autoplan` review on 2026-05-16):
+**The VPS is behind the working tree** (checked 2026-07-31). It runs `payments`
+migrations through `0006` and `tenants` through `0003`, so none of the July
+hardening — private document storage, the authorization layer, the financial
+constraints — is deployed yet. The database holds 4 users and 10 units with zero
+leases, invoices or payments, so the pending migrations apply cleanly.
+
+Two things to settle before that deploy:
+
+1. `manage.py check --deploy` on the live api container reports `security.W009`
+   — the production `SECRET_KEY` is auto-generated/insecure. simplejwt signs
+   HS256 tokens with it, so tokens are forgeable. Rotate it in
+   `.env.production` before real users exist.
+2. Redeploy is what activates the backup fix below; confirm the next nightly
+   dump is kilobytes, not 20 bytes.
+
+## Historical May audit
+
+This list is retained as historical context. Items 1–15 were addressed before
+the July 2026 hardening pass; use current tests and `PRODUCTION.md` as the source
+of truth.
 
 1. **[CRITICAL]** Mobile login is `DevPickerScreen`, not `LoginScreen` — `mobile/lib/core/router.dart` line 41. Swap before any user touches the app.
 2. **[CRITICAL]** Refresh token rotation bug — `mobile/lib/core/api/api_client.dart` line ~109. `_tryRefreshToken()` saves `access_token` but never persists the new `refresh_token`. Backend has `ROTATE_REFRESH_TOKENS = True` — every user is silently logged out after first 30-minute expiry.
@@ -81,11 +106,11 @@ Sandbox M-Pesa credentials are at https://developer.safaricom.co.ke. The default
 
 ### Mobile (`mobile/lib/`)
 - `main.dart` — app entry, providers, MaterialApp
-- `core/api/api_client.dart` — Dio instance + JWT interceptor (refresh token bug here)
-- `core/router.dart` — GoRouter; routes `/login` to `DevPickerScreen` currently
-- `core/constants.dart` — hardcoded API base URL + dev credentials (must be removed before release)
+- `core/api/api_client.dart` — Dio instance + JWT interceptor with token rotation
+- `core/router.dart` — GoRouter; routes `/login` to `LoginScreen`
+- `core/constants.dart` — build-time API and media endpoints
 - `core/theme/kasa_tokens.dart` — design tokens
-- `features/auth/` — `login_screen.dart` (NOT wired) + `dev_picker_screen.dart` (currently wired)
+- `features/auth/` — phone/password login and OTP password reset
 - `features/dashboard/`, `features/properties/`, `features/tenants/`, `features/payments/`, `features/maintenance/`, `features/profile/`, `features/notifications/` — UI screens
 
 ### Infrastructure
@@ -100,7 +125,9 @@ Sandbox M-Pesa credentials are at https://developer.safaricom.co.ke. The default
 - **Safaricom Daraja API** — sandbox + production. Production URLs registered via `MpesaRegisterC2BView`. Webhook IP allowlist hardcoded in `core/middleware.py:SAFARICOM_IPS` — verify list against developer.safaricom.co.ke at least annually.
 - **Africa's Talking** — SMS dispatch. Custom sender ID requires AT support ticket; defaults to shared sandbox sender.
 - **Jenga API** (KCB, Equity) — currently dormant. `apps/payments/jenga.py`, `bank_views.py`, `bank_reconcile.py` are written but no live credentials. Plan to keep dormant until commercial agreement is in hand.
-- **MinIO** — bucket `kasa-media` must have a `public/` prefix with anonymous read access for tenant ID photos and lease PDFs to resolve from the mobile app.
+- **MinIO** — the asset bucket is private. ID photos, lease PDFs, reports, and
+  maintenance photos are returned through expiring signed URLs generated for
+  `S3_PUBLIC_ENDPOINT_URL`.
 
 ## Cron jobs (Celery Beat)
 
@@ -122,10 +149,28 @@ Sandbox M-Pesa credentials are at https://developer.safaricom.co.ke. The default
 
 ## Backup strategy
 
-**NONE YET — critical gap.** The `mysql_data` Docker volume on a single VPS is the only copy of payment and tenant data. Plan:
-- Daily MySQL dump to MinIO (separate bucket)
-- Weekly MinIO snapshot off-site (S3 or rclone to remote)
-- Document restore procedure
+A `db-backup` sidecar (`backup/backup.sh`, wired in `docker-compose.prod.yml`)
+dumps MySQL nightly at 02:00 EAT, gzips it, and uploads to the `kasa-backups`
+MinIO bucket with a 30-day retention sweep.
+
+**Verify before trusting it.** Between roughly May and 2026-07-31 every uploaded
+dump was a 20-byte empty archive: Debian's `default-mysql-client` is MariaDB's
+`mysqldump`, which rejects the Oracle-only `--set-gtid-purged=OFF`, and the
+script piped straight into `gzip` so it saw gzip's exit status instead of
+mysqldump's. Both are fixed; the script now checks mysqldump's own status and
+requires the `-- Dump completed` trailer before uploading.
+
+Confirm the fix took after the next deploy:
+
+```bash
+# On the VPS — a real dump is kilobytes, not 20 bytes.
+docker exec $(docker ps --format '{{.Names}}' | grep '^minio-') \
+  mc ls local/kasa-backups | tail -5
+```
+
+Still outstanding:
+- Weekly off-site copy (S3 or rclone to a remote) — the bucket lives on the same VPS.
+- A documented, rehearsed restore procedure.
 
 ## Who to ask
 
