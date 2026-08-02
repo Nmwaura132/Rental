@@ -114,6 +114,23 @@ services:
     # use `ssh -L 9001:localhost:9001 vps`.
     expose:
       - "9000"
+    # WHY labels here rather than a domain set in the Coolify UI: this is the only
+    # record of how media is routed, and it belongs next to the service it routes
+    # in version control. Mirrors the entryPoint/certresolver pair Coolify
+    # generates for the api service so both are issued by the same ACME resolver.
+    labels:
+      - traefik.enable=true
+      - traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https
+      - traefik.http.routers.kasa-minio-http.entryPoints=http
+      - traefik.http.routers.kasa-minio-http.rule=Host(`files-rwrwarkqwn77gwu6zbky1ppo.37.221.93.219.sslip.io`)
+      - traefik.http.routers.kasa-minio-http.middlewares=redirect-to-https
+      - traefik.http.routers.kasa-minio-http.service=kasa-minio
+      - traefik.http.routers.kasa-minio-https.entryPoints=https
+      - traefik.http.routers.kasa-minio-https.rule=Host(`files-rwrwarkqwn77gwu6zbky1ppo.37.221.93.219.sslip.io`)
+      - traefik.http.routers.kasa-minio-https.tls=true
+      - traefik.http.routers.kasa-minio-https.tls.certresolver=letsencrypt
+      - traefik.http.routers.kasa-minio-https.service=kasa-minio
+      - traefik.http.services.kasa-minio.loadbalancer.server.port=9000
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
