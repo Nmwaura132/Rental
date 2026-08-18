@@ -22,7 +22,6 @@ class KasaColors {
   static const darkError        = Color(0xFFFF6E84);
 
   // Logo tokens
-  static const darkHouseFill    = Color(0xFF8496FF);
   static const darkKColor       = Color(0xFFFF8E7F);
   static const darkAsaColor     = Color(0xFFF0EDF4);
 
@@ -45,7 +44,6 @@ class KasaColors {
   static const lightError       = Color(0xFFD32F2F);
 
   // Logo tokens
-  static const lightHouseFill   = Color(0xFF2F3FB8);
   static const lightKColor      = Color(0xFFFF7A66);
   static const lightAsaColor    = Color(0xFF1A1A1F);
 }
@@ -102,8 +100,6 @@ extension KasaColorScheme on ColorScheme {
   Color get statusCancelledBg => statusCancelled.withValues(alpha: 0.12);
 
   // Logo
-  Color get kasaHouseFill => brightness == Brightness.dark
-      ? KasaColors.darkHouseFill : KasaColors.lightHouseFill;
   Color get kasaKColor    => brightness == Brightness.dark
       ? KasaColors.darkKColor    : KasaColors.lightKColor;
   Color get kasaAsaColor  => brightness == Brightness.dark

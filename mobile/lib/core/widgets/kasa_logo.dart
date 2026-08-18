@@ -5,94 +5,138 @@ import '../theme/kasa_tokens.dart';
 
 // ─── House mark ────────────────────────────────────────────────────────────────
 
+/// The Kasa mark — "Tenant Link" (concept 04).
+///
+/// Two half-dwellings interlocking into one home: the landlord side in
+/// periwinkle, the tenant side in coral, meeting on a shared tenon. The
+/// agreement itself, rather than a roof — a roof alone says real estate, and
+/// Kasa is rental operations.
 class KasaMark extends StatelessWidget {
   const KasaMark({super.key, this.size = 48, this.showShadow = true});
+
   final double size;
   final bool showShadow;
+
+  /// Below this the stroke and offset shadow stop resolving and just muddy the
+  /// silhouette, so the mark renders as flat colour instead.
+  static const _detailCutoff = 32.0;
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final h = size * (80 / 96);
+    final isDark = cs.brightness == Brightness.dark;
+    final detailed = size >= _detailCutoff;
+
     return SizedBox(
       width: size,
-      height: h,
+      height: size,
       child: CustomPaint(
-        painter: _HousePainter(
-          houseFill: cs.kasaHouseFill,
-          shadow: showShadow ? cs.kasaShadow : Colors.transparent,
+        painter: _TenantLinkPainter(
+          landlordFill: cs.secondary,
+          tenantFill: cs.primary,
+          // WHY the stroke is the background colour in dark: it separates the
+          // two fills from each other, and on near-black a near-black stroke
+          // reads as the gap it is. In light it is the near-black outline.
+          stroke: isDark ? KasaColors.darkBg : KasaColors.lightStroke,
+          // WHY the shadow inverts: a black offset shadow is invisible on a
+          // near-black ground, so dark mode throws a light one instead.
+          shadow: (showShadow && detailed)
+              ? (isDark ? KasaColors.darkText : KasaColors.lightShadow)
+              : Colors.transparent,
           shadowOffset: KasaBorders.shadow,
+          drawStroke: detailed,
         ),
       ),
     );
   }
 }
 
-class _HousePainter extends CustomPainter {
-  const _HousePainter({
-    required this.houseFill,
+class _TenantLinkPainter extends CustomPainter {
+  const _TenantLinkPainter({
+    required this.landlordFill,
+    required this.tenantFill,
+    required this.stroke,
     required this.shadow,
     required this.shadowOffset,
+    required this.drawStroke,
   });
 
-  final Color houseFill;
+  final Color landlordFill;
+  final Color tenantFill;
+  final Color stroke;
   final Color shadow;
   final double shadowOffset;
+  final bool drawStroke;
 
-  // Build the house-with-key path normalised to viewBox 96×80.
-  Path _buildPath() {
-    final p = Path()
-      // Outer house silhouette (clockwise from bottom-left)
-      ..moveTo(12, 74)
-      ..quadraticBezierTo(8, 74, 8, 70)
-      ..lineTo(8, 32)
-      ..quadraticBezierTo(8, 30, 9.5, 28.5)
-      ..lineTo(46, 4)
-      ..quadraticBezierTo(48, 2.5, 50, 4)
-      ..lineTo(86.5, 28.5)
-      ..quadraticBezierTo(88, 30, 88, 32)
-      ..lineTo(88, 70)
-      ..quadraticBezierTo(88, 74, 84, 74)
-      ..close()
-      // Key bow — full circle at (48, 42) r=6.5
-      ..addOval(Rect.fromCircle(center: const Offset(48, 42), radius: 6.5))
-      // Key shaft
-      ..addRect(const Rect.fromLTRB(45.5, 42, 50.5, 68))
-      // Tooth 1
-      ..addRect(const Rect.fromLTRB(50.5, 58, 55.5, 60.5))
-      // Tooth 2
-      ..addRect(const Rect.fromLTRB(50.5, 62.5, 55.5, 65));
-    p.fillType = PathFillType.evenOdd;
-    return p;
-  }
+  static const _viewBox = 100.0;
+
+  /// Left half — pitched roof, body, and the tenon reaching right.
+  Path _landlordPath() => Path()
+    ..moveTo(34, 6)
+    ..lineTo(48, 14)
+    ..lineTo(48, 42)
+    ..lineTo(60, 42)
+    ..lineTo(60, 58)
+    ..lineTo(48, 58)
+    ..lineTo(48, 94)
+    ..lineTo(10, 94)
+    ..lineTo(10, 40)
+    ..close();
+
+  /// Right half — the mortise it locks into.
+  Path _tenantPath() => Path()
+    ..moveTo(56, 18)
+    ..lineTo(94, 40)
+    ..lineTo(94, 94)
+    ..lineTo(64, 94)
+    ..lineTo(64, 64)
+    ..lineTo(52, 64)
+    ..lineTo(52, 36)
+    ..lineTo(64, 36)
+    ..lineTo(64, 28)
+    ..close();
 
   @override
   void paint(Canvas canvas, Size size) {
-    final scaleX = size.width / 96;
-    final scaleY = size.height / 80;
-    final path = _buildPath();
+    final scale = size.shortestSide / _viewBox;
+    final landlord = _landlordPath();
+    final tenant = _tenantPath();
 
-    // Hard-edge shadow — draw offset copy first
     if (shadow != Colors.transparent) {
       canvas.save();
       canvas.translate(shadowOffset, shadowOffset);
-      canvas.scale(scaleX, scaleY);
-      canvas.drawPath(path, Paint()..color = shadow);
+      canvas.scale(scale);
+      final paint = Paint()..color = shadow;
+      canvas.drawPath(landlord, paint);
+      canvas.drawPath(tenant, paint);
       canvas.restore();
     }
 
-    // Main house
     canvas.save();
-    canvas.scale(scaleX, scaleY);
-    canvas.drawPath(path, Paint()..color = houseFill);
+    canvas.scale(scale);
+    canvas.drawPath(landlord, Paint()..color = landlordFill);
+    canvas.drawPath(tenant, Paint()..color = tenantFill);
+
+    if (drawStroke) {
+      final outline = Paint()
+        ..color = stroke
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = KasaBorders.button
+        ..strokeJoin = StrokeJoin.miter;
+      canvas.drawPath(landlord, outline);
+      canvas.drawPath(tenant, outline);
+    }
     canvas.restore();
   }
 
   @override
-  bool shouldRepaint(_HousePainter old) =>
-      old.houseFill != houseFill ||
+  bool shouldRepaint(_TenantLinkPainter old) =>
+      old.landlordFill != landlordFill ||
+      old.tenantFill != tenantFill ||
+      old.stroke != stroke ||
       old.shadow != shadow ||
-      old.shadowOffset != shadowOffset;
+      old.shadowOffset != shadowOffset ||
+      old.drawStroke != drawStroke;
 }
 
 // ─── Wordmark ─────────────────────────────────────────────────────────────────
@@ -110,9 +154,9 @@ class KasaWordmark extends StatelessWidget {
           text: 'K',
           style: GoogleFonts.outfit(
             fontSize: fontSize,
-            fontWeight: FontWeight.w900,
+            fontWeight: FontWeight.w700,
             color: cs.kasaKColor,
-            letterSpacing: -0.01 * fontSize,
+            letterSpacing: -0.03 * fontSize,
             height: 0.9,
           ),
         ),
@@ -120,9 +164,9 @@ class KasaWordmark extends StatelessWidget {
           text: 'ASA',
           style: GoogleFonts.outfit(
             fontSize: fontSize,
-            fontWeight: FontWeight.w900,
+            fontWeight: FontWeight.w700,
             color: cs.kasaAsaColor,
-            letterSpacing: -0.01 * fontSize,
+            letterSpacing: -0.03 * fontSize,
             height: 0.9,
           ),
         ),
