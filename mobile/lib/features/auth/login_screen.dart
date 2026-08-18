@@ -1,11 +1,13 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:dio/dio.dart';
 import '../../core/api/api_client.dart';
+import '../../core/utils/phone.dart';
 import '../../core/widgets/kasa_logo.dart';
 
 const _storage = FlutterSecureStorage();
@@ -34,7 +36,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final prefs = await SharedPreferences.getInstance();
     final savedPhone = prefs.getString('saved_phone');
     if (savedPhone != null && mounted) {
-      setState(() => _phoneCtrl.text = savedPhone);
+      setState(() => _phoneCtrl.text = toLocalKenyanDigits(savedPhone));
     }
   }
 
@@ -50,9 +52,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     setState(() => _loading = true);
 
     try {
+      final phone = normalizeKenyanPhone(_phoneCtrl.text);
       final dio = ref.read(publicDioProvider);
       final resp = await dio.post('/api/v1/auth/login/', data: {
-        'phone_number': _phoneCtrl.text.trim(),
+        'phone_number': phone,
         'password': _passCtrl.text,
       });
 
@@ -62,7 +65,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         await _storage.write(key: 'refresh_token', value: resp.data['refresh']);
         // Remember the phone number for next time
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('saved_phone', _phoneCtrl.text.trim());
+        await prefs.setString('saved_phone', phone);
       } else {
         // Session-only: store tokens but clear saved phone
         await _storage.write(key: 'access_token', value: resp.data['access']);
@@ -255,11 +258,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                         TextFormField(
                                           controller: _phoneCtrl,
                                           keyboardType: TextInputType.phone,
+                                          inputFormatters: [
+                                            FilteringTextInputFormatter.digitsOnly,
+                                            LengthLimitingTextInputFormatter(12),
+                                          ],
                                           style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
                                           decoration: InputDecoration(
                                             labelText: 'Phone Number',
                                             prefixIcon: const Icon(Icons.phone_rounded, color: Color(0xFF2C5364)),
-                                            hintText: '+254...',
+                                            prefixText: '+254 ',
+                                            prefixStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: Color(0xFF203A43)),
+                                            hintText: '712 345 678',
                                             filled: true,
                                             fillColor: Colors.white,
                                             border: OutlineInputBorder(
@@ -275,7 +284,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                               borderSide: const BorderSide(color: Color(0xFF2C5364), width: 2),
                                             ),
                                           ),
-                                          validator: (v) => v == null || v.isEmpty ? 'Required' : null,
+                                          validator: validateKenyanPhone,
                                         ),
                                         const SizedBox(height: 20),
                                         
@@ -438,7 +447,7 @@ class _ForgotPasswordPageState extends ConsumerState<_ForgotPasswordPage> {
     try {
       final dio = ref.read(publicDioProvider);
       await dio.post('/api/v1/auth/password-reset/request/', data: {
-        'phone_number': _phoneCtrl.text.trim(),
+        'phone_number': normalizeKenyanPhone(_phoneCtrl.text),
       });
       if (mounted) {
         setState(() => _otpRequested = true);
@@ -468,7 +477,7 @@ class _ForgotPasswordPageState extends ConsumerState<_ForgotPasswordPage> {
       final dio = ref.read(publicDioProvider);
 
       await dio.post('/api/v1/auth/password-reset/', data: {
-        'phone_number': _phoneCtrl.text.trim(),
+        'phone_number': normalizeKenyanPhone(_phoneCtrl.text),
         'otp': _otpCtrl.text.trim(),
         'new_password': _newPassCtrl.text,
       });
@@ -515,14 +524,17 @@ class _ForgotPasswordPageState extends ConsumerState<_ForgotPasswordPage> {
               TextFormField(
                 controller: _phoneCtrl,
                 keyboardType: TextInputType.phone,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(12),
+                ],
                 decoration: const InputDecoration(
                   labelText: 'Phone Number',
                   prefixIcon: Icon(Icons.phone),
-                  hintText: '+254XXXXXXXXX',
+                  prefixText: '+254 ',
+                  hintText: '712 345 678',
                 ),
-                validator: (v) => v == null || v.isEmpty
-                    ? 'Phone number is required'
-                    : null,
+                validator: validateKenyanPhone,
               ),
               const SizedBox(height: 16),
               if (_otpRequested) ...[

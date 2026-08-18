@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
@@ -9,6 +10,7 @@ import '../../core/api/pagination.dart';
 import '../../core/constants.dart';
 import '../../core/theme/kasa_tokens.dart';
 import '../../core/utils/api_error.dart';
+import '../../core/utils/phone.dart';
 import '../../core/widgets/kasa_primitives.dart';
 import '../../shared/widgets/shimmer_loading.dart';
 
@@ -608,17 +610,7 @@ class _AddTenantDialogState extends ConsumerState<_AddTenantDialog> {
     super.dispose();
   }
 
-  String _normalizePhone(String phone) {
-    final digits = phone.replaceAll(RegExp(r'[\s\-()]'), '');
-    if (digits.startsWith('0') && digits.length == 10) {
-      return '+254${digits.substring(1)}';
-    }
-    if (digits.startsWith('254') && !digits.startsWith('+')) {
-      return '+$digits';
-    }
-    if (!digits.startsWith('+')) return '+254$digits';
-    return digits;
-  }
+  String _normalizePhone(String phone) => normalizeKenyanPhone(phone);
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
@@ -792,20 +784,17 @@ class _AddTenantDialogState extends ConsumerState<_AddTenantDialog> {
                         controller: _phoneCtrl,
                         decoration: const InputDecoration(
                           labelText: 'Phone Number *',
-                          hintText: '0712 345 678',
+                          hintText: '712 345 678',
                           prefixIcon: Icon(Icons.phone),
+                          prefixText: '+254 ',
                           isDense: true,
                         ),
                         keyboardType: TextInputType.phone,
-                        validator: (v) {
-                          if (v!.isEmpty) return 'Required';
-                          final d = v.replaceAll(RegExp(r'[\s\-()]'), '');
-                          final digits = d.startsWith('+') ? d.substring(1) : d;
-                          if (!RegExp(r'^\d{7,15}$').hasMatch(digits)) {
-                            return 'Enter a valid phone number';
-                          }
-                          return null;
-                        },
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                          LengthLimitingTextInputFormatter(12),
+                        ],
+                        validator: validateKenyanPhone,
                       ),
 
                       // ── Identity ───────────────────────────────────
@@ -880,11 +869,16 @@ class _AddTenantDialogState extends ConsumerState<_AddTenantDialog> {
                         controller: _kinPhoneCtrl,
                         decoration: const InputDecoration(
                           labelText: 'Phone Number',
-                          hintText: '0712 345 678',
+                          hintText: '712 345 678',
                           prefixIcon: Icon(Icons.phone_outlined),
+                          prefixText: '+254 ',
                           isDense: true,
                         ),
                         keyboardType: TextInputType.phone,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                          LengthLimitingTextInputFormatter(12),
+                        ],
                       ),
 
                       // ── Account ────────────────────────────────────
