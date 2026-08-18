@@ -11,6 +11,7 @@ import '../../core/api/api_client.dart';
 import '../../core/providers/theme_provider.dart';
 import '../../core/theme/kasa_tokens.dart';
 import '../../core/utils/currency.dart';
+import '../../core/utils/pluralize.dart';
 import '../../core/widgets/kasa_logo.dart';
 import '../../core/widgets/kasa_primitives.dart';
 
@@ -232,7 +233,12 @@ class _LandlordBento extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 14),
-              _TrendChip(label: '${data['properties'] ?? 0} PROPERTIES · $totalUnits UNITS', onPrimary: cs.onPrimary, primary: cs.primary),
+              _TrendChip(
+                label: '${data['properties'] ?? 0} ${pluralize(data['properties'] ?? 0, 'PROPERTY', 'PROPERTIES')} · '
+                    '$totalUnits ${pluralize(totalUnits, 'UNIT', 'UNITS')}',
+                onPrimary: cs.onPrimary,
+                primary: cs.primary,
+              ),
             ],
           ),
         ),
@@ -718,7 +724,8 @@ class _ActivityCard extends StatelessWidget {
       _ActivityItem(
         icon: Icons.home_work_outlined,
         accent: KasaCardAccent.secondary,
-        text: '${data['properties'] ?? 0} properties · ${data['total_units'] ?? 0} units',
+        text: '${data['properties'] ?? 0} ${pluralize(data['properties'] ?? 0, 'property', 'properties')} · '
+            '${data['total_units'] ?? 0} ${pluralize(data['total_units'] ?? 0, 'unit', 'units')}',
         time: 'PORTFOLIO',
       ),
       _ActivityItem(
