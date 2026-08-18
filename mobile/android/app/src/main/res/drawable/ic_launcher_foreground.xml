@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Kasa mark — "Tenant Link": two half-dwellings interlocking on a shared tenon.
+
+  The group transform fits the artwork (which is authored in a 100x100 space,
+  with content spanning x 10..94 and y 6..94) into the 72dp safe zone of the
+  108dp adaptive-icon viewport. Anything outside that safe zone can be cropped
+  by the launcher's mask, so the whole mark stays inside it.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="0.8182"
+        android:scaleY="0.8182"
+        android:translateX="11.47"
+        android:translateY="13.09">
+        <path
+            android:pathData="M34,6 L48,14 L48,42 L60,42 L60,58 L48,58 L48,94 L10,94 L10,40 Z"
+            android:fillColor="#5868E0"
+            android:strokeColor="#1A1A1F"
+            android:strokeWidth="3"
+            android:strokeLineJoin="miter" />
+        <path
+            android:pathData="M56,18 L94,40 L94,94 L64,94 L64,64 L52,64 L52,36 L64,36 L64,28 Z"
+            android:fillColor="#FF7A66"
+            android:strokeColor="#1A1A1F"
+            android:strokeWidth="3"
+            android:strokeLineJoin="miter" />
+    </group>
+</vector>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Kasa cream. Neutral on purpose: the mark's two halves are periwinkle
+         and coral, so a coloured ground would fight one of them. -->
+    <color name="ic_launcher_background">#F5F2ED</color>
+</resources>

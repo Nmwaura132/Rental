@@ -16,6 +16,6 @@ class AppConstants {
         .replaceFirst(RegExp(r'http://localhost(:\d+)?'), mediaBaseUrl);
   }
 
-  static const String appName = 'Rental Manager';
+  static const String appName = 'Kasa';
   static const String currency = 'KES';
 }
