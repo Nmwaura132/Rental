@@ -84,8 +84,13 @@ class _TenantLinkPainter extends CustomPainter {
     ..close();
 
   /// Right half — the mortise it locks into.
+  ///
+  /// Peak and inner eave mirror the landlord half's (34,6)/(48,14) across the
+  /// shape's centre so both roof pitches carry equal height and angle — the
+  /// original had a shallower, lower tenant peak that read as the smaller of
+  /// two unequal halves instead of a matched pair.
   Path _tenantPath() => Path()
-    ..moveTo(56, 18)
+    ..moveTo(70, 6)
     ..lineTo(94, 40)
     ..lineTo(94, 94)
     ..lineTo(64, 94)
@@ -93,7 +98,7 @@ class _TenantLinkPainter extends CustomPainter {
     ..lineTo(52, 64)
     ..lineTo(52, 36)
     ..lineTo(64, 36)
-    ..lineTo(64, 28)
+    ..lineTo(56, 14)
     ..close();
 
   @override
