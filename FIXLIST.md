@@ -155,36 +155,43 @@ Source reports:
 
 ---
 
-## P0 (new) — found 2026-07-31
+## P0 (new) — found 2026-07-31, resolved in Coolify config 2026-08-18
 
-34. **Production `SECRET_KEY` is insecure.** `manage.py check --deploy` on the live
-    api container reports `security.W009` with `DEBUG=False`. simplejwt signs
-    HS256 tokens with `SECRET_KEY`, so a guessable key means forgeable access
-    tokens. Generate a 50+ char random key, set it in `.env.production`, redeploy.
-    Rotating invalidates existing sessions and refresh tokens — fine pre-launch.
+All four items below are staged and confirmed applied in Coolify's stored
+config. None are *live* yet — they take effect on the next deploy, which is
+still pending (see `handoff.md`).
 
-35. **Nightly backups were silently empty.** Every dump in `kasa-backups` from
-    ~May through 2026-07-31 is a 20-byte empty gzip. Two compounding causes,
-    both fixed in `backup/backup.sh`: MariaDB's `mysqldump` rejects the
-    Oracle-only `--set-gtid-purged=OFF`, and `mysqldump | gzip > f` returns
-    gzip's exit status, so the failure read as success. Needs a redeploy, then
-    confirm the next dump is kilobytes rather than 20 bytes.
+34. ~~**Production `SECRET_KEY` is insecure.**~~ — DONE. `manage.py check --deploy`
+    had flagged `security.W009`: simplejwt signs HS256 tokens with `SECRET_KEY`,
+    so a weak key means forgeable access tokens. Rotated to a 64-char random key
+    (40 unique chars) directly in Coolify's stored config, verified round-trip
+    through its encryption. Applies on next deploy; rotating invalidates existing
+    sessions and refresh tokens, which is fine pre-launch.
 
-36. **Signed document URLs would be served over plain HTTP.** The live api has
-    `S3_PUBLIC_URL=http://37.221.93.219:9000/rental-assets` and no
-    `S3_PUBLIC_ENDPOINT_URL` at all, so MinIO is reached directly on port 9000
-    over HTTP at a bare IP. Harmless today only because prod still runs
-    pre-hardening code; the moment `apps.core.private_files` deploys, national ID
-    photos and lease PDFs travel unencrypted with their signatures in the query
-    string. Set both to an HTTPS host behind Traefik (per `PRODUCTION.md`) and
-    stop publishing 9000 before that deploy. `S3_SIGNED_URL_EXPIRES` is also
-    unset — it wants an explicit value.
+35. ~~**Nightly backups were silently empty.**~~ — DONE and verified end-to-end.
+    Every archive in `kasa-backups` from ~May through 2026-07-31 was a 20-byte
+    empty gzip: MariaDB's `mysqldump` rejects the Oracle-only
+    `--set-gtid-purged=OFF`, and `mysqldump | gzip > f` reported gzip's exit
+    status instead of mysqldump's, so the failure read as success. Fixed in
+    `backup/backup.sh`. A live production dump (94,501 bytes, 36 tables) was
+    restored into an isolated container and matched prod exactly — 89
+    migrations, same row counts. See `handoff.md` "Restore procedure" for the
+    rehearsal record.
 
-37. **`.sslip.io` wildcard is in production `ALLOWED_HOSTS`.** P1-12 gated the
-    code path behind `ALLOW_SSLIP_HOSTS`, but the deployed env lists `.sslip.io`
-    literally, which accepts any sslip.io subdomain — i.e. any host that resolves
-    to an arbitrary IP. Fine for staging, wrong once real tenants exist; pin to
-    the actual domain.
+36. ~~**Signed document URLs would be served over plain HTTP.**~~ — DONE. MinIO
+    was on a published port 9000 over plain HTTP at a bare IP —
+    `S3_PUBLIC_URL=http://37.221.93.219:9000/rental-assets`, no
+    `S3_PUBLIC_ENDPOINT_URL` set. Moved MinIO to Traefik-routed TLS at
+    `files-rwrwarkqwn77gwu6zbky1ppo.37.221.93.219.sslip.io` (labels committed in
+    `docker-compose.prod.yml`, matching the resolver Coolify already uses for
+    `api`), and set `S3_PUBLIC_ENDPOINT_URL`, `S3_PUBLIC_URL`, and
+    `S3_SIGNED_URL_EXPIRES` in Coolify. Applies on next deploy.
+
+37. ~~**`.sslip.io` wildcard is in production `ALLOWED_HOSTS`.**~~ — DONE. P1-12
+    gated the code path behind `ALLOW_SSLIP_HOSTS`, but the deployed env listed
+    `.sslip.io` literally, accepting any sslip.io subdomain — i.e. any host
+    resolving to an arbitrary IP. Removed from the deployed `ALLOWED_HOSTS`; only
+    the specific host in actual use remains. Applies on next deploy.
 
 ---
 
