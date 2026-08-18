@@ -340,13 +340,14 @@ class _InvoiceCard extends ConsumerWidget {
                           ),
                         ),
                       if (canVoid)
-                        const PopupMenuItem(
+                        PopupMenuItem(
                           value: 'void',
                           child: ListTile(
                             leading: Icon(Icons.cancel_outlined,
-                                color: Colors.orange),
+                                color: Theme.of(context).colorScheme.tertiary),
                             title: Text('Void Invoice',
-                                style: TextStyle(color: Colors.orange)),
+                                style: TextStyle(
+                                    color: Theme.of(context).colorScheme.tertiary)),
                             contentPadding: EdgeInsets.zero,
                             dense: true,
                           ),
@@ -504,7 +505,8 @@ class _InvoiceCard extends ConsumerWidget {
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.orange, foregroundColor: Colors.white),
+                backgroundColor: Theme.of(ctx).colorScheme.tertiary,
+                foregroundColor: Theme.of(ctx).colorScheme.onTertiary),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Void'),
           ),
@@ -517,9 +519,9 @@ class _InvoiceCard extends ConsumerWidget {
       await dio.post('/api/v1/payments/invoices/${invoice['id']}/cancel/');
       onChanged();
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Invoice voided.'),
-          backgroundColor: Colors.orange,
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: const Text('Invoice voided.'),
+          backgroundColor: Theme.of(context).colorScheme.tertiary,
         ));
       }
     } catch (e) {
@@ -572,7 +574,7 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('M-Pesa prompt sent! Check your phone.'),
-          backgroundColor: Color(0xFF43A047),
+          backgroundColor: KasaChannel.mpesa,
           duration: Duration(seconds: 5),
         ));
         // Poll for completion every 3 seconds, up to 60 seconds
@@ -605,7 +607,7 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
               content: Text('Payment confirmed! Invoice updated.'),
-              backgroundColor: Color(0xFF43A047),
+              backgroundColor: KasaChannel.mpesa,
             ));
             Navigator.of(context).pop();
           }
@@ -621,12 +623,12 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
           return;
         } else if (stkStatus == 'requires_review') {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text(
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: const Text(
                 'M-Pesa reported success, but the receipt still needs verification. '
                 'Do not pay again; contact your landlord if it remains pending.',
               ),
-              backgroundColor: Colors.orange,
+              backgroundColor: Theme.of(context).colorScheme.tertiary,
             ));
           }
           return;
@@ -637,9 +639,9 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
     }
     // Timed out polling — tell user to check manually
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Payment status unknown. Refresh invoices to check.'),
-        backgroundColor: Colors.orange,
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: const Text('Payment status unknown. Refresh invoices to check.'),
+        backgroundColor: Theme.of(context).colorScheme.tertiary,
       ));
     }
   }
@@ -1038,8 +1040,8 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
                           ),
                           ElevatedButton(
                             style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.orange,
-                                foregroundColor: Colors.white),
+                                backgroundColor: Theme.of(ctx).colorScheme.tertiary,
+                                foregroundColor: Theme.of(ctx).colorScheme.onTertiary),
                             onPressed: () => Navigator.pop(ctx, true),
                             child: const Text('Void'),
                           ),
@@ -1053,9 +1055,9 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
                           '/api/v1/payments/invoices/${invoice['id']}/cancel/');
                       onChanged();
                       if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                          content: Text('Invoice voided.'),
-                          backgroundColor: Colors.orange,
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: const Text('Invoice voided.'),
+                          backgroundColor: Theme.of(context).colorScheme.tertiary,
                         ));
                       }
                     } catch (e) {
@@ -1331,7 +1333,7 @@ class _PaymentMethodSheet extends StatelessWidget {
           // ── M-Pesa STK Push ───────────────────────────────────────────
           _MethodTile(
             icon: Icons.phone_android_outlined,
-            color: const Color(0xFF43A047),
+            color: KasaChannel.mpesa,
             title: 'M-Pesa (STK Push)',
             subtitle: 'We\'ll send a payment prompt directly to your phone.',
             onTap: onStkPush,
@@ -1342,7 +1344,7 @@ class _PaymentMethodSheet extends StatelessWidget {
           // ── M-Pesa Paybill (manual) ───────────────────────────────────
           _MethodTile(
             icon: Icons.dialpad_outlined,
-            color: const Color(0xFF00897B),
+            color: KasaChannel.paybill,
             title: 'M-Pesa Paybill',
             subtitle: 'Pay manually via Lipa na M-Pesa then wait for confirmation.',
             onTap: () {
@@ -1356,7 +1358,7 @@ class _PaymentMethodSheet extends StatelessWidget {
             const SizedBox(height: 10),
             _MethodTile(
               icon: Icons.account_balance_outlined,
-              color: const Color(0xFF1565C0),
+              color: KasaChannel.bank,
               title: 'Bank Transfer',
               subtitle: 'Record a payment received via bank transfer.',
               onTap: onManualPayment ?? () {},
@@ -1368,7 +1370,7 @@ class _PaymentMethodSheet extends StatelessWidget {
             const SizedBox(height: 10),
             _MethodTile(
               icon: Icons.payments_outlined,
-              color: const Color(0xFFF57F17),
+              color: KasaChannel.cash,
               title: 'Cash',
               subtitle: 'Tenant pays in cash. Record when received.',
               onTap: onManualPayment ?? () {},
@@ -1377,7 +1379,7 @@ class _PaymentMethodSheet extends StatelessWidget {
             const SizedBox(height: 10),
             _MethodTile(
               icon: Icons.payments_outlined,
-              color: const Color(0xFFF57F17),
+              color: KasaChannel.cash,
               title: 'Cash',
               subtitle: 'Pay your landlord in cash and wait for them to confirm.',
               onTap: () {
@@ -1984,7 +1986,7 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('Could not load charges: ${apiError(e)}'),
-          backgroundColor: Colors.orange,
+          backgroundColor: Theme.of(context).colorScheme.tertiary,
         ));
       }
     }

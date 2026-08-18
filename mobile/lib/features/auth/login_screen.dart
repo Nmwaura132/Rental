@@ -1,4 +1,3 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +6,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:dio/dio.dart';
 import '../../core/api/api_client.dart';
+import '../../core/theme/kasa_tokens.dart';
+import '../../core/widgets/kasa_primitives.dart';
 import '../../core/utils/phone.dart';
 import '../../core/widgets/kasa_logo.dart';
 
@@ -93,322 +94,182 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
-  }  @override
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
     return Scaffold(
-      extendBodyBehindAppBar: true,
-      body: Stack(
-        children: [
-          // Background Gradient
-          Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  Color(0xFF0F2027),
-                  Color(0xFF203A43),
-                  Color(0xFF2C5364),
-                ],
-              ),
-            ),
-          ),
-          
-          // Decorative Orbs
-          Positioned(
-            top: -100,
-            right: -50,
-            child: Container(
-              width: 300,
-              height: 300,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [
-                    Colors.white.withValues(alpha: 0.1),
-                    Colors.transparent,
-                  ]
-                ),
-              ),
-            ),
-          ),
-          
-          Positioned(
-            bottom: -50,
-            left: -100,
-            child: Container(
-              width: 350,
-              height: 350,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [
-                    const Color(0xFF64B5F6).withValues(alpha: 0.15),
-                    Colors.transparent,
-                  ]
-                ),
-              ),
-            ),
-          ),
-
-          SafeArea(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                return SingleChildScrollView(
-                  reverse: true,
-                  physics: const BouncingScrollPhysics(),
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(minHeight: constraints.maxHeight),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          // App Logo Animation
-                          TweenAnimationBuilder<double>(
-                            tween: Tween(begin: 0, end: 1),
-                            duration: const Duration(milliseconds: 1000),
-                            curve: Curves.elasticOut,
-                            builder: (context, val, child) {
-                              return Transform.scale(
-                                scale: val,
-                                child: child,
-                              );
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.all(24),
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: Colors.white.withValues(alpha: 0.1),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.2),
-                                    blurRadius: 25,
-                                    spreadRadius: 2,
-                                  ),
-                                ],
-                                border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
-                              ),
-                              child: const Icon(Icons.maps_home_work_rounded, color: Colors.white, size: 72),
-                            ),
+      backgroundColor: cs.kasaBg,
+      body: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              reverse: true,
+              physics: const BouncingScrollPhysics(),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // WHY a plain rise-and-fade instead of the previous elastic
+                      // bounce: the mark is a wordmark, and overshoot on type reads
+                      // as a toy. Entrance only, nothing looping.
+                      const _RiseIn(
+                        child: KasaLockupStacked(markSize: 72),
+                      ),
+                      const SizedBox(height: 12),
+                      _RiseIn(
+                        delayMs: 60,
+                        child: Text(
+                          'Rent, sorted.',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: cs.onSurfaceVariant,
                           ),
-                          const SizedBox(height: 24),
-                          
-                          // Title Fade In
-                          TweenAnimationBuilder<double>(
-                            tween: Tween(begin: 0, end: 1),
-                            duration: const Duration(milliseconds: 800),
-                            curve: Curves.easeOutCubic,
-                            builder: (context, val, child) {
-                              return Transform.translate(
-                                offset: Offset(0, 30 * (1 - val)),
-                                child: Opacity(opacity: val, child: child),
-                              );
-                            },
-                            child: const KasaLockupStacked(markSize: 64),
-                          ),
-                          
-                          const SizedBox(height: 56),
+                        ),
+                      ),
+                      const SizedBox(height: 40),
 
-                          // Glassmorphism Login Form
-                          TweenAnimationBuilder<double>(
-                            tween: Tween(begin: 0, end: 1),
-                            duration: const Duration(milliseconds: 1000),
-                            curve: Curves.easeOutQuart,
-                            builder: (context, val, child) {
-                              return Transform.translate(
-                                offset: Offset(0, 60 * (1 - val)),
-                                child: Opacity(opacity: val, child: child),
-                              );
-                            },
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(32),
-                              child: BackdropFilter(
-                                filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-                                child: Container(
-                                  padding: const EdgeInsets.all(32),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: 0.85),
-                                    borderRadius: BorderRadius.circular(32),
-                                    border: Border.all(color: Colors.white.withValues(alpha: 0.5)),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withValues(alpha: 0.1),
-                                        blurRadius: 30,
-                                        spreadRadius: -10,
-                                      ),
-                                    ],
+                      _RiseIn(
+                        delayMs: 120,
+                        child: KasaCard(
+                          padding: const EdgeInsets.all(24),
+                          child: Form(
+                            key: _formKey,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Text(
+                                  'Sign In',
+                                  style: theme.textTheme.headlineSmall,
+                                ),
+                                const SizedBox(height: 20),
+
+                                TextFormField(
+                                  controller: _phoneCtrl,
+                                  keyboardType: TextInputType.phone,
+                                  inputFormatters: [
+                                    FilteringTextInputFormatter.digitsOnly,
+                                    LengthLimitingTextInputFormatter(12),
+                                  ],
+                                  decoration: const InputDecoration(
+                                    labelText: 'Phone Number',
+                                    prefixIcon: Icon(Icons.phone_rounded),
+                                    prefixText: '+254 ',
+                                    hintText: '712 345 678',
                                   ),
-                                  child: Form(
-                                    key: _formKey,
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  validator: validateKenyanPhone,
+                                ),
+                                const SizedBox(height: 16),
+
+                                TextFormField(
+                                  controller: _passCtrl,
+                                  obscureText: _obscure,
+                                  decoration: InputDecoration(
+                                    labelText: 'Password',
+                                    prefixIcon: const Icon(Icons.lock_rounded),
+                                    suffixIcon: IconButton(
+                                      icon: Icon(_obscure
+                                          ? Icons.visibility_rounded
+                                          : Icons.visibility_off_rounded),
+                                      onPressed: () =>
+                                          setState(() => _obscure = !_obscure),
+                                      tooltip: _obscure
+                                          ? 'Show password'
+                                          : 'Hide password',
+                                    ),
+                                  ),
+                                  validator: (v) => v == null || v.isEmpty
+                                      ? 'Password is required'
+                                      : null,
+                                ),
+                                const SizedBox(height: 8),
+
+                                // WHY the whole row toggles: a bare 24px checkbox
+                                // is under the 44px touch-target minimum.
+                                InkWell(
+                                  onTap: () =>
+                                      setState(() => _rememberMe = !_rememberMe),
+                                  borderRadius:
+                                      BorderRadius.circular(KasaRadius.sm),
+                                  child: Padding(
+                                    padding:
+                                        const EdgeInsets.symmetric(vertical: 10),
+                                    child: Row(
                                       children: [
-                                        Text('Sign In', 
-                                          style: theme.textTheme.headlineSmall?.copyWith(
-                                            fontWeight: FontWeight.bold,
-                                            color: const Color(0xFF203A43)
-                                          ),
-                                          textAlign: TextAlign.center,
-                                        ),
-                                        const SizedBox(height: 32),
-                                        
-                                        // Phone Input
-                                        TextFormField(
-                                          controller: _phoneCtrl,
-                                          keyboardType: TextInputType.phone,
-                                          inputFormatters: [
-                                            FilteringTextInputFormatter.digitsOnly,
-                                            LengthLimitingTextInputFormatter(12),
-                                          ],
-                                          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
-                                          decoration: InputDecoration(
-                                            labelText: 'Phone Number',
-                                            prefixIcon: const Icon(Icons.phone_rounded, color: Color(0xFF2C5364)),
-                                            prefixText: '+254 ',
-                                            prefixStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: Color(0xFF203A43)),
-                                            hintText: '712 345 678',
-                                            filled: true,
-                                            fillColor: Colors.white,
-                                            border: OutlineInputBorder(
-                                              borderRadius: BorderRadius.circular(16),
-                                              borderSide: BorderSide(color: Colors.grey.shade300),
-                                            ),
-                                            enabledBorder: OutlineInputBorder(
-                                              borderRadius: BorderRadius.circular(16),
-                                              borderSide: BorderSide(color: Colors.grey.shade300),
-                                            ),
-                                            focusedBorder: OutlineInputBorder(
-                                              borderRadius: BorderRadius.circular(16),
-                                              borderSide: const BorderSide(color: Color(0xFF2C5364), width: 2),
-                                            ),
-                                          ),
-                                          validator: validateKenyanPhone,
-                                        ),
-                                        const SizedBox(height: 20),
-                                        
-                                        // Password Input
-                                        TextFormField(
-                                          controller: _passCtrl,
-                                          obscureText: _obscure,
-                                          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
-                                          decoration: InputDecoration(
-                                            labelText: 'Password',
-                                            prefixIcon: const Icon(Icons.lock_rounded, color: Color(0xFF2C5364)),
-                                            suffixIcon: IconButton(
-                                              icon: Icon(
-                                                _obscure ? Icons.visibility_rounded : Icons.visibility_off_rounded,
-                                                color: Colors.grey.shade600,
-                                              ),
-                                              onPressed: () => setState(() => _obscure = !_obscure),
-                                            ),
-                                            filled: true,
-                                            fillColor: Colors.white,
-                                            border: OutlineInputBorder(
-                                              borderRadius: BorderRadius.circular(16),
-                                              borderSide: BorderSide(color: Colors.grey.shade300),
-                                            ),
-                                            enabledBorder: OutlineInputBorder(
-                                              borderRadius: BorderRadius.circular(16),
-                                              borderSide: BorderSide(color: Colors.grey.shade300),
-                                            ),
-                                            focusedBorder: OutlineInputBorder(
-                                              borderRadius: BorderRadius.circular(16),
-                                              borderSide: const BorderSide(color: Color(0xFF2C5364), width: 2),
-                                            ),
-                                          ),
-                                          validator: (v) => v == null || v.isEmpty ? 'Required' : null,
-                                        ),
-                                        const SizedBox(height: 16),
-                                        
-                                        // Remember me
-                                        Row(
-                                          children: [
-                                            SizedBox(
-                                              height: 24,
-                                              width: 24,
-                                              child: Checkbox(
-                                                value: _rememberMe,
-                                                onChanged: (v) => setState(() => _rememberMe = v ?? true),
-                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                                                activeColor: const Color(0xFF2C5364),
-                                              ),
-                                            ),
-                                            const SizedBox(width: 8),
-                                            GestureDetector(
-                                              onTap: () => setState(() => _rememberMe = !_rememberMe),
-                                              child: Text('Remember me', 
-                                                style: TextStyle(color: Colors.grey.shade800, fontWeight: FontWeight.w500)),
-                                            ),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 40),
-                                        
-                                        // Sleek Button
-                                        Container(
-                                          decoration: BoxDecoration(
-                                            borderRadius: BorderRadius.circular(16),
-                                            boxShadow: [
-                                              BoxShadow(
-                                                color: const Color(0xFF203A43).withValues(alpha: 0.4),
-                                                blurRadius: 20,
-                                                offset: const Offset(0, 10),
-                                              ),
-                                            ],
-                                          ),
-                                          child: ElevatedButton(
-                                            style: ElevatedButton.styleFrom(
-                                              backgroundColor: const Color(0xFF203A43),
-                                              foregroundColor: Colors.white,
-                                              padding: const EdgeInsets.symmetric(vertical: 20),
-                                              shape: RoundedRectangleBorder(
-                                                borderRadius: BorderRadius.circular(16),
-                                              ),
-                                              elevation: 0,
-                                            ),
-                                            onPressed: _loading ? null : _login,
-                                            child: _loading 
-                                              ? const SizedBox(
-                                                  height: 24, width: 24,
-                                                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                                              : const Text('Sign In', 
-                                                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, letterSpacing: 1.0)),
+                                        SizedBox(
+                                          height: 24,
+                                          width: 24,
+                                          child: Checkbox(
+                                            value: _rememberMe,
+                                            onChanged: (v) => setState(
+                                                () => _rememberMe = v ?? true),
                                           ),
                                         ),
-                                        
-                                        const SizedBox(height: 20),
-                                        
-                                        // Forgot Password
-                                        TextButton(
-                                          onPressed: () => Navigator.of(context).push(
-                                            MaterialPageRoute(
-                                              fullscreenDialog: true,
-                                              builder: (_) => const _ForgotPasswordPage(),
-                                            ),
-                                          ),
-                                          style: TextButton.styleFrom(
-                                            foregroundColor: Colors.grey.shade700,
-                                          ),
-                                          child: const Text('Forgot password?', style: TextStyle(fontWeight: FontWeight.w600)),
-                                        ),
+                                        const SizedBox(width: 12),
+                                        Text('Keep me signed in',
+                                            style: theme.textTheme.bodyMedium),
                                       ],
                                     ),
                                   ),
                                 ),
-                              ),
+                                const SizedBox(height: 20),
+
+                                KasaButton(
+                                  label: 'Sign In',
+                                  isLoading: _loading,
+                                  onTap: _loading ? null : _login,
+                                ),
+                                const SizedBox(height: 4),
+
+                                TextButton(
+                                  onPressed: () => Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      fullscreenDialog: true,
+                                      builder: (_) => const _ForgotPasswordPage(),
+                                    ),
+                                  ),
+                                  child: const Text('Forgot password?'),
+                                ),
+                              ],
                             ),
                           ),
-                        ],
+                        ),
                       ),
-                    ),
+                    ],
                   ),
-                );
-              }
-            ),
-          ),
-        ],
+                ),
+              ),
+            );
+          },
+        ),
       ),
+    );
+  }
+}
+
+/// Entrance animation: rise and fade, once, on first build.
+class _RiseIn extends StatelessWidget {
+  const _RiseIn({required this.child, this.delayMs = 0});
+
+  final Widget child;
+  final int delayMs;
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: Duration(milliseconds: 420 + delayMs),
+      curve: Curves.easeOutCubic,
+      builder: (context, val, child) => Transform.translate(
+        offset: Offset(0, 16 * (1 - val)),
+        child: Opacity(opacity: val.clamp(0.0, 1.0), child: child),
+      ),
+      child: child,
     );
   }
 }
@@ -516,9 +377,11 @@ class _ForgotPasswordPageState extends ConsumerState<_ForgotPasswordPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
+              Text(
                 'Enter your phone number to receive a one-time reset code.',
-                style: TextStyle(color: Colors.grey),
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
               ),
               const SizedBox(height: 24),
               TextFormField(
@@ -595,11 +458,12 @@ class _ForgotPasswordPageState extends ConsumerState<_ForgotPasswordPage> {
                 onPressed:
                     _loading ? null : (_otpRequested ? _reset : _requestOtp),
                 child: _loading
-                    ? const SizedBox(
+                    ? SizedBox(
                         height: 20,
                         width: 20,
                         child: CircularProgressIndicator(
-                            color: Colors.white, strokeWidth: 2),
+                            color: Theme.of(context).colorScheme.onPrimary,
+                            strokeWidth: 2),
                       )
                     : Text(_otpRequested ? 'Reset Password' : 'Send Reset Code'),
               ),

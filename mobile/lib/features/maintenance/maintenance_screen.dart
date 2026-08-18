@@ -1525,11 +1525,12 @@ class _CreateRequestSheetState extends ConsumerState<_CreateRequestSheet> {
                 child: ElevatedButton(
                   onPressed: (_loading || _leaseId == null) ? null : _submit,
                   child: _loading
-                      ? const SizedBox(
+                      ? SizedBox(
                           height: 20,
                           width: 20,
                           child: CircularProgressIndicator(
-                              color: Colors.white, strokeWidth: 2))
+                              color: Theme.of(context).colorScheme.onPrimary,
+                              strokeWidth: 2))
                       : const Text('Submit Request'),
                 ),
               ),

@@ -109,3 +109,20 @@ extension KasaColorScheme on ColorScheme {
   Color get kasaAsaColor  => brightness == Brightness.dark
       ? KasaColors.darkAsaColor  : KasaColors.lightAsaColor;
 }
+
+/// Payment-channel and third-party brand colors.
+///
+/// WHY these are fixed rather than theme-driven: they identify an external
+/// brand (M-Pesa green, WhatsApp green) or a payment rail users recognise by
+/// colour. They stay constant across light and dark so the channel stays
+/// recognisable; only the surface behind them changes. Each is checked to hold
+/// contrast on both the cream and near-black grounds.
+class KasaChannel {
+  KasaChannel._();
+
+  static const mpesa    = Color(0xFF43A047); // M-Pesa / STK push
+  static const paybill  = Color(0xFF00897B); // Lipa na M-Pesa paybill
+  static const bank     = Color(0xFF1565C0); // Bank transfer
+  static const cash     = Color(0xFFF57F17); // Cash in hand
+  static const whatsapp = Color(0xFF25D366); // WhatsApp delivery channel
+}

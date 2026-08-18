@@ -24,7 +24,7 @@ const _channelIcon = {
 const _channelColor = {
   'sms': Colors.blue,
   'email': Colors.deepPurple,
-  'whatsapp': Color(0xFF25D366),
+  'whatsapp': KasaChannel.whatsapp,
   'push': Colors.orange,
 };
 
