@@ -2,10 +2,11 @@
 <!--
   Kasa mark — "Tenant Link": two half-dwellings interlocking on a shared tenon.
 
-  The group transform fits the artwork (which is authored in a 100x100 space,
-  with content spanning x 10..94 and y 6..94) into the 72dp safe zone of the
-  108dp adaptive-icon viewport. Anything outside that safe zone can be cropped
-  by the launcher's mask, so the whole mark stays inside it.
+  Artwork is authored in a 100x100 space (content spans x 10..94, y 6..94) and
+  placed into the 108dp adaptive-icon viewport at 0.72, which lands it well
+  inside the 72dp safe zone. It is deliberately not scaled to fill that zone:
+  the silhouette has a flat filled base, so pushing it to the edge leaves the
+  corners crowding a circular mask with no optical margin.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
@@ -13,10 +14,10 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
     <group
-        android:scaleX="0.8182"
-        android:scaleY="0.8182"
-        android:translateX="11.47"
-        android:translateY="13.09">
+        android:scaleX="0.72"
+        android:scaleY="0.72"
+        android:translateX="16.56"
+        android:translateY="18.0">
         <path
             android:pathData="M34,6 L48,14 L48,42 L60,42 L60,58 L48,58 L48,94 L10,94 L10,40 Z"
             android:fillColor="#5868E0"

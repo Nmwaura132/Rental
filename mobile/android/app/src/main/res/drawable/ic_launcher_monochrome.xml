@@ -1,8 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Themed-icon layer (Android 13+). The launcher tints this to match the user's
-  wallpaper palette, so it is a flat silhouette with no fills of its own — the
-  two halves read apart by the gap between them, not by colour.
+  Themed-icon layer (Android 13+). The launcher flattens this to a single tint,
+  which is what makes it tricky: the two halves overlap at the tenon, so filling
+  them as two separate paths merges them into one shapeless mass with no visible
+  joint.
+
+  Drawing both subpaths as ONE path with evenOdd instead turns their overlap
+  into a hole, so the interlock is exactly what survives the tint — the joint
+  reads as a gap rather than relying on colour that the launcher strips away.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
@@ -11,15 +16,13 @@
     android:viewportHeight="108"
     android:tint="#000000">
     <group
-        android:scaleX="0.8182"
-        android:scaleY="0.8182"
-        android:translateX="11.47"
-        android:translateY="13.09">
+        android:scaleX="0.72"
+        android:scaleY="0.72"
+        android:translateX="16.56"
+        android:translateY="18.0">
         <path
-            android:pathData="M34,6 L48,14 L48,42 L60,42 L60,58 L48,58 L48,94 L10,94 L10,40 Z"
-            android:fillColor="#000000" />
-        <path
-            android:pathData="M56,18 L94,40 L94,94 L64,94 L64,64 L52,64 L52,36 L64,36 L64,28 Z"
-            android:fillColor="#000000" />
+            android:fillType="evenOdd"
+            android:fillColor="#000000"
+            android:pathData="M34,6 L48,14 L48,42 L60,42 L60,58 L48,58 L48,94 L10,94 L10,40 Z M56,18 L94,40 L94,94 L64,94 L64,64 L52,64 L52,36 L64,36 L64,28 Z" />
     </group>
 </vector>
