@@ -19,7 +19,7 @@ dependencies:
   flutter_riverpod: ^2.5.1
 
   # ── Navigation ──────────────────────────────────────────────────────────────
-  go_router: ^14.2.0
+  go_router: ^17.2.0
 
   # ── Local storage ───────────────────────────────────────────────────────────
   flutter_secure_storage: ^9.2.2

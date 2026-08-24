@@ -107,6 +107,10 @@ class MainShell extends ConsumerStatefulWidget {
 
 class _MainShellState extends ConsumerState<MainShell> {
   bool _isVisible = true;
+  // Mirrors whether the ACTIVE branch's own nested Navigator still has
+  // something to pop, kept in sync by the NavigationNotification listener
+  // below. Used to tell "deep inside a branch" apart from "at a branch root".
+  bool _branchCanPop = false;
 
   @override
   Widget build(BuildContext context) {
@@ -133,8 +137,9 @@ class _MainShellState extends ConsumerState<MainShell> {
 
     final cs = Theme.of(context).colorScheme;
     final bottomInset = MediaQuery.of(context).padding.bottom;
+    final isOnHomeTab = widget.navigationShell.currentIndex == 0;
 
-    return Scaffold(
+    final shell = Scaffold(
       extendBody: true,
       body: NotificationListener<UserScrollNotification>(
         onNotification: (notification) {
@@ -145,7 +150,29 @@ class _MainShellState extends ConsumerState<MainShell> {
           }
           return true;
         },
-        child: widget.navigationShell,
+        child: NotificationListener<NavigationNotification>(
+          onNotification: (notification) {
+            final nextBranchCanPop = notification.canHandlePop;
+            if (nextBranchCanPop != _branchCanPop) {
+              setState(() => _branchCanPop = nextBranchCanPop);
+            }
+            // WHY stop propagation (true) rather than the `false` that
+            // NavigatorPopHandler uses: WidgetsApp's root handler forwards
+            // whatever canHandlePop it receives straight to the engine as
+            // setFrameworkHandlesBack(). At a branch root the branch Navigator
+            // correctly reports canHandlePop: false — nothing to pop *within*
+            // the branch — and letting that reach WidgetsApp unregisters
+            // Flutter's back callback, so Android's default finish() runs and
+            // the app exits without PopScope ever being consulted.
+            // NavigatorPopHandler can forward it because there the two agree;
+            // here they are inverted (the branch cannot pop, yet we still want
+            // the framework to handle Back so we can fall back to Home), so it
+            // must stop here and leave PopScope as the only voice the engine
+            // hears.
+            return true;
+          },
+          child: widget.navigationShell,
+        ),
       ),
       // Neo-brutalist pill nav — no glass blur, no soft shadow, hard-edge offset only.
       bottomNavigationBar: AnimatedSlide(
@@ -216,6 +243,22 @@ class _MainShellState extends ConsumerState<MainShell> {
           ),
         ),
       ),
+    );
+
+    // WHY: StatefulShellRoute.indexedStack pops each branch's OWN stack on
+    // Back, but never falls back to branch 0 first — once a branch is at its
+    // root, Back exits the app outright. That left any single tab switch
+    // (Props, Tenants, Bills, Fix) one Back press from closing Kasa, with no
+    // way home. Intercept only the "branch is already at its own root" case:
+    // Back there returns to Home, while Back on Home, or Back deeper inside a
+    // branch's own stack, behaves normally.
+    return PopScope(
+      canPop: isOnHomeTab || _branchCanPop,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        widget.navigationShell.goBranch(0, initialLocation: true);
+      },
+      child: shell,
     );
   }
 }
