@@ -110,7 +110,17 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       ),
     );
     if (confirmed == true && mounted) {
-      await _storage.deleteAll();
+      final service = ref.read(biometricServiceProvider);
+      // With biometrics on, signing out ends the session but keeps the refresh
+      // token so the fingerprint can get back in — clearing it would silently
+      // disable the feature the user turned on. "Biometric unlock" off in
+      // Preferences is the switch that forgets the device entirely.
+      if (await service.isEnabled()) {
+        await service.endSessionKeepingCredential();
+      } else {
+        await _storage.deleteAll();
+      }
+      ref.read(sessionUnlockedProvider.notifier).state = false;
       if (mounted) context.go('/login');
     }
   }

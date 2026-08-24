@@ -4,6 +4,7 @@ import 'package:local_auth/local_auth.dart';
 
 const _storage = FlutterSecureStorage();
 const _enabledKey = 'biometric_enabled';
+const _askedKey = 'biometric_asked';
 
 /// Why an unlock attempt failed, so callers can tell "try again" apart from
 /// "this will never work here" and word the message accordingly.
@@ -58,6 +59,32 @@ class BiometricService {
     } else {
       await _storage.delete(key: _enabledKey);
     }
+  }
+
+  /// Whether the offer to turn biometrics on has already been made once.
+  /// Declining is a real answer, so the offer is not repeated every login.
+  Future<bool> hasBeenOffered() async =>
+      await _storage.read(key: _askedKey) == 'true';
+
+  Future<void> markOffered() async =>
+      _storage.write(key: _askedKey, value: 'true');
+
+  /// Ends the active session but keeps the refresh token that biometrics
+  /// unlocks, so signing out still leaves a fingerprint way back in.
+  ///
+  /// WHY not wipe everything: a full clear destroys the very credential the
+  /// sensor exists to unlock, which would make biometric sign-in impossible
+  /// for exactly the people who turned it on. Turning the toggle off — or
+  /// failing the sensor — still clears the lot.
+  Future<void> endSessionKeepingCredential() async {
+    await _storage.delete(key: 'access_token');
+  }
+
+  /// True when a fingerprint can still get this device back into an account,
+  /// whether or not an access token is currently live.
+  Future<bool> hasUnlockableSession() async {
+    if (!await isEnabled()) return false;
+    return await _storage.read(key: 'refresh_token') != null;
   }
 
   /// Throws [BiometricException] rather than returning false so callers can
@@ -118,3 +145,7 @@ final biometricAvailableProvider = FutureProvider<bool>(
 final biometricEnabledProvider = FutureProvider<bool>(
   (ref) => ref.watch(biometricServiceProvider).isEnabled(),
 );
+
+/// Cleared on every cold start, so a stored session is unlocked once per app
+/// launch rather than once per navigation.
+final sessionUnlockedProvider = StateProvider<bool>((ref) => false);

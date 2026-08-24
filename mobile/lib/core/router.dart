@@ -7,6 +7,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 
 import '../features/auth/login_screen.dart';
+import 'auth/biometric_service.dart';
 import '../features/dashboard/dashboard_screen.dart';
 import '../features/properties/properties_screen.dart';
 import '../features/properties/property_detail_screen.dart';
@@ -29,6 +30,23 @@ final routerProvider = Provider<GoRouter>((ref) {
       final token = await _storage.read(key: 'access_token');
       final isLoggedIn = token != null;
       final isGoingToLogin = state.matchedLocation == '/login';
+
+      // WHY this runs before the signed-out check, and keys off the refresh
+      // token rather than the access token: after signing out there is no
+      // access token, but the refresh token is deliberately kept so a
+      // fingerprint can still get back in. Both that case and a live session
+      // on cold start are "sealed until the sensor says otherwise", and /login
+      // is where that check happens.
+      if (!ref.read(sessionUnlockedProvider) &&
+          await ref.read(biometricServiceProvider).hasUnlockableSession()) {
+        // Carry the verdict in the URL so LoginScreen knows on its first build
+        // whether it is a sign-in form or an unlock screen. Deciding it there
+        // would mean an async gap on every sign-in.
+        final alreadyLocked =
+            isGoingToLogin && state.uri.queryParameters['locked'] == '1';
+        return alreadyLocked ? null : '/login?locked=1';
+      }
+
       if (!isLoggedIn && !isGoingToLogin) return '/login';
       if (isLoggedIn && isGoingToLogin) return '/dashboard';
       // Block tenant-restricted routes
@@ -45,7 +63,12 @@ final routerProvider = Provider<GoRouter>((ref) {
       return null;
     },
     routes: [
-      GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
+      GoRoute(
+        path: '/login',
+        builder: (_, state) => LoginScreen(
+          isLocked: state.uri.queryParameters['locked'] == '1',
+        ),
+      ),
       // Global routes without Bottom Nav
       GoRoute(path: '/notifications', builder: (_, __) => const NotificationsScreen()),
       GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
