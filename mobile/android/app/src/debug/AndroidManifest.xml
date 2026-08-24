@@ -4,4 +4,10 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- WHY debug-only: dev testing points API_BASE_URL at a local dev stack
+         over plain HTTP (adb reverse tcp:8020), which Android blocks by
+         default on API 28+. This manifest only merges into debug builds, so
+         release/prod — which always talks HTTPS — is unaffected. -->
+    <application android:usesCleartextTraffic="true" />
 </manifest>
