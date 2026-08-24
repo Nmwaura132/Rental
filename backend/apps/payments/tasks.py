@@ -24,7 +24,8 @@ def mark_overdue_invoices():
 def process_mpesa_payment(self, receipt_number, amount, account_ref, phone, idempotency_key):
     """
     Match an M-Pesa C2B payment to an open invoice and record it.
-    account_ref is the BillRefNumber the tenant entered (typically unit number).
+    account_ref is the BillRefNumber the tenant entered (their unit's payment
+    code, or the unit_number their landlord goes by).
     `amount` is a string (JSON-safe); parsed to Decimal here.
     """
     from apps.tenants.models import Lease
@@ -43,12 +44,16 @@ def process_mpesa_payment(self, receipt_number, amount, account_ref, phone, idem
         # Normalize incoming phone
         normalized_phone = normalize_phone(phone)
 
-        # Find the active lease by unit number (account_ref)
+        # Resolve account_ref (payment_code, falling back to unit_number) to a
+        # unit, then find that unit's active lease.
+        from apps.properties.models import Unit
+        unit = Unit.match_reference(account_ref)
         lease = (
             Lease.objects
-            .filter(unit__unit_number__iexact=account_ref, status=Lease.Status.ACTIVE)
+            .filter(unit=unit, status=Lease.Status.ACTIVE)
             .select_related("unit__property", "tenant")
             .first()
+            if unit else None
         )
 
         if not lease:

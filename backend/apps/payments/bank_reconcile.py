@@ -36,10 +36,12 @@ def reconcile_bank_notification(notification, *, invoice_id=None) -> bool:
         ).first()
 
     if not invoice and invoice_id is None and reference:
+        from apps.properties.models import Unit
+        unit = Unit.match_reference(reference)
         lease = Lease.objects.filter(
-            unit__unit_number__iexact=reference,
+            unit=unit,
             status=Lease.Status.ACTIVE,
-        ).first()
+        ).first() if unit else None
         if lease:
             invoice = Invoice.objects.filter(
                 lease=lease,

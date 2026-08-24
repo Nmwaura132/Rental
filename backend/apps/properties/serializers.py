@@ -6,7 +6,10 @@ class UnitSerializer(serializers.ModelSerializer):
     class Meta:
         model = Unit
         fields = "__all__"
-        read_only_fields = ["id", "created_at"]
+        # WHY payment_code is read-only: it's derived from unit_number in
+        # Unit.save() with its own collision handling. Letting it through the
+        # API would let a client set a duplicate or bypass that logic entirely.
+        read_only_fields = ["id", "created_at", "payment_code"]
 
 
 class PropertyChargeSerializer(serializers.ModelSerializer):

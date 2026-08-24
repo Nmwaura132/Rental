@@ -1,11 +1,19 @@
+import re
+
 from django.db import models
 from django.conf import settings
 import random
 import string
 
-def _generate_unit_hash(length=4):
-    """Generate a random alphanumeric suffix for global M-Pesa unit matching."""
-    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=length))
+# WHY exclude 0/O/1/I: these are the disambiguating suffix characters a tenant
+# reads off an SMS/invoice and dials into their phone keypad; ambiguous glyphs
+# there turn into wrong-account payments, not just typos.
+_PAYMENT_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+def _slugify_unit_number(unit_number):
+    """Uppercase, alphanumeric-only projection of a landlord's own unit label."""
+    return re.sub(r"[^A-Z0-9]", "", unit_number.upper())
 
 
 class Property(models.Model):
@@ -47,7 +55,17 @@ class Unit(models.Model):
         MAINTENANCE = "maintenance", "Under Maintenance"
 
     property = models.ForeignKey(Property, on_delete=models.CASCADE, related_name="units")
-    unit_number = models.CharField(max_length=20, unique=True)
+    # WHY unique only per-property, not globally: this is the landlord's own
+    # label ("G1", "1A") — the whole point is that two different landlords
+    # (or even two properties for the same landlord) can each have a "G1"
+    # without colliding. Global uniqueness lives on payment_code instead.
+    unit_number = models.CharField(max_length=20)
+    # WHY a separate field: unit_number needs to be readable and landlord-chosen;
+    # what a tenant dials into M-Pesa needs to be short, globally unique, and
+    # free of characters that get misread on a phone keypad. Forcing one field
+    # to do both meant every unit_number got a random suffix bolted on
+    # ("G1-K3P9"), which broke the very thing landlords use it for.
+    payment_code = models.CharField(max_length=12, unique=True, db_index=True)
     unit_type = models.CharField(max_length=20, choices=UnitType.choices)
     rent_amount = models.DecimalField(max_digits=10, decimal_places=2)
     deposit_amount = models.DecimalField(max_digits=10, decimal_places=2)
@@ -61,19 +79,76 @@ class Unit(models.Model):
         constraints = [
             models.CheckConstraint(condition=models.Q(rent_amount__gt=0), name="unit_rent_positive"),
             models.CheckConstraint(condition=models.Q(deposit_amount__gte=0), name="unit_deposit_nonnegative"),
+            models.UniqueConstraint(fields=["property", "unit_number"], name="unit_number_unique_per_property"),
         ]
         indexes = [
             models.Index(fields=["property", "status"]),
         ]
 
+    def _next_payment_code(self):
+        """
+        Derive a payment code from unit_number, falling back to a random
+        suffix only on an actual collision.
+
+        WHY derive-with-fallback rather than always-random: most units never
+        collide across the whole system ("G1" is globally unique in practice
+        even though it's only guaranteed unique per-property), so most
+        landlords see their own label on the invoice unchanged. A random code
+        for every unit would make ALL of them equally unmemorable to solve a
+        collision that, for most units, never happens.
+        """
+        base = _slugify_unit_number(self.unit_number)[:12] or "UNIT"
+        if not Unit.objects.filter(payment_code__iexact=base).exists():
+            return base
+        for _ in range(20):
+            suffix = "".join(random.choices(_PAYMENT_CODE_ALPHABET, k=4))
+            candidate = f"{base[:7]}{suffix}"[:12]
+            if not Unit.objects.filter(payment_code__iexact=candidate).exists():
+                return candidate
+        # Astronomically unlikely with a 32-char alphabet and 4-char suffix,
+        # but fail loudly rather than save a colliding payment_code.
+        raise RuntimeError(f"Could not derive a unique payment_code from '{self.unit_number}'.")
+
     def save(self, *args, **kwargs):
-        # On creation, append a random suffix to ensure global uniqueness for M-Pesa matching
-        if not self.pk and self.unit_number:
-            suffix = _generate_unit_hash()
-            # max_length is 20, we need 5 chars for "-XXXX"
-            base_number = str(self.unit_number)[:14]
-            self.unit_number = f"{base_number}-{suffix}"
+        if not self.pk and not self.payment_code:
+            self.payment_code = self._next_payment_code()
         super().save(*args, **kwargs)
+
+    @classmethod
+    def match_reference(cls, reference):
+        """
+        Resolve whatever a tenant typed into a Paybill/bank reference field to
+        a single Unit, or None.
+
+        Tries payment_code first — the intended path, since it's what's
+        printed on invoices and SMS and is globally unique by construction.
+        Falls back to unit_number (normalized: uppercased, punctuation/space
+        stripped) for tenants who type what their landlord actually calls the
+        unit instead ("G1") rather than the system code. Because unit_number
+        is only unique per-property, this fallback can match more than one
+        unit across different landlords — returns None rather than guessing
+        wrong when that happens, since crediting the wrong landlord's tenant
+        is worse than not auto-matching at all.
+        """
+        reference = (reference or "").strip()
+        if not reference:
+            return None
+
+        unit = cls.objects.filter(payment_code__iexact=reference).first()
+        if unit:
+            return unit
+
+        # Second indexed lookup, not a table scan: strip the space/dash
+        # punctuation a tenant might type ("1-A", "G 1") from the *input*
+        # only, then match it as-is against stored unit_number. Landlords who
+        # store unit_number with unusual internal punctuation of their own
+        # ("1.A") won't hit this path — falls through to manual reconciliation,
+        # same as any other unrecognised reference today.
+        slug = _slugify_unit_number(reference)
+        if not slug:
+            return None
+        candidates = list(cls.objects.filter(unit_number__iexact=slug)[:2])
+        return candidates[0] if len(candidates) == 1 else None
 
     def __str__(self):
         return f"{self.property.name} — Unit {self.unit_number}"

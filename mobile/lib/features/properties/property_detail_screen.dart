@@ -604,6 +604,7 @@ class _EditUnitDialog extends ConsumerStatefulWidget {
 
 class _EditUnitDialogState extends ConsumerState<_EditUnitDialog> {
   final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _unitNumberCtrl;
   late final TextEditingController _rentCtrl;
   late final TextEditingController _depositCtrl;
   late String _unitType;
@@ -613,6 +614,7 @@ class _EditUnitDialogState extends ConsumerState<_EditUnitDialog> {
   @override
   void initState() {
     super.initState();
+    _unitNumberCtrl = TextEditingController(text: widget.unit['unit_number']?.toString() ?? '');
     _rentCtrl = TextEditingController(text: widget.unit['rent_amount']?.toString() ?? '');
     _depositCtrl = TextEditingController(text: widget.unit['deposit_amount']?.toString() ?? '');
     _unitType = widget.unit['unit_type'] as String? ?? 'bedsitter';
@@ -621,6 +623,7 @@ class _EditUnitDialogState extends ConsumerState<_EditUnitDialog> {
 
   @override
   void dispose() {
+    _unitNumberCtrl.dispose();
     _rentCtrl.dispose();
     _depositCtrl.dispose();
     super.dispose();
@@ -631,6 +634,7 @@ class _EditUnitDialogState extends ConsumerState<_EditUnitDialog> {
     setState(() => _loading = true);
     try {
       await ref.read(dioProvider).patch('/api/v1/properties/units/${widget.unit['id']}/', data: {
+        'unit_number': _unitNumberCtrl.text.trim(),
         'unit_type': _unitType,
         'rent_amount': double.parse(_rentCtrl.text.replaceAll(',', '')),
         'deposit_amount': double.parse(_depositCtrl.text.replaceAll(',', '')),
@@ -660,6 +664,16 @@ class _EditUnitDialogState extends ConsumerState<_EditUnitDialog> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              TextFormField(
+                controller: _unitNumberCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Unit Number',
+                  helperText: 'Your own label for this unit, e.g. G1 or 1A',
+                ),
+                validator: (v) =>
+                    (v == null || v.trim().isEmpty) ? 'Required' : null,
+              ),
+              const SizedBox(height: 12),
               DropdownButtonFormField<String>(
                 initialValue: _unitType,
                 decoration: const InputDecoration(labelText: 'Unit Type'),

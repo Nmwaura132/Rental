@@ -73,7 +73,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             f"has been issued. Amount: KES {invoice.amount_due:,.0f}. "
             f"Due: {invoice.due_date.strftime('%d %b %Y')}. "
             f"Pay via M-Pesa Paybill {settings.MPESA_SHORTCODE}, "
-            f"Acc: {unit.unit_number}."
+            f"Acc: {unit.payment_code}."
         )
         send_sms.delay(tenant.id, msg)
 
@@ -314,7 +314,7 @@ class MpesaSTKPushView(APIView):
         if amount_int <= 0:
             return Response({"error": "Invoice balance is zero."}, status=400)
 
-        account_ref = invoice.lease.unit.unit_number[:12]
+        account_ref = invoice.lease.unit.payment_code
         description = "Rent"
 
         try:

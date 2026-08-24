@@ -160,13 +160,13 @@ def send_rent_reminders():
                 msg = (
                     f"Dear {tenant.first_name}, your rent of KES {balance:,.0f} "
                     f"for {unit.property.name} Unit {unit.unit_number} is due TODAY. "
-                    f"Pay via M-Pesa Paybill {settings.MPESA_SHORTCODE}, Acc: {unit.unit_number}."
+                    f"Pay via M-Pesa Paybill {settings.MPESA_SHORTCODE}, Acc: {unit.payment_code}."
                 )
             else:
                 msg = (
                     f"Dear {tenant.first_name}, your rent of KES {balance:,.0f} "
                     f"for {unit.property.name} Unit {unit.unit_number} is due in {days} days. "
-                    f"Pay via M-Pesa Paybill {settings.MPESA_SHORTCODE}, Acc: {unit.unit_number}."
+                    f"Pay via M-Pesa Paybill {settings.MPESA_SHORTCODE}, Acc: {unit.payment_code}."
                 )
 
             send_sms.delay(tenant.id, msg)

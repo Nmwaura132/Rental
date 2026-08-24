@@ -302,13 +302,14 @@ class BankNotificationListView(APIView):
         owned_invoice_refs = Invoice.objects.filter(
             lease__unit__property__owner=request.user
         ).values("invoice_number")
-        owned_unit_refs = Unit.objects.filter(
-            property__owner=request.user
-        ).values("unit_number")
+        owned_units = Unit.objects.filter(property__owner=request.user)
+        owned_unit_refs = owned_units.values("unit_number")
+        owned_payment_codes = owned_units.values("payment_code")
         qs = BankPaymentNotification.objects.filter(
             Q(payment__invoice__lease__unit__property__owner=request.user)
             | Q(payment_ref__in=owned_invoice_refs)
             | Q(payment_ref__in=owned_unit_refs)
+            | Q(payment_ref__in=owned_payment_codes)
         ).distinct()
 
         status_filter = request.query_params.get("status")
@@ -341,14 +342,15 @@ class BankNotificationMatchView(APIView):
         owned_invoice_refs = Invoice.objects.filter(
             lease__unit__property__owner=request.user
         ).values("invoice_number")
-        owned_unit_refs = Unit.objects.filter(
-            property__owner=request.user
-        ).values("unit_number")
+        owned_units = Unit.objects.filter(property__owner=request.user)
+        owned_unit_refs = owned_units.values("unit_number")
+        owned_payment_codes = owned_units.values("payment_code")
         try:
             notification = BankPaymentNotification.objects.filter(
                 Q(payment__invoice__lease__unit__property__owner=request.user)
                 | Q(payment_ref__in=owned_invoice_refs)
                 | Q(payment_ref__in=owned_unit_refs)
+                | Q(payment_ref__in=owned_payment_codes)
             ).distinct().get(pk=pk)
         except BankPaymentNotification.DoesNotExist:
             return Response({"error": "Notification not found."}, status=404)

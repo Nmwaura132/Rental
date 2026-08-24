@@ -157,6 +157,55 @@ def test_invalid_account_ref_does_not_create_payment(lease):
 
 
 @pytest.mark.django_db
+def test_payment_matches_on_payment_code_not_just_unit_number(invoice, lease):
+    """The intended path: a tenant types the short code printed on their
+    invoice/SMS, not the landlord's own unit label."""
+    process_mpesa_payment(
+        receipt_number="RCODE",
+        amount="15000",
+        account_ref=lease.unit.payment_code,
+        phone="+254700111111",
+        idempotency_key=make_idempotency_key("RCODE"),
+    )
+    invoice.refresh_from_db()
+    assert invoice.status == Invoice.Status.PAID
+
+
+@pytest.mark.django_db
+def test_same_unit_number_on_different_properties_does_not_cross_match(lease):
+    """Two landlords each naming a unit 'A1' must never let one's tenant pay
+    into the other's lease — unit_number is only unique per property."""
+    from apps.properties.models import Property, Unit
+
+    other_landlord = lease.unit.property.owner.__class__.objects.create_user(
+        phone_number="+254700999000",
+        password="OtherLandlord@Test1",
+        first_name="Other",
+        last_name="Landlord",
+        role=lease.unit.property.owner.__class__.Role.LANDLORD,
+    )
+    other_property = Property.objects.create(owner=other_landlord, name="Other Apartments")
+    Unit.objects.create(
+        property=other_property,
+        unit_number=lease.unit.unit_number,  # deliberately the same label ("A1")
+        unit_type=Unit.UnitType.ONE_BED,
+        rent_amount=Decimal("15000.00"),
+        deposit_amount=Decimal("30000.00"),
+    )
+
+    process_mpesa_payment(
+        receipt_number="RAMBIG",
+        amount="15000",
+        account_ref=lease.unit.unit_number,  # ambiguous: matches both units' unit_number
+        phone="+254700111111",
+        idempotency_key=make_idempotency_key("RAMBIG"),
+    )
+
+    # Refuses to guess between two same-named units on different properties.
+    assert not Payment.objects.filter(mpesa_receipt_number="RAMBIG").exists()
+
+
+@pytest.mark.django_db
 def test_confirmed_payment_is_immutable(invoice):
     payment = Payment.objects.create(
         invoice=invoice,
