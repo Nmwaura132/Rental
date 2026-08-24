@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../core/api/api_client.dart';
+import '../../core/auth/biometric_service.dart';
 import '../../core/utils/api_error.dart';
 import '../../core/providers/theme_provider.dart';
 import '../../core/constants.dart';
@@ -41,6 +42,48 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         _phone = phone;
         _role = role;
       });
+    }
+  }
+
+  Future<void> _setBiometricEnabled(bool enabled) async {
+    final service = ref.read(biometricServiceProvider);
+
+    // WHY authenticate before enabling: it proves the sensor actually works
+    // for this user, so nobody discovers at the next cold start that they have
+    // locked themselves behind a prompt they cannot pass.
+    if (enabled) {
+      try {
+        await service.authenticate(reason: 'Confirm to turn on biometric unlock');
+      } on BiometricException catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(switch (e.failure) {
+              BiometricFailure.notEnrolled =>
+                'Add a fingerprint or face in device settings first.',
+              BiometricFailure.lockedOut =>
+                'Too many attempts. Try again later.',
+              BiometricFailure.unavailable =>
+                'Biometrics are unavailable on this device.',
+              BiometricFailure.rejected => 'Not recognised. Nothing changed.',
+            }),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ));
+        }
+        return;
+      }
+    }
+
+    await service.setEnabled(enabled: enabled);
+    ref.invalidate(biometricEnabledProvider);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+          enabled
+              ? 'Kasa will ask for your fingerprint or face on next launch.'
+              : 'Biometric unlock turned off.',
+        ),
+      ));
     }
   }
 
@@ -400,6 +443,42 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         ),
                       ),
                     ),
+
+                    // Biometric unlock row — omitted entirely when the device
+                    // has no usable sensor, rather than shown disabled, since
+                    // a toggle that can never succeed only raises questions.
+                    if (ref.watch(biometricAvailableProvider).valueOrNull ??
+                        false)
+                      Container(
+                        decoration: BoxDecoration(
+                          border: Border(
+                            top: BorderSide(color: cs.kasaStroke, width: 2),
+                          ),
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 18, vertical: 6),
+                        child: Row(
+                          children: [
+                            Text(
+                              'BIOMETRIC UNLOCK',
+                              style: GoogleFonts.spaceGrotesk(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.04,
+                                color: cs.kasaTextSub,
+                              ),
+                            ),
+                            const Spacer(),
+                            Switch(
+                              value: ref
+                                      .watch(biometricEnabledProvider)
+                                      .valueOrNull ??
+                                  false,
+                              onChanged: _setBiometricEnabled,
+                            ),
+                          ],
+                        ),
+                      ),
 
                     // Server URL row
                     Container(
