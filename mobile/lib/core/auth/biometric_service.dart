@@ -5,6 +5,24 @@ import 'package:local_auth/local_auth.dart';
 const _storage = FlutterSecureStorage();
 const _enabledKey = 'biometric_enabled';
 const _askedKey = 'biometric_asked';
+const _authenticatedAtKey = 'biometric_authenticated_at';
+
+/// How long a fingerprint may stand in for the password before the password
+/// itself is required again. The clock restarts on every password sign-in.
+const biometricCredentialLifetime = Duration(days: 60);
+
+/// What the router should do with a stored session.
+enum SessionLockState {
+  /// Nothing stored, or biometrics off — behave as normal.
+  none,
+
+  /// A credential is waiting behind the sensor.
+  locked,
+
+  /// The credential outlived [biometricCredentialLifetime] and has been
+  /// discarded; the password is required.
+  expired,
+}
 
 /// Why an unlock attempt failed, so callers can tell "try again" apart from
 /// "this will never work here" and word the message accordingly.
@@ -56,10 +74,19 @@ class BiometricService {
   Future<void> setEnabled({required bool enabled}) async {
     if (enabled) {
       await _storage.write(key: _enabledKey, value: 'true');
+      await stampPasswordAuth();
     } else {
       await _storage.delete(key: _enabledKey);
+      await _storage.delete(key: _authenticatedAtKey);
     }
   }
+
+  /// Restarts the 60-day clock. Called whenever the password itself has been
+  /// entered, since that is the thing the fingerprint is standing in for.
+  Future<void> stampPasswordAuth() => _storage.write(
+        key: _authenticatedAtKey,
+        value: DateTime.now().toUtc().toIso8601String(),
+      );
 
   /// Whether the offer to turn biometrics on has already been made once.
   /// Declining is a real answer, so the offer is not repeated every login.
@@ -80,11 +107,37 @@ class BiometricService {
     await _storage.delete(key: 'access_token');
   }
 
-  /// True when a fingerprint can still get this device back into an account,
+  /// Whether a fingerprint can still get this device back into an account,
   /// whether or not an access token is currently live.
-  Future<bool> hasUnlockableSession() async {
-    if (!await isEnabled()) return false;
-    return await _storage.read(key: 'refresh_token') != null;
+  Future<SessionLockState> lockState() async {
+    if (!await isEnabled()) return SessionLockState.none;
+    if (await _storage.read(key: 'refresh_token') == null) {
+      return SessionLockState.none;
+    }
+
+    if (await _hasOutlivedPassword()) {
+      // Drop the credential rather than merely hiding it, so an expired
+      // enrolment cannot be revived by anything short of the password. The
+      // preference itself survives: the user opted in, and re-entering the
+      // password re-arms it without making them find the toggle again.
+      await _storage.delete(key: 'refresh_token');
+      await _storage.delete(key: 'access_token');
+      return SessionLockState.expired;
+    }
+
+    return SessionLockState.locked;
+  }
+
+  Future<bool> _hasOutlivedPassword() async {
+    final stamp = await _storage.read(key: _authenticatedAtKey);
+    // A credential with no stamp predates this rule; treat it as due rather
+    // than trusting it indefinitely.
+    if (stamp == null) return true;
+
+    final at = DateTime.tryParse(stamp);
+    if (at == null) return true;
+
+    return DateTime.now().toUtc().difference(at) > biometricCredentialLifetime;
   }
 
   /// Throws [BiometricException] rather than returning false so callers can

@@ -37,14 +37,21 @@ final routerProvider = Provider<GoRouter>((ref) {
       // fingerprint can still get back in. Both that case and a live session
       // on cold start are "sealed until the sensor says otherwise", and /login
       // is where that check happens.
-      if (!ref.read(sessionUnlockedProvider) &&
-          await ref.read(biometricServiceProvider).hasUnlockableSession()) {
+      if (!ref.read(sessionUnlockedProvider)) {
         // Carry the verdict in the URL so LoginScreen knows on its first build
         // whether it is a sign-in form or an unlock screen. Deciding it there
         // would mean an async gap on every sign-in.
-        final alreadyLocked =
-            isGoingToLogin && state.uri.queryParameters['locked'] == '1';
-        return alreadyLocked ? null : '/login?locked=1';
+        final lock = await ref.read(biometricServiceProvider).lockState();
+        final params = state.uri.queryParameters;
+
+        if (lock == SessionLockState.locked) {
+          final alreadyLocked = isGoingToLogin && params['locked'] == '1';
+          return alreadyLocked ? null : '/login?locked=1';
+        }
+        if (lock == SessionLockState.expired) {
+          final alreadyExpired = isGoingToLogin && params['expired'] == '1';
+          return alreadyExpired ? null : '/login?expired=1';
+        }
       }
 
       if (!isLoggedIn && !isGoingToLogin) return '/login';
@@ -67,6 +74,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/login',
         builder: (_, state) => LoginScreen(
           isLocked: state.uri.queryParameters['locked'] == '1',
+          hasExpired: state.uri.queryParameters['expired'] == '1',
         ),
       ),
       // Global routes without Bottom Nav

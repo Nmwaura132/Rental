@@ -29,6 +29,7 @@ Future<void> _pumpLocked(WidgetTester tester, {required bool succeeds}) async {
   FlutterSecureStorage.setMockInitialValues({
     'biometric_enabled': 'true',
     'refresh_token': 'stored-refresh',
+    'biometric_authenticated_at': DateTime.now().toUtc().toIso8601String(),
   });
   SharedPreferences.setMockInitialValues({});
 
@@ -81,5 +82,80 @@ void main() {
       await const FlutterSecureStorage().read(key: 'biometric_enabled'),
       'true',
     );
+  });
+
+  testWidgets('the password form offers a way back to biometrics',
+      (tester) async {
+    await _pumpLocked(tester, succeeds: false);
+
+    await tester.tap(find.text('Use password instead'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Use biometrics'), findsOneWidget);
+  });
+
+  testWidgets('the password fallback keeps the credential it can return to',
+      (tester) async {
+    await _pumpLocked(tester, succeeds: false);
+
+    await tester.tap(find.text('Use password instead'));
+    await tester.pumpAndSettle();
+
+    expect(
+      await const FlutterSecureStorage().read(key: 'refresh_token'),
+      'stored-refresh',
+    );
+  });
+
+  group('credential lifetime', () {
+    test('a credential older than 60 days is discarded', () async {
+      FlutterSecureStorage.setMockInitialValues({
+        'biometric_enabled': 'true',
+        'refresh_token': 'stored-refresh',
+        'biometric_authenticated_at': DateTime.now()
+            .toUtc()
+            .subtract(const Duration(days: 61))
+            .toIso8601String(),
+      });
+
+      final state =
+          await BiometricService(LocalAuthentication()).lockState();
+
+      expect(state, SessionLockState.expired);
+    });
+
+    test('a credential inside 60 days still unlocks', () async {
+      FlutterSecureStorage.setMockInitialValues({
+        'biometric_enabled': 'true',
+        'refresh_token': 'stored-refresh',
+        'biometric_authenticated_at': DateTime.now()
+            .toUtc()
+            .subtract(const Duration(days: 59))
+            .toIso8601String(),
+      });
+
+      final state =
+          await BiometricService(LocalAuthentication()).lockState();
+
+      expect(state, SessionLockState.locked);
+    });
+
+    test('an expired credential is erased, not merely hidden', () async {
+      FlutterSecureStorage.setMockInitialValues({
+        'biometric_enabled': 'true',
+        'refresh_token': 'stored-refresh',
+        'biometric_authenticated_at': DateTime.now()
+            .toUtc()
+            .subtract(const Duration(days: 61))
+            .toIso8601String(),
+      });
+
+      await BiometricService(LocalAuthentication()).lockState();
+
+      expect(
+        await const FlutterSecureStorage().read(key: 'refresh_token'),
+        isNull,
+      );
+    });
   });
 }

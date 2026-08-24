@@ -16,11 +16,20 @@ import '../../core/widgets/kasa_logo.dart';
 const _storage = FlutterSecureStorage();
 
 class LoginScreen extends ConsumerStatefulWidget {
-  const LoginScreen({super.key, this.isLocked = false});
+  const LoginScreen({
+    super.key,
+    this.isLocked = false,
+    this.hasExpired = false,
+  });
 
   /// Set by the router when a stored session is waiting behind a biometric
   /// check, which turns this screen into an unlock screen.
   final bool isLocked;
+
+  /// Set by the router when a biometric credential was discarded for outliving
+  /// [biometricCredentialLifetime], so the screen can say why the password is
+  /// suddenly being asked for again.
+  final bool hasExpired;
 
   @override
   ConsumerState<LoginScreen> createState() => _LoginScreenState();
@@ -35,6 +44,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   bool _rememberMe = true; // default: stay logged in for 30 days
 
   late bool _isLocked = widget.isLocked;
+
+  /// A sealed credential still exists even while the password form is showing,
+  /// so the user can switch back without having thrown anything away.
+  late bool _canUseBiometrics = widget.isLocked;
+
   BiometricPulseState _pulse = BiometricPulseState.idle;
   String? _unlockError;
 
@@ -67,11 +81,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         final restored = await _restoreSession();
         if (!restored) {
           if (!mounted) return;
-          setState(() {
-            _pulse = BiometricPulseState.error;
-            _unlockError = 'Session expired. Sign in with your password.';
-          });
-          await _usePasswordInstead();
+          // The refresh token is dead, so there is nothing left to unlock —
+          // the credential goes with it.
+          await _forgetBiometrics();
+          if (mounted) {
+            setState(() => _unlockError =
+                'Session expired. Sign in with your password.');
+          }
           return;
         }
       }
@@ -88,7 +104,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       // check they cannot pass — drop them to the password form instead.
       if (e.failure == BiometricFailure.unavailable ||
           e.failure == BiometricFailure.notEnrolled) {
-        await _usePasswordInstead(forgetBiometrics: true);
+        await _forgetBiometrics();
         return;
       }
       setState(() {
@@ -127,24 +143,39 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     }
   }
 
-  /// Abandons the sealed session and returns to a plain sign-in form.
-  ///
-  /// [forgetBiometrics] is for a sensor that can no longer work, where leaving
-  /// the setting on would seal the session again on the next launch and loop
-  /// the user right back here. Choosing the password by hand is not that: it
-  /// keeps the preference, so one fallback does not silently switch off a
-  /// feature the user deliberately turned on.
-  Future<void> _usePasswordInstead({bool forgetBiometrics = false}) async {
-    if (forgetBiometrics) {
-      await ref.read(biometricServiceProvider).setEnabled(enabled: false);
-      ref.invalidate(biometricEnabledProvider);
-    }
+  /// Swaps the unlock panel for the sign-in form without touching the stored
+  /// credential, so the user can switch back and forth freely. Only a sensor
+  /// that has genuinely stopped working discards anything — see [_forgetBiometrics].
+  void _showPasswordForm() {
+    setState(() {
+      _isLocked = false;
+      _pulse = BiometricPulseState.idle;
+      _unlockError = null;
+    });
+  }
+
+  void _showUnlockPanel() {
+    setState(() {
+      _isLocked = true;
+      _pulse = BiometricPulseState.idle;
+      _unlockError = null;
+    });
+    _unlock();
+  }
+
+  /// For a sensor that can no longer work. Leaving the setting on would seal
+  /// the session again on the next launch and loop the user right back here,
+  /// so the enrolment and the credential both go.
+  Future<void> _forgetBiometrics() async {
+    await ref.read(biometricServiceProvider).setEnabled(enabled: false);
+    ref.invalidate(biometricEnabledProvider);
     await _storage.delete(key: 'access_token');
     await _storage.delete(key: 'refresh_token');
 
     if (!mounted) return;
     setState(() {
       _isLocked = false;
+      _canUseBiometrics = false;
       _pulse = BiometricPulseState.idle;
       _unlockError = null;
     });
@@ -245,6 +276,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       // open — don't make them prove themselves twice on the way to /dashboard.
       ref.read(sessionUnlockedProvider.notifier).state = true;
 
+      // The password is what the fingerprint stands in for, so entering it
+      // restarts the 60-day window for anyone already enrolled.
+      final service = ref.read(biometricServiceProvider);
+      if (await service.isEnabled()) await service.stampPasswordAuth();
+
       await _maybeOfferBiometrics();
 
       if (mounted) context.go('/dashboard');
@@ -309,7 +345,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             pulse: _pulse,
                             error: _unlockError,
                             onUnlock: _unlock,
-                            onUsePassword: _usePasswordInstead,
+                            onUsePassword: _showPasswordForm,
                           ),
                         )
                       else
@@ -326,6 +362,33 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   'Sign In',
                                   style: theme.textTheme.headlineSmall,
                                 ),
+
+                                // Being asked for a password after weeks of
+                                // fingerprints looks like a fault unless the
+                                // reason is stated.
+                                if (widget.hasExpired) ...[
+                                  const SizedBox(height: 12),
+                                  Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Icon(Icons.schedule_rounded,
+                                          size: 18, color: cs.onSurfaceVariant),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          'It has been 60 days since you last '
+                                          'used your password. Enter it once to '
+                                          'turn your fingerprint back on.',
+                                          style: theme.textTheme.bodySmall
+                                              ?.copyWith(
+                                            color: cs.onSurfaceVariant,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
                                 const SizedBox(height: 20),
 
                                 TextFormField(
@@ -414,6 +477,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   ),
                                   child: const Text('Forgot password?'),
                                 ),
+
+                                // The way back. Without it, "Use password
+                                // instead" is a one-way door for anyone who
+                                // taps it by mistake.
+                                if (_canUseBiometrics)
+                                  TextButton.icon(
+                                    onPressed: _showUnlockPanel,
+                                    icon: const Icon(Icons.fingerprint_rounded,
+                                        size: 20),
+                                    label: const Text('Use biometrics'),
+                                  ),
                               ],
                             ),
                           ),
