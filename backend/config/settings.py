@@ -328,3 +328,10 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
 }
+
+
+# ── KRA Monthly Rental Income ────────────────────────────────────────────────
+# Rate applied to gross rent received. Kept in config because it has already
+# moved once (10% -> 7.5% in January 2024) and the Finance Bill 2026 proposed
+# moving it back to 10%; confirm the current rate with KRA before filing.
+MRI_TAX_RATE = env.float("MRI_TAX_RATE", default=0.075)

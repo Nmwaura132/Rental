@@ -1,7 +1,7 @@
 """
 Financial report PDF generators for the Rental Manager system.
 All functions return raw bytes (PDF) ready to upload to MinIO.
-Follows the same ReportLab patterns as apps/tenants/lease_pdf.py.
+Follows the same ReportLab patterns as apps/tenants/tenancy_pdf.py.
 """
 import io
 from datetime import date, timedelta
@@ -98,7 +98,7 @@ def _section(text):
 
 def generate_monthly_pnl(prop, year: int, month: int) -> bytes:
     """Monthly rent collection P&L for a single property."""
-    from apps.tenants.models import Lease
+    from apps.tenants.models import Tenancy
     from apps.payments.models import Invoice, Payment
 
     import calendar
@@ -108,8 +108,8 @@ def generate_monthly_pnl(prop, year: int, month: int) -> bytes:
     last_day = date(year, month, calendar.monthrange(year, month)[1])
     month_label = first_day.strftime('%B %Y')
 
-    # All active/expired leases for this property with units
-    leases = Lease.objects.filter(
+    # All active/expired tenancies for this property with units
+    tenancies = Tenancy.objects.filter(
         unit__property=prop
     ).select_related('unit', 'tenant')
 
@@ -118,15 +118,15 @@ def generate_monthly_pnl(prop, year: int, month: int) -> bytes:
     total_collected = Decimal('0')
     method_totals: dict[str, Decimal] = {}
 
-    for lease in leases:
+    for tenancy in tenancies:
         invoices = Invoice.objects.filter(
-            lease=lease,
+            tenancy=tenancy,
             period_start__lte=last_day,
             period_end__gte=first_day,
         )
         expected = invoices.aggregate(s=Sum('amount_due'))['s'] or Decimal('0')
         payments = Payment.objects.filter(
-            invoice__lease=lease,
+            invoice__tenancy=tenancy,
             status='confirmed',
             paid_at__date__gte=first_day,
             paid_at__date__lte=last_day,
@@ -143,8 +143,8 @@ def generate_monthly_pnl(prop, year: int, month: int) -> bytes:
         total_collected += collected
 
         rows.append([
-            lease.unit.unit_number,
-            lease.tenant.get_full_name(),
+            tenancy.unit.unit_number,
+            tenancy.tenant.get_full_name(),
             _fmt_money(expected),
             _fmt_money(collected),
             _fmt_money(balance),
@@ -222,9 +222,9 @@ def generate_aged_receivables(prop) -> bytes:
 
     today = date.today()
     outstanding = Invoice.objects.filter(
-        lease__unit__property=prop,
+        tenancy__unit__property=prop,
         status__in=['pending', 'overdue', 'partially_paid'],
-    ).select_related('lease__tenant', 'lease__unit')
+    ).select_related('tenancy__tenant', 'tenancy__unit')
 
     def bucket(days):
         if days <= 0:
@@ -247,8 +247,8 @@ def generate_aged_receivables(prop) -> bytes:
         b = bucket(days_overdue)
         bucket_totals[b] += bal
         rows.append([
-            inv.lease.tenant.get_full_name(),
-            inv.lease.unit.unit_number,
+            inv.tenancy.tenant.get_full_name(),
+            inv.tenancy.unit.unit_number,
             inv.invoice_number,
             _fmt_date(inv.due_date),
             _fmt_money(inv.amount_due),
@@ -292,20 +292,20 @@ def generate_aged_receivables(prop) -> bytes:
 # Report 3: Tenant Ledger
 # ─────────────────────────────────────────────────────────────────────────────
 
-def generate_tenant_ledger(lease, date_from: date, date_to: date) -> bytes:
-    """Chronological statement of debits (invoices) and credits (payments) for a lease."""
+def generate_tenant_ledger(tenancy, date_from: date, date_to: date) -> bytes:
+    """Chronological statement of debits (invoices) and credits (payments) for a tenancy."""
     from apps.payments.models import Invoice, Payment
 
-    prop = lease.unit.property
-    tenant = lease.tenant
+    prop = tenancy.unit.property
+    tenant = tenancy.tenant
 
     invoices = Invoice.objects.filter(
-        lease=lease,
+        tenancy=tenancy,
         due_date__range=(date_from, date_to),
     ).order_by('due_date')
 
     payments = Payment.objects.filter(
-        invoice__lease=lease,
+        invoice__tenancy=tenancy,
         paid_at__date__range=(date_from, date_to),
         status='confirmed',
     ).order_by('paid_at')
@@ -346,7 +346,7 @@ def generate_tenant_ledger(lease, date_from: date, date_to: date) -> bytes:
 
     story.append(_header_para("Tenant Ledger Statement"))
     story.append(_sub_para(
-        f"Tenant: {tenant.get_full_name()}  |  Unit: {lease.unit.unit_number}, {prop.name}  |  "
+        f"Tenant: {tenant.get_full_name()}  |  Unit: {tenancy.unit.unit_number}, {prop.name}  |  "
         f"Period: {_fmt_date(date_from)} – {_fmt_date(date_to)}"
     ))
     story.append(_hr())
@@ -373,9 +373,9 @@ def generate_tenant_ledger(lease, date_from: date, date_to: date) -> bytes:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def generate_rent_roll(prop) -> bytes:
-    """Current rent roll — all units with lease and payment status."""
+    """Current rent roll — all units with tenancy and payment status."""
     from apps.properties.models import Unit
-    from apps.tenants.models import Lease
+    from apps.tenants.models import Tenancy
     from apps.payments.models import Payment
     from django.db.models import Max
 
@@ -387,21 +387,21 @@ def generate_rent_roll(prop) -> bytes:
     occupied = 0
 
     for unit in units:
-        lease = Lease.objects.filter(
+        tenancy = Tenancy.objects.filter(
             unit=unit, status='active'
         ).select_related('tenant').first()
 
-        if lease:
+        if tenancy:
             occupied += 1
-            total_expected += lease.rent_amount or Decimal('0')
+            total_expected += tenancy.rent_amount or Decimal('0')
 
             last_payment = Payment.objects.filter(
-                invoice__lease=lease, status='confirmed'
+                invoice__tenancy=tenancy, status='confirmed'
             ).order_by('-paid_at').first()
 
             from apps.payments.models import Invoice
             arrears = Invoice.objects.filter(
-                lease=lease,
+                tenancy=tenancy,
                 status__in=['pending', 'overdue', 'partially_paid'],
             ).aggregate(
                 a=Max('amount_due')
@@ -409,7 +409,7 @@ def generate_rent_roll(prop) -> bytes:
             # Compute proper arrears sum
             from django.db.models import Sum as _Sum
             arr_agg = Invoice.objects.filter(
-                lease=lease,
+                tenancy=tenancy,
                 status__in=['pending', 'overdue', 'partially_paid'],
             ).aggregate(due=_Sum('amount_due'), paid=_Sum('amount_paid'))
             arrears_val = (arr_agg['due'] or Decimal('0')) - (arr_agg['paid'] or Decimal('0'))
@@ -420,9 +420,9 @@ def generate_rent_roll(prop) -> bytes:
                 unit.floor or '—',
                 unit.unit_type or '—',
                 'Occupied',
-                lease.tenant.get_full_name(),
-                lease.tenant.phone_number,
-                _fmt_money(lease.rent_amount),
+                tenancy.tenant.get_full_name(),
+                tenancy.tenant.phone_number,
+                _fmt_money(tenancy.rent_amount),
                 _fmt_date(last_payment.paid_at.date()) if last_payment else 'None',
                 _fmt_money(arrears_val) if arrears_val > 0 else '—',
             ])

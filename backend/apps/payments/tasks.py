@@ -28,7 +28,7 @@ def process_mpesa_payment(self, receipt_number, amount, account_ref, phone, idem
     code, or the unit_number their landlord goes by).
     `amount` is a string (JSON-safe); parsed to Decimal here.
     """
-    from apps.tenants.models import Lease
+    from apps.tenants.models import Tenancy
     from .models import Invoice, Payment
     from apps.core.utils.phone import normalize_phone
 
@@ -45,19 +45,19 @@ def process_mpesa_payment(self, receipt_number, amount, account_ref, phone, idem
         normalized_phone = normalize_phone(phone)
 
         # Resolve account_ref (payment_code, falling back to unit_number) to a
-        # unit, then find that unit's active lease.
+        # unit, then find that unit's active tenancy.
         from apps.properties.models import Unit
         unit = Unit.match_reference(account_ref)
-        lease = (
-            Lease.objects
-            .filter(unit=unit, status=Lease.Status.ACTIVE)
+        tenancy = (
+            Tenancy.objects
+            .filter(unit=unit, status=Tenancy.Status.ACTIVE)
             .select_related("unit__property", "tenant")
             .first()
             if unit else None
         )
 
-        if not lease:
-            logger.warning("No active lease found for account_ref=%s receipt=%s", account_ref, receipt_number)
+        if not tenancy:
+            logger.warning("No active tenancy found for account_ref=%s receipt=%s", account_ref, receipt_number)
             return
 
         # WHY: wrap the Payment.create + Invoice update in a single transaction and
@@ -66,17 +66,17 @@ def process_mpesa_payment(self, receipt_number, amount, account_ref, phone, idem
         # amount_paid and corrupt the balance. The idempotency_key prevents a
         # double Payment row; the lock prevents the lost-update on amount_paid.
         with db_transaction.atomic():
-            # Find oldest unpaid invoice for this lease — locked for update.
+            # Find oldest unpaid invoice for this tenancy — locked for update.
             invoice = (
                 Invoice.objects
                 .select_for_update()
-                .filter(lease=lease, status__in=[Invoice.Status.PENDING, Invoice.Status.OVERDUE, Invoice.Status.PARTIALLY_PAID])
+                .filter(tenancy=tenancy, status__in=[Invoice.Status.PENDING, Invoice.Status.OVERDUE, Invoice.Status.PARTIALLY_PAID])
                 .order_by("due_date")
                 .first()
             )
 
             if not invoice:
-                logger.warning("No open invoice for lease=%s receipt=%s", lease.id, receipt_number)
+                logger.warning("No open invoice for tenancy=%s receipt=%s", tenancy.id, receipt_number)
                 return
 
             payment, created = apply_confirmed_payment(
@@ -101,8 +101,8 @@ def process_mpesa_payment(self, receipt_number, amount, account_ref, phone, idem
 
         # Invalidate dashboard cache for tenant and landlord
         from django.core.cache import cache
-        cache.delete(f"dashboard:{lease.tenant.id}")
-        cache.delete(f"dashboard:{lease.unit.property.owner.id}")
+        cache.delete(f"dashboard:{tenancy.tenant.id}")
+        cache.delete(f"dashboard:{tenancy.unit.property.owner.id}")
 
         logger.info("Payment recorded: receipt=%s amount=%s invoice=%s", receipt_number, amount_dec, invoice.invoice_number)
 
@@ -202,7 +202,7 @@ def process_stk_callback(self, payload: dict):
                         invoice = (
                             Invoice.objects
                             .select_for_update()
-                            .select_related("lease__tenant", "lease__unit__property__owner")
+                            .select_related("tenancy__tenant", "tenancy__unit__property__owner")
                             .get(pk=req.invoice_id)
                         )
                         payment, created = apply_confirmed_payment(
@@ -221,8 +221,8 @@ def process_stk_callback(self, payload: dict):
                         if created:
                             payment_id_for_sms = payment.id
                             cache_keys_to_invalidate = [
-                                f"dashboard:{invoice.lease.tenant_id}",
-                                f"dashboard:{invoice.lease.unit.property.owner_id}",
+                                f"dashboard:{invoice.tenancy.tenant_id}",
+                                f"dashboard:{invoice.tenancy.unit.property.owner_id}",
                             ]
             else:
                 # User cancelled (1032), timeout (1037), insufficient funds (1), etc.
@@ -397,7 +397,7 @@ def poll_equity_statement(date_from: str | None = None, date_to: str | None = No
 def generate_monthly_invoices():
     """
     Celery Beat task — runs on the 1st of each month.
-    Creates invoices for all active leases.
+    Creates invoices for all active tenancies.
 
     WHY due_date = period_start + 7 days: invoices are generated on the 1st,
     and `send_rent_reminders` fires reminders at -7d, -3d, 0d before due_date.
@@ -406,7 +406,7 @@ def generate_monthly_invoices():
     window AND aligns the reminder cadence with reality (reminder #1 lands the
     same day the invoice arrives).
     """
-    from apps.tenants.models import Lease
+    from apps.tenants.models import Tenancy
     from .models import Invoice
     from django.utils import timezone
     import uuid
@@ -417,16 +417,16 @@ def generate_monthly_invoices():
     period_end = next_month - timedelta(days=1)
     due_date = period_start + timedelta(days=7)  # 8th of the month — gives reminder window room
 
-    active_leases = Lease.objects.filter(status=Lease.Status.ACTIVE).select_related("unit", "tenant")
+    active_tenancies = Tenancy.objects.filter(status=Tenancy.Status.ACTIVE).select_related("unit", "tenant")
     created = 0
 
-    for lease in active_leases:
+    for tenancy in active_tenancies:
         _, was_created = Invoice.objects.get_or_create(
-            lease=lease,
+            tenancy=tenancy,
             period_start=period_start,
             defaults={
                 "invoice_number": f"INV-{period_start.strftime('%Y%m')}-{uuid.uuid4().hex[:6].upper()}",
-                "amount_due": lease.rent_amount,
+                "amount_due": tenancy.rent_amount,
                 "due_date": due_date,
                 "period_end": period_end,
             },

@@ -22,18 +22,42 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         if attrs.get("password") != attrs.get("password_confirm"):
             raise serializers.ValidationError({"password": "Passwords do not match."})
-        # Self-registration is only allowed for tenants.
-        # Landlords and caretakers must be created by an admin.
-        role = attrs.get("role", "tenant")
-        if role not in ("tenant",):
+
+        # WHY keyed on the creator's role: this endpoint is not self-service —
+        # it requires an authenticated landlord or caretaker and stamps
+        # created_by. A landlord runs the property, so they may take on a
+        # caretaker; a caretaker may only add tenants, since letting them mint
+        # peers would let one hire another behind the owner's back.
+        creator = getattr(self.context.get("request"), "user", None)
+        allowed = {User.Role.TENANT}
+        if creator is not None and getattr(creator, "is_landlord", False):
+            allowed.add(User.Role.CARETAKER)
+
+        role = attrs.get("role", User.Role.TENANT)
+        if role not in allowed:
             raise serializers.ValidationError(
-                {"role": "Self-registration is only available for tenants."}
+                {"role": f"You cannot create a {role} account."}
             )
+
         attrs.pop("password_confirm", None)
         return attrs
 
     def create(self, validated_data):
         return User.objects.create_user(**validated_data)
+
+
+class TenantPickerSerializer(serializers.ModelSerializer):
+    """Just enough to choose a tenant when creating a tenancy.
+
+    WHY separate from UserProfileSerializer: that one carries national_id and
+    kra_pin, and this list is readable by every caretaker on the property. A
+    caretaker has no reason to see either, and the two together are exactly the
+    pair used for SIM-swap and identity fraud. No client reads them back here.
+    """
+
+    class Meta:
+        model = User
+        fields = ["id", "phone_number", "first_name", "last_name", "is_verified"]
 
 
 class UserProfileSerializer(serializers.ModelSerializer):

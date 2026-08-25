@@ -67,31 +67,31 @@ class ReportsView(APIView):
             return None, Response({"error": "Property not found."}, status=404)
         return prop, None
 
-    def _get_lease(self, request):
-        """Resolve lease_id, scoped to the requesting user."""
-        from apps.tenants.models import Lease
-        lease_id = request.query_params.get("lease")
-        if not lease_id:
-            return None, Response({"error": "lease is required."}, status=400)
+    def _get_tenancy(self, request):
+        """Resolve tenancy_id, scoped to the requesting user."""
+        from apps.tenants.models import Tenancy
+        tenancy_id = request.query_params.get("tenancy")
+        if not tenancy_id:
+            return None, Response({"error": "tenancy is required."}, status=400)
         user = request.user
         try:
             if user.is_tenant:
-                lease = Lease.objects.select_related(
+                tenancy = Tenancy.objects.select_related(
                     'unit__property', 'tenant'
-                ).get(id=lease_id, tenant=user)
+                ).get(id=tenancy_id, tenant=user)
             elif user.is_landlord:
-                lease = Lease.objects.select_related(
+                tenancy = Tenancy.objects.select_related(
                     'unit__property', 'tenant'
-                ).get(id=lease_id, unit__property__owner=user)
+                ).get(id=tenancy_id, unit__property__owner=user)
             elif user.is_caretaker:
-                lease = Lease.objects.select_related(
+                tenancy = Tenancy.objects.select_related(
                     'unit__property', 'tenant'
-                ).get(id=lease_id, unit__property__caretaker=user)
+                ).get(id=tenancy_id, unit__property__caretaker=user)
             else:
                 return None, Response({"error": "Permission denied."}, status=403)
-        except Lease.DoesNotExist:
-            return None, Response({"error": "Lease not found."}, status=404)
-        return lease, None
+        except Tenancy.DoesNotExist:
+            return None, Response({"error": "Tenancy not found."}, status=404)
+        return tenancy, None
 
     # ── report handlers ───────────────────────────────────────────────────────
 
@@ -161,7 +161,7 @@ class ReportsView(APIView):
         })
 
     def _ledger(self, request):
-        lease, err = self._get_lease(request)
+        tenancy, err = self._get_tenancy(request)
         if err:
             return err
 
@@ -177,12 +177,12 @@ class ReportsView(APIView):
 
         from .reports import generate_tenant_ledger
         try:
-            pdf_bytes = generate_tenant_ledger(lease, date_from, date_to)
+            pdf_bytes = generate_tenant_ledger(tenancy, date_from, date_to)
         except Exception:
             logger.exception("Tenant ledger PDF generation failed")
             return Response({"error": "PDF generation failed."}, status=500)
 
-        key = f"reports/ledger/{lease.id}/{date_from}_{date_to}.pdf"
+        key = f"reports/ledger/{tenancy.id}/{date_from}_{date_to}.pdf"
         try:
             pdf_url = _upload_pdf(pdf_bytes, key)
         except Exception:
@@ -193,8 +193,8 @@ class ReportsView(APIView):
             "pdf_url": pdf_url,
             "generated_at": timezone.now().isoformat(),
             "summary": {
-                "tenant": lease.tenant.get_full_name(),
-                "unit": lease.unit.unit_number,
+                "tenant": tenancy.tenant.get_full_name(),
+                "unit": tenancy.unit.unit_number,
                 "date_from": date_from.isoformat(),
                 "date_to": date_to.isoformat(),
             },

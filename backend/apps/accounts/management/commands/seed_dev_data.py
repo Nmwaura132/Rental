@@ -5,7 +5,7 @@ Creates:
   • Landlord and tenant credentials from DEV_* environment variables
   • Property   — Whitty Apartments (Nairobi)
   • 4 Units    — 101, 102, 201, 202
-  • Lease      — Nelson in Unit 201, active Jan–Dec 2026
+  • Tenancy      — Nelson in Unit 201, active Jan–Dec 2026
   • Invoices   — Feb 2026 (paid), Mar 2026 (paid), Apr 2026 (overdue)
 
 Safe to re-run — uses get_or_create throughout.
@@ -26,11 +26,11 @@ User = get_user_model()
 
 
 class Command(BaseCommand):
-    help = "Seed dev users, a sample property, lease, and invoices."
+    help = "Seed dev users, a sample property, tenancy, and invoices."
 
     def handle(self, *args, **options):
         from apps.properties.models import Property, Unit
-        from apps.tenants.models import Lease
+        from apps.tenants.models import Tenancy
         from apps.payments.models import Invoice, Payment
 
         if not settings.DEBUG:
@@ -137,8 +137,8 @@ class Command(BaseCommand):
         unit202, c = get_or_create_unit("202", Unit.UnitType.TWO_BED,   35000, 70000, floor=2)
         if c: self.stdout.write(self.style.SUCCESS(f"  Created unit {unit202.unit_number}"))
 
-        # ── Lease ─────────────────────────────────────────────────────────────
-        lease, created = Lease.objects.get_or_create(
+        # ── Tenancy ─────────────────────────────────────────────────────────────
+        tenancy, created = Tenancy.objects.get_or_create(
             tenant=tenant,
             unit=unit201,
             defaults={
@@ -147,7 +147,7 @@ class Command(BaseCommand):
                 "rent_amount": Decimal("28000"),
                 "deposit_amount": Decimal("56000"),
                 "deposit_paid": True,
-                "status": Lease.Status.ACTIVE,
+                "status": Tenancy.Status.ACTIVE,
             },
         )
         if created:
@@ -155,10 +155,10 @@ class Command(BaseCommand):
             unit201.status = Unit.Status.OCCUPIED
             unit201.save(update_fields=["status"])
             self.stdout.write(self.style.SUCCESS(
-                f"  Created lease: Nelson → {unit201.unit_number}"
+                f"  Created tenancy: Nelson → {unit201.unit_number}"
             ))
         else:
-            self.stdout.write("  Lease already exists — skipping")
+            self.stdout.write("  Tenancy already exists — skipping")
 
         # ── Invoices ──────────────────────────────────────────────────────────
         def make_invoice(number, period_start, period_end, due_date, inv_status,
@@ -166,7 +166,7 @@ class Command(BaseCommand):
             inv, created = Invoice.objects.get_or_create(
                 invoice_number=number,
                 defaults={
-                    "lease": lease,
+                    "tenancy": tenancy,
                     "amount_due": Decimal("28000"),
                     "amount_paid": amount_paid,
                     "due_date": due_date,

@@ -41,6 +41,27 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
   String _tab = 'all';
 
   @override
+  void initState() {
+    super.initState();
+    _markAllRead();
+  }
+
+  /// WHY on open rather than per-item: the list is the whole inbox and opening
+  /// it is the act of reading. Marking per-tap would leave the badge lit after
+  /// someone has plainly seen everything.
+  ///
+  /// Deliberately fire-and-forget: failing to clear a badge must not block the
+  /// notifications from being shown.
+  Future<void> _markAllRead() async {
+    try {
+      await ref.read(dioProvider).post('/api/v1/notifications/mark-read/');
+      if (mounted) ref.invalidate(notificationsProvider);
+    } catch (_) {
+      // Left unread; the next visit will try again.
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final notifs = ref.watch(notificationsProvider);
@@ -75,10 +96,13 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
                       ),
                     ),
                   ),
+                  // WHY this changed: it used to only invalidate the provider,
+                  // so "MARK READ" refreshed the list and marked nothing —
+                  // a button that appeared to work and did not.
                   GestureDetector(
                     onTap: () {
                       HapticFeedback.lightImpact();
-                      ref.invalidate(notificationsProvider);
+                      _markAllRead();
                     },
                     child: Text(
                       'MARK READ',
@@ -183,7 +207,23 @@ class _NotificationTile extends StatelessWidget {
     final icon = _channelIcon[channel] ?? Icons.notifications_outlined;
     final accentColor = _channelColor[channel] ?? Colors.grey;
     final bool isUnread = n['is_read'] != true;
-    final sent = n['status'] == 'sent';
+    // WHY three states and not a sent/not-sent boolean: "pending" means queued
+    // and still on its way, but the old check rendered everything that was not
+    // "sent" in red as FAILED — telling people a message had failed when it had
+    // simply not gone out yet.
+    final status = (n['status'] as String? ?? 'pending');
+    final sent = status == 'sent';
+    final failed = status == 'failed';
+    final statusColor = sent
+        ? Colors.green
+        : failed
+            ? Colors.red
+            : Colors.orange;
+    final statusLabel = sent
+        ? 'SENT'
+        : failed
+            ? 'FAILED'
+            : 'QUEUED';
     final subject = (n['subject'] as String?)?.trim();
     final message = (n['message'] as String? ?? '').trim();
     final rawDate = n['sent_at'] ?? n['created_at'];
@@ -282,23 +322,19 @@ class _NotificationTile extends StatelessWidget {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: (sent
-                              ? Colors.green
-                              : Colors.red
-                          ).withValues(alpha: 0.12),
+                          color: statusColor.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(KasaRadius.pill),
                           border: Border.all(
-                            color: (sent ? Colors.green : Colors.red)
-                                .withValues(alpha: 0.4),
+                            color: statusColor.withValues(alpha: 0.4),
                             width: 1,
                           ),
                         ),
                         child: Text(
-                          sent ? 'SENT' : 'FAILED',
+                          statusLabel,
                           style: GoogleFonts.spaceGrotesk(
                             fontSize: 9,
                             fontWeight: FontWeight.w700,
-                            color: sent ? Colors.green : Colors.red,
+                            color: statusColor,
                             letterSpacing: 0.04,
                           ),
                         ),

@@ -40,8 +40,8 @@ class PropertyViewSet(viewsets.ModelViewSet):
             return Property.objects.filter(caretaker=user).prefetch_related("units")
         return (
             Property.objects.filter(
-                units__leases__tenant=user,
-                units__leases__status="active",
+                units__tenancies__tenant=user,
+                units__tenancies__status="active",
             )
             .distinct()
             .prefetch_related("units")
@@ -52,7 +52,7 @@ class PropertyViewSet(viewsets.ModelViewSet):
             return super().destroy(request, *args, **kwargs)
         except ProtectedError:
             return Response(
-                {"error": "Properties with lease history cannot be deleted."},
+                {"error": "Properties with tenancy history cannot be deleted."},
                 status=409,
             )
 
@@ -107,8 +107,8 @@ class UnitViewSet(viewsets.ModelViewSet):
             return Unit.objects.filter(property__caretaker=user).select_related("property")
         return (
             Unit.objects.filter(
-                leases__tenant=user,
-                leases__status="active",
+                tenancies__tenant=user,
+                tenancies__status="active",
             )
             .select_related("property")
             .distinct()
@@ -128,6 +128,6 @@ class UnitViewSet(viewsets.ModelViewSet):
             return super().destroy(request, *args, **kwargs)
         except ProtectedError:
             return Response(
-                {"error": "Units with lease history cannot be deleted."},
+                {"error": "Units with tenancy history cannot be deleted."},
                 status=409,
             )

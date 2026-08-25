@@ -1,7 +1,7 @@
 """Shared pytest fixtures for Kasa.
 
 These fixtures cover the minimum graph needed to exercise money + auth paths:
-landlord -> property -> unit -> lease -> tenant -> invoice. Build helpers stay
+landlord -> property -> unit -> tenancy -> tenant -> invoice. Build helpers stay
 small; tests that need more should create their own factories.
 """
 from __future__ import annotations
@@ -75,9 +75,9 @@ def unit(db, property_):
 
 
 @pytest.fixture
-def lease(db, tenant, unit):
-    from apps.tenants.models import Lease
-    return Lease.objects.create(
+def tenancy(db, tenant, unit):
+    from apps.tenants.models import Tenancy
+    return Tenancy.objects.create(
         tenant=tenant,
         unit=unit,
         start_date=date.today() - timedelta(days=30),
@@ -87,13 +87,13 @@ def lease(db, tenant, unit):
 
 
 @pytest.fixture
-def invoice(db, lease):
+def invoice(db, tenancy):
     from apps.payments.models import Invoice
     period_start = date.today().replace(day=1)
     return Invoice.objects.create(
-        lease=lease,
+        tenancy=tenancy,
         invoice_number="INV-TEST-000001",
-        amount_due=lease.rent_amount,
+        amount_due=tenancy.rent_amount,
         amount_paid=Decimal("0"),
         due_date=date.today() + timedelta(days=7),
         period_start=period_start,

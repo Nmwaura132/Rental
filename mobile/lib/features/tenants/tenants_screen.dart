@@ -14,16 +14,16 @@ import '../../core/utils/phone.dart';
 import '../../core/widgets/kasa_primitives.dart';
 import '../../shared/widgets/shimmer_loading.dart';
 
-final leasesProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
+final tenanciesProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
   final dio = ref.read(dioProvider);
-  return fetchAllPages(dio, '/api/v1/tenants/leases/');
+  return fetchAllPages(dio, '/api/v1/tenants/tenancies/');
 });
 
 // Returns display status: 'active', 'ending', 'past'
-String _leaseDisplayStatus(Map<String, dynamic> lease) {
-  final status = lease['status'] as String? ?? '';
+String _tenancyDisplayStatus(Map<String, dynamic> tenancy) {
+  final status = tenancy['status'] as String? ?? '';
   if (status != 'active') return 'past';
-  final endStr = lease['end_date'] as String?;
+  final endStr = tenancy['end_date'] as String?;
   if (endStr != null) {
     try {
       final end = DateTime.parse(endStr);
@@ -54,12 +54,12 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
   List<Map<String, dynamic>> _applyFilter(List<dynamic> all) {
     final list = all.cast<Map<String, dynamic>>();
     if (_filter == 'all') return list;
-    return list.where((l) => _leaseDisplayStatus(l) == _filter).toList();
+    return list.where((l) => _tenancyDisplayStatus(l) == _filter).toList();
   }
 
   @override
   Widget build(BuildContext context) {
-    final leases = ref.watch(leasesProvider);
+    final tenancies = ref.watch(tenanciesProvider);
     final cs = Theme.of(context).colorScheme;
 
     return Scaffold(
@@ -119,7 +119,7 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
           ),
           const SizedBox(height: 10),
           Expanded(
-            child: leases.when(
+            child: tenancies.when(
               loading: () => const SkeletonList(),
               error: (e, _) => Center(
                 child: Column(
@@ -134,7 +134,7 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                       label: 'RETRY',
                       variant: KasaButtonVariant.ghost,
                       leading: Icon(Icons.refresh, size: 16, color: cs.secondary),
-                      onTap: () => ref.invalidate(leasesProvider),
+                      onTap: () => ref.invalidate(tenanciesProvider),
                     ),
                   ],
                 ),
@@ -162,21 +162,21 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                         ),
                       )
                     : RefreshIndicator(
-                        onRefresh: () => ref.refresh(leasesProvider.future),
+                        onRefresh: () => ref.refresh(tenanciesProvider.future),
                         child: ListView.builder(
                           padding: const EdgeInsets.fromLTRB(20, 4, 20, 100),
                           itemCount: list.length,
                           itemBuilder: (_, i) {
-                            final lease = list[i];
+                            final tenancy = list[i];
                             final name =
-                                lease['tenant_name'] as String? ?? 'Unknown';
-                            final apiStatus = lease['status'] as String? ?? 'unknown';
-                            final displayStatus = _leaseDisplayStatus(lease);
-                            final property = lease['property_name'] as String? ?? '';
-                            final unit = lease['unit_number'] as String? ?? '';
-                            final phone = lease['tenant_phone'] as String?;
-                            final rent = lease['rent_amount'];
-                            final endDate = lease['end_date'] as String?;
+                                tenancy['tenant_name'] as String? ?? 'Unknown';
+                            final apiStatus = tenancy['status'] as String? ?? 'unknown';
+                            final displayStatus = _tenancyDisplayStatus(tenancy);
+                            final property = tenancy['property_name'] as String? ?? '';
+                            final unit = tenancy['unit_number'] as String? ?? '';
+                            final phone = tenancy['tenant_phone'] as String?;
+                            final rent = tenancy['rent_amount'];
+                            final endDate = tenancy['end_date'] as String?;
 
                             // Design: overdue→primary, ending→tertiary, active→secondary
                             final chipVariant = displayStatus == 'ending'
@@ -251,7 +251,7 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                                               children: [
                                                 if (endDate != null) ...[
                                                   Text(
-                                                    'LEASE: $endDate',
+                                                    'TENANCY: $endDate',
                                                     style: GoogleFonts.spaceGrotesk(
                                                       fontSize: 10,
                                                       fontWeight: FontWeight.w700,
@@ -293,16 +293,16 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                                         icon: Icon(Icons.more_vert,
                                             size: 20, color: cs.kasaTextSub),
                                         onSelected: (action) async {
-                                          if (action == 'send_lease') {
+                                          if (action == 'send_tenancy') {
                                             try {
                                               ScaffoldMessenger.of(context)
                                                   .showSnackBar(const SnackBar(
                                                       content: Text(
-                                                          'Generating lease PDF…')));
+                                                          'Generating tenancy PDF…')));
                                               final resp = await ref
                                                   .read(dioProvider)
                                                   .post(
-                                                    '/api/v1/tenants/leases/${lease['id']}/send-lease/',
+                                                    '/api/v1/tenants/tenancies/${tenancy['id']}/send-tenancy/',
                                                   );
                                               if (context.mounted) {
                                                 ScaffoldMessenger.of(context)
@@ -329,9 +329,9 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                                               useRootNavigator: true,
                                               builder: (ctx) => AlertDialog(
                                                 title: const Text(
-                                                    'Terminate Lease'),
+                                                    'Terminate Tenancy'),
                                                 content: Text(
-                                                    'Terminate the lease for $name? '
+                                                    'Terminate the tenancy for $name? '
                                                     'The unit will be marked vacant.'),
                                                 actions: [
                                                   TextButton(
@@ -366,12 +366,12 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                                                 await ref
                                                     .read(dioProvider)
                                                     .patch(
-                                                      '/api/v1/tenants/leases/${lease['id']}/',
+                                                      '/api/v1/tenants/tenancies/${tenancy['id']}/',
                                                       data: {
                                                         'status': 'terminated'
                                                       },
                                                     );
-                                                ref.invalidate(leasesProvider);
+                                                ref.invalidate(tenanciesProvider);
                                               } catch (e) {
                                                 if (context.mounted) {
                                                   ScaffoldMessenger.of(context)
@@ -386,13 +386,13 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                                         },
                                         itemBuilder: (_) => [
                                           PopupMenuItem(
-                                            value: 'send_lease',
+                                            value: 'send_tenancy',
                                             child: ListTile(
                                               leading: Icon(
                                                   Icons.picture_as_pdf_outlined,
                                                   color: cs.secondary),
                                               title: const Text(
-                                                  'Send Lease Agreement'),
+                                                  'Send Tenancy Agreement'),
                                             ),
                                           ),
                                           PopupMenuItem(
@@ -501,7 +501,7 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                           child: Icon(Icons.assignment,
                               size: 20, color: scs.onTertiaryContainer),
                         ),
-                        title: Text('New Lease',
+                        title: Text('New Tenancy',
                             style: GoogleFonts.spaceGrotesk(
                                 fontWeight: FontWeight.w700)),
                         subtitle: Text('Assign a unit to an existing tenant',
@@ -509,7 +509,7 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                                 fontSize: 12, color: scs.kasaTextSub)),
                         trailing: Icon(Icons.chevron_right,
                             color: scs.kasaTextSub),
-                        onTap: () => Navigator.pop(sheetCtx, 'newLease'),
+                        onTap: () => Navigator.pop(sheetCtx, 'newTenancy'),
                       ),
                     ],
                   ),
@@ -544,18 +544,18 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
               ),
             ),
             body: _AddTenantDialog(
-              onDone: () => ref.invalidate(leasesProvider),
+              onDone: () => ref.invalidate(tenanciesProvider),
             ),
           ),
         ),
       );
-    } else if (action == 'newLease') {
+    } else if (action == 'newTenancy') {
       showDialog(
         context: context,
         useRootNavigator: true,
         barrierDismissible: false,
-        builder: (_) => _AddLeaseDialog(
-          onDone: () => ref.invalidate(leasesProvider),
+        builder: (_) => _AddTenancyDialog(
+          onDone: () => ref.invalidate(tenanciesProvider),
         ),
       );
     }
@@ -951,17 +951,17 @@ class _AddTenantDialogState extends ConsumerState<_AddTenantDialog> {
   }
 }
 
-// ─── Add Lease Dialog ─────────────────────────────────────────────────────────
+// ─── Add Tenancy Dialog ─────────────────────────────────────────────────────────
 
-class _AddLeaseDialog extends ConsumerStatefulWidget {
-  const _AddLeaseDialog({required this.onDone});
+class _AddTenancyDialog extends ConsumerStatefulWidget {
+  const _AddTenancyDialog({required this.onDone});
   final VoidCallback onDone;
 
   @override
-  ConsumerState<_AddLeaseDialog> createState() => _AddLeaseDialogState();
+  ConsumerState<_AddTenancyDialog> createState() => _AddTenancyDialogState();
 }
 
-class _AddLeaseDialogState extends ConsumerState<_AddLeaseDialog> {
+class _AddTenancyDialogState extends ConsumerState<_AddTenancyDialog> {
   // Data loaded on init
   List<Map<String, dynamic>> _tenants = [];
   List<Map<String, dynamic>> _properties = [];
@@ -1103,7 +1103,7 @@ class _AddLeaseDialogState extends ConsumerState<_AddLeaseDialog> {
     setState(() => _submitting = true);
     try {
       final dio = ref.read(dioProvider);
-      await dio.post('/api/v1/tenants/leases/', data: {
+      await dio.post('/api/v1/tenants/tenancies/', data: {
         'tenant': _selectedTenantId,
         'unit': _selectedUnitId,
         'start_date': _apiDate.format(_startDate),
@@ -1118,7 +1118,7 @@ class _AddLeaseDialogState extends ConsumerState<_AddLeaseDialog> {
         final messenger = ScaffoldMessenger.of(context);
         Navigator.pop(context);
         messenger.showSnackBar(const SnackBar(
-          content: Text('Lease created successfully.'),
+          content: Text('Tenancy created successfully.'),
           backgroundColor: Colors.green,
         ));
       }
@@ -1137,7 +1137,7 @@ class _AddLeaseDialogState extends ConsumerState<_AddLeaseDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('New Lease'),
+      title: const Text('New Tenancy'),
       content: _initialLoading
           ? const SizedBox(
               height: 100,
@@ -1286,7 +1286,7 @@ class _AddLeaseDialogState extends ConsumerState<_AddLeaseDialog> {
                   width: 20,
                   height: 20,
                   child: CircularProgressIndicator(strokeWidth: 2))
-              : const Text('Create Lease'),
+              : const Text('Create Tenancy'),
         ),
       ],
     );

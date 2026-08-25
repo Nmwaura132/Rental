@@ -19,8 +19,8 @@ def _style(base, **kwargs):
     return s
 
 
-def generate_lease_pdf(lease) -> bytes:
-    """Return PDF bytes for the given Lease instance."""
+def generate_tenancy_pdf(tenancy) -> bytes:
+    """Return PDF bytes for the given Tenancy instance."""
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -31,8 +31,8 @@ def generate_lease_pdf(lease) -> bytes:
         bottomMargin=2 * cm,
     )
 
-    tenant = lease.tenant
-    unit = lease.unit
+    tenant = tenancy.tenant
+    unit = tenancy.unit
     prop = unit.property
     landlord = prop.owner
 
@@ -77,10 +77,10 @@ def generate_lease_pdf(lease) -> bytes:
     tenant_phone = tenant.phone_number
     tenant_id = tenant.national_id or '—'
     unit_desc = f"Unit {unit.unit_number}, {prop.name}"
-    rent = fmt_money(lease.rent_amount)
-    deposit = fmt_money(lease.deposit_amount)
-    start = fmt_date(lease.start_date)
-    end = fmt_date(lease.end_date) if lease.end_date else 'Month-to-month (no fixed end date)'
+    rent = fmt_money(tenancy.rent_amount)
+    deposit = fmt_money(tenancy.deposit_amount)
+    start = fmt_date(tenancy.start_date)
+    end = fmt_date(tenancy.end_date) if tenancy.end_date else 'Month-to-month (no fixed end date)'
     today = fmt_date(date.today())
 
     story = []
@@ -141,7 +141,7 @@ def generate_lease_pdf(lease) -> bytes:
 
     # ── Clauses ───────────────────────────────────────────────────────────────
     story += clause(
-        1, "LEASE PERIOD",
+        1, "TENANCY PERIOD",
         f"This Agreement commences on <b>{start}</b> and continues until <b>{end}</b>. "
         f"Unless terminated earlier in accordance with this Agreement, the tenancy shall "
         f"automatically revert to a month-to-month arrangement upon expiry unless renewed in writing."

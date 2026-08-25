@@ -28,10 +28,22 @@ class PropertySerializer(serializers.ModelSerializer):
     class Meta:
         model = Property
         fields = [
-            "id", "name", "address", "county", "town",
+            "id", "name", "address", "county", "town", "lr_number",
             "caretaker", "unit_count", "vacant_count", "units", "charges", "created_at",
         ]
         read_only_fields = ["id", "owner", "created_at"]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # WHY owner-only: lr_number is the title's Land Reference, collected for
+        # the landlord's own KRA filing. Tenants and caretakers can read this
+        # serializer for the property they occupy or manage, and the LR number
+        # is enough to look up the landlord's title in the land registry.
+        request = self.context.get("request")
+        viewer = getattr(request, "user", None)
+        if viewer is None or viewer.id != instance.owner_id:
+            data.pop("lr_number", None)
+        return data
 
     def get_unit_count(self, obj) -> int:
         return len(obj.units.all())

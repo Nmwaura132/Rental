@@ -22,24 +22,24 @@ logger = logging.getLogger(__name__)
 
 def _invoice_qs_for_user(user):
     if user.is_landlord:
-        return Invoice.objects.filter(lease__unit__property__owner=user)
+        return Invoice.objects.filter(tenancy__unit__property__owner=user)
     if user.is_caretaker:
-        return Invoice.objects.filter(lease__unit__property__caretaker=user)
-    return Invoice.objects.filter(lease__tenant=user)
+        return Invoice.objects.filter(tenancy__unit__property__caretaker=user)
+    return Invoice.objects.filter(tenancy__tenant=user)
 
 
 def _payment_qs_for_user(user):
     if user.is_landlord:
-        return Payment.objects.filter(invoice__lease__unit__property__owner=user)
+        return Payment.objects.filter(invoice__tenancy__unit__property__owner=user)
     if user.is_caretaker:
-        return Payment.objects.filter(invoice__lease__unit__property__caretaker=user)
-    return Payment.objects.filter(invoice__lease__tenant=user)
+        return Payment.objects.filter(invoice__tenancy__unit__property__caretaker=user)
+    return Payment.objects.filter(invoice__tenancy__tenant=user)
 
 
 class InvoiceViewSet(viewsets.ModelViewSet):
     serializer_class = InvoiceSerializer
     permission_classes = [permissions.IsAuthenticated]
-    filterset_fields = ["status", "lease"]
+    filterset_fields = ["status", "tenancy"]
     queryset = Invoice.objects.none()  # for drf-spectacular schema introspection
 
     def get_permissions(self):
@@ -49,24 +49,24 @@ class InvoiceViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return _invoice_qs_for_user(self.request.user).select_related(
-            "lease__tenant", "lease__unit"
+            "tenancy__tenant", "tenancy__unit"
         ).prefetch_related("line_items", "payments")
 
     def perform_create(self, serializer):
-        lease = serializer.validated_data["lease"]
+        tenancy = serializer.validated_data["tenancy"]
         user = self.request.user
-        if user.is_landlord and lease.unit.property.owner_id != user.id:
-            raise PermissionDenied("You cannot create invoices for this lease.")
-        if user.is_caretaker and lease.unit.property.caretaker_id != user.id:
-            raise PermissionDenied("You cannot create invoices for this lease.")
+        if user.is_landlord and tenancy.unit.property.owner_id != user.id:
+            raise PermissionDenied("You cannot create invoices for this tenancy.")
+        if user.is_caretaker and tenancy.unit.property.caretaker_id != user.id:
+            raise PermissionDenied("You cannot create invoices for this tenancy.")
         super().perform_create(serializer)
         invoice = Invoice.objects.select_related(
-            "lease__tenant", "lease__unit__property"
+            "tenancy__tenant", "tenancy__unit__property"
         ).get(pk=serializer.instance.pk)
         from apps.notifications.tasks import send_sms
         from django.conf import settings
-        tenant = invoice.lease.tenant
-        unit = invoice.lease.unit
+        tenant = invoice.tenancy.tenant
+        unit = invoice.tenancy.unit
         msg = (
             f"Dear {tenant.first_name}, invoice {invoice.invoice_number} "
             f"for {unit.property.name} Unit {unit.unit_number} "
@@ -78,12 +78,12 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         send_sms.delay(tenant.id, msg)
 
     def perform_update(self, serializer):
-        lease = serializer.validated_data.get("lease", serializer.instance.lease)
+        tenancy = serializer.validated_data.get("tenancy", serializer.instance.tenancy)
         user = self.request.user
-        if user.is_landlord and lease.unit.property.owner_id != user.id:
-            raise PermissionDenied("You cannot move invoices to this lease.")
-        if user.is_caretaker and lease.unit.property.caretaker_id != user.id:
-            raise PermissionDenied("You cannot move invoices to this lease.")
+        if user.is_landlord and tenancy.unit.property.owner_id != user.id:
+            raise PermissionDenied("You cannot move invoices to this tenancy.")
+        if user.is_caretaker and tenancy.unit.property.caretaker_id != user.id:
+            raise PermissionDenied("You cannot move invoices to this tenancy.")
         serializer.save()
 
     def destroy(self, request, *args, **kwargs):
@@ -113,7 +113,7 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         return _payment_qs_for_user(self.request.user).select_related(
-            "invoice__lease__tenant"
+            "invoice__tenancy__tenant"
         )
 
     @action(detail=False, methods=["post"], url_path="record",
@@ -188,13 +188,13 @@ class DashboardStatsView(APIView):
 
     def _compute(self, request):
         from apps.properties.models import Property, Unit
-        from apps.tenants.models import Lease
+        from apps.tenants.models import Tenancy
         user = request.user
 
         if user.is_tenant:
             from django.conf import settings as django_settings
-            # Tenant dashboard: balance, next due date, active lease/unit info
-            invoices = Invoice.objects.filter(lease__tenant=user)
+            # Tenant dashboard: balance, next due date, active tenancy/unit info
+            invoices = Invoice.objects.filter(tenancy__tenant=user)
             _bal = invoices.filter(
                 status__in=[Invoice.Status.PENDING, Invoice.Status.OVERDUE, Invoice.Status.PARTIALLY_PAID]
             ).aggregate(due=Sum("amount_due"), paid=Sum("amount_paid"))
@@ -202,18 +202,23 @@ class DashboardStatsView(APIView):
             next_invoice = invoices.filter(
                 status__in=[Invoice.Status.PENDING, Invoice.Status.OVERDUE]
             ).order_by("due_date").first()
-            lease = Lease.objects.filter(
-                tenant=user, status=Lease.Status.ACTIVE
+            tenancy = Tenancy.objects.filter(
+                tenant=user, status=Tenancy.Status.ACTIVE
             ).select_related("unit__property").first()
             return Response({
                 "outstanding_balance": total_balance,
                 "next_due_date": next_invoice.due_date if next_invoice else None,
                 "next_due_amount": next_invoice.balance if next_invoice else None,
-                "unit_number": lease.unit.unit_number if lease else None,
-                "property_name": lease.unit.property.name if lease else None,
-                "monthly_rent": float(lease.rent_amount) if lease else None,
-                "lease_start": lease.start_date.isoformat() if (lease and lease.start_date) else None,
-                "lease_end": lease.end_date.isoformat() if (lease and lease.end_date) else None,
+                "unit_number": tenancy.unit.unit_number if tenancy else None,
+                "property_name": tenancy.unit.property.name if tenancy else None,
+                "monthly_rent": float(tenancy.rent_amount) if tenancy else None,
+                "tenancy_start": tenancy.start_date.isoformat() if (tenancy and tenancy.start_date) else None,
+                "tenancy_end": tenancy.end_date.isoformat() if (tenancy and tenancy.end_date) else None,
+                # The id and notice state let the tenant give — or see they have
+                # already given — notice without a second round trip.
+                "tenancy_id": tenancy.id if tenancy else None,
+                "notice_given_at": tenancy.notice_given_at.isoformat() if (tenancy and tenancy.notice_given_at) else None,
+                "notice_effective_date": tenancy.notice_effective_date.isoformat() if (tenancy and tenancy.notice_effective_date) else None,
                 "mpesa_paybill": getattr(django_settings, "MPESA_SHORTCODE", None),
             })
 
@@ -225,8 +230,8 @@ class DashboardStatsView(APIView):
 
         prop_ids = props.values_list("id", flat=True)
         units = Unit.objects.filter(property_id__in=prop_ids)
-        leases = Lease.objects.filter(unit__property_id__in=prop_ids, status=Lease.Status.ACTIVE)
-        invoices = Invoice.objects.filter(lease__unit__property_id__in=prop_ids)
+        tenancies = Tenancy.objects.filter(unit__property_id__in=prop_ids, status=Tenancy.Status.ACTIVE)
+        invoices = Invoice.objects.filter(tenancy__unit__property_id__in=prop_ids)
 
         total_units = units.count()
         vacant_units = units.filter(status=Unit.Status.VACANT).count()
@@ -234,7 +239,7 @@ class DashboardStatsView(APIView):
 
         this_month = timezone.now().date().replace(day=1)
         monthly_collected = Payment.objects.filter(
-            invoice__lease__unit__property_id__in=prop_ids,
+            invoice__tenancy__unit__property_id__in=prop_ids,
             status=Payment.Status.CONFIRMED,
             paid_at__date__gte=this_month,
         ).aggregate(total=Sum("amount"))["total"] or 0
@@ -250,7 +255,7 @@ class DashboardStatsView(APIView):
             "occupied_units": occupied_units,
             "vacant_units": vacant_units,
             "occupancy_rate": round(occupied_units / total_units * 100, 1) if total_units else 0,
-            "active_leases": leases.count(),
+            "active_tenancies": tenancies.count(),
             "monthly_collected_kes": monthly_collected,
             "overdue_invoices": overdue_count,
             "overdue_amount_kes": overdue_amount,
@@ -263,7 +268,7 @@ class MpesaSTKPushView(APIView):
     POST /api/v1/payments/stk/push/
     Initiate an STK Push prompt on the tenant's phone.
     Body: { invoice_id }
-    The tenant's phone and amount are derived from the invoice/lease.
+    The tenant's phone and amount are derived from the invoice/tenancy.
     Landlords can also push on behalf of a tenant by passing { invoice_id, phone }.
     """
     permission_classes = [permissions.IsAuthenticated]
@@ -279,7 +284,7 @@ class MpesaSTKPushView(APIView):
 
         try:
             invoice = _invoice_qs_for_user(request.user).select_related(
-                "lease__tenant", "lease__unit"
+                "tenancy__tenant", "tenancy__unit"
             ).get(id=invoice_id)
         except Invoice.DoesNotExist:
             return Response({"error": "Invoice not found."}, status=404)
@@ -303,7 +308,7 @@ class MpesaSTKPushView(APIView):
         if request.user.is_tenant:
             phone_e164 = request.user.phone_number
         else:
-            phone_raw = request.data.get("phone", invoice.lease.tenant.phone_number)
+            phone_raw = request.data.get("phone", invoice.tenancy.tenant.phone_number)
             phone_e164 = normalize_phone(str(phone_raw))
 
         # Daraja requires 2547XXXXXXXX (no + prefix)
@@ -314,7 +319,7 @@ class MpesaSTKPushView(APIView):
         if amount_int <= 0:
             return Response({"error": "Invoice balance is zero."}, status=400)
 
-        account_ref = invoice.lease.unit.payment_code
+        account_ref = invoice.tenancy.unit.payment_code
         description = "Rent"
 
         try:

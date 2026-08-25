@@ -1,6 +1,8 @@
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models
 from django.utils import timezone
+
+from apps.core.utils.kra import normalize_kra_pin, validate_kra_pin
 from apps.core.utils.phone import validate_phone, normalize_phone
 
 
@@ -53,7 +55,11 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     # Kenya-specific identity fields
     national_id = models.CharField(max_length=20, blank=True, null=True, unique=True)
-    kra_pin = models.CharField(max_length=11, blank=True, null=True)  # e.g. A000000000A
+    # WHY validated: eRITS files the landlord's monthly return against this
+    # PIN, so a typo misfiles their rent under a stranger's name.
+    kra_pin = models.CharField(
+        max_length=11, blank=True, null=True, validators=[validate_kra_pin]
+    )  # e.g. A000000000A
 
     # Tenant profile fields
     occupation = models.CharField(max_length=100, blank=True, null=True)
@@ -93,6 +99,10 @@ class User(AbstractBaseUser, PermissionsMixin):
             self.phone_number = normalize_phone(self.phone_number)
         if self.next_of_kin_phone:
             self.next_of_kin_phone = normalize_phone(self.next_of_kin_phone)
+        # Same reason as the phones: a PIN stored as typed ("a012345678z")
+        # would be emitted verbatim into the KRA rent roll.
+        if self.kra_pin:
+            self.kra_pin = normalize_kra_pin(self.kra_pin)
         super().save(*args, **kwargs)
 
     def __str__(self):

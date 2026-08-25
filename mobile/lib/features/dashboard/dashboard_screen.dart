@@ -9,7 +9,9 @@ import 'package:intl/intl.dart';
 
 import '../../core/api/api_client.dart';
 import '../../core/providers/theme_provider.dart';
+import '../../core/providers/user_role_provider.dart';
 import '../../core/theme/kasa_tokens.dart';
+import '../../core/utils/api_error.dart';
 import '../../core/utils/currency.dart';
 import '../../core/utils/pluralize.dart';
 import '../../core/widgets/kasa_logo.dart';
@@ -21,6 +23,17 @@ final dashboardProvider = FutureProvider.autoDispose<Map<String, dynamic>>((ref)
   final dio = ref.watch(dioProvider);
   final resp = await dio.get('/api/v1/payments/dashboard/');
   return resp.data as Map<String, dynamic>;
+});
+
+/// Unread notifications, for the bell badge.
+///
+/// WHY it needed a provider at all: the badge used to be drawn unconditionally,
+/// so every user was permanently told they had something waiting and no amount
+/// of reading could clear it.
+final unreadCountProvider = FutureProvider.autoDispose<int>((ref) async {
+  final dio = ref.watch(dioProvider);
+  final resp = await dio.get('/api/v1/notifications/unread-count/');
+  return (resp.data['unread'] as num?)?.toInt() ?? 0;
 });
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
@@ -58,7 +71,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           loading: () => const Center(child: CircularProgressIndicator()),
           error: (e, _) => _ErrorState(onRetry: () => ref.invalidate(dashboardProvider)),
           data: (data) {
-            final isLandlord = data.containsKey('properties');
+            // WHY the role and not the payload shape: the dashboard endpoint
+            // returns the same shape to landlords and caretakers, so keying off
+            // it showed caretakers a landlord's screen — "your portfolio", plus
+            // an ADD PROPERTY tile they have no permission to use.
+            final role = ref.watch(userRoleProvider).valueOrNull;
+            final isCaretaker = role == 'caretaker';
+            final isLandlord = role == 'landlord' || (role == null && data.containsKey('properties'));
             return RefreshIndicator(
               onRefresh: () => ref.refresh(dashboardProvider.future),
               child: CustomScrollView(
@@ -67,9 +86,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   SliverToBoxAdapter(
                     child: _DashHeader(
                       userName: _userName,
-                      subtitle: isLandlord
-                          ? 'Here\'s how your portfolio is running.'
-                          : '${data['property_name'] ?? ''} · Unit ${data['unit_number'] ?? ''}',
+                      subtitle: isCaretaker
+                          ? 'The properties you look after.'
+                          : isLandlord
+                              ? 'Here\'s how your portfolio is running.'
+                              : '${data['property_name'] ?? ''} · Unit ${data['unit_number'] ?? ''}',
                       isDark: isDark,
                       onThemeToggle: () {
                         ref.read(themeModeProvider.notifier).setMode(
@@ -82,8 +103,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                     padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
                     sliver: SliverList(
                       delegate: SliverChildListDelegate([
-                        if (isLandlord)
-                          _LandlordBento(data: data, cs: cs)
+                        if (isLandlord || isCaretaker)
+                          _LandlordBento(
+                            data: data,
+                            cs: cs,
+                            canManageProperties: isLandlord,
+                          )
                         else
                           _TenantBento(data: data, cs: cs),
                       ]),
@@ -101,7 +126,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
 // ─── Header ───────────────────────────────────────────────────────────────────
 
-class _DashHeader extends StatelessWidget {
+class _DashHeader extends ConsumerWidget {
   const _DashHeader({
     required this.userName,
     required this.subtitle,
@@ -115,9 +140,10 @@ class _DashHeader extends StatelessWidget {
   final VoidCallback onThemeToggle;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final cs = Theme.of(context).colorScheme;
     final firstName = (userName ?? 'there').split(' ').first.toUpperCase();
+    final unread = ref.watch(unreadCountProvider).valueOrNull ?? 0;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 12, 12, 0),
@@ -142,23 +168,29 @@ class _DashHeader extends StatelessWidget {
                   clipBehavior: Clip.none,
                   children: [
                     Icon(Icons.notifications_outlined, size: 22, color: cs.onSurface),
-                    Positioned(
-                      top: -2,
-                      right: -2,
-                      child: Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          color: cs.primary,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: cs.surface, width: 1.5),
+                    if (unread > 0)
+                      Positioned(
+                        top: -2,
+                        right: -2,
+                        child: Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: cs.primary,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: cs.surface, width: 1.5),
+                          ),
                         ),
                       ),
-                    ),
                   ],
                 ),
-                onPressed: () => context.push('/notifications'),
-                tooltip: 'Notifications',
+                onPressed: () async {
+                  await context.push('/notifications');
+                  ref.invalidate(unreadCountProvider);
+                },
+                tooltip: unread > 0
+                    ? 'Notifications, $unread unread'
+                    : 'Notifications',
               ),
               IconButton(
                 icon: Icon(Icons.account_circle_outlined, size: 22, color: cs.onSurface),
@@ -197,9 +229,17 @@ class _DashHeader extends StatelessWidget {
 // ─── Landlord Bento ───────────────────────────────────────────────────────────
 
 class _LandlordBento extends StatelessWidget {
-  const _LandlordBento({required this.data, required this.cs});
+  const _LandlordBento({
+    required this.data,
+    required this.cs,
+    this.canManageProperties = true,
+  });
   final Map<String, dynamic> data;
   final ColorScheme cs;
+
+  /// False for caretakers, who manage occupancy on someone else's properties
+  /// and cannot create one.
+  final bool canManageProperties;
 
   @override
   Widget build(BuildContext context) {
@@ -327,13 +367,14 @@ class _LandlordBento extends StatelessWidget {
         const SizedBox(height: 14),
 
         // ── Quick actions ──
-        Row(
+        _ResponsiveTileGrid(
           children: [
-            Expanded(child: _QuickAction(icon: Icons.add_home_work_outlined, label: 'ADD\nPROPERTY', accent: KasaCardAccent.primary, onTap: () => context.push('/properties'))),
-            const SizedBox(width: 10),
-            Expanded(child: _QuickAction(icon: Icons.person_add_outlined, label: 'ADD\nTENANT', accent: KasaCardAccent.secondary, onTap: () => context.push('/tenants'))),
-            const SizedBox(width: 10),
-            Expanded(child: _QuickAction(icon: Icons.receipt_long_outlined, label: 'NEW\nINVOICE', accent: KasaCardAccent.tertiary, onTap: () => context.push('/invoices'))),
+            // Caretakers cannot create a property, so offering it would be a
+            // button that only ever returns a permission error.
+            if (canManageProperties)
+              _QuickAction(icon: Icons.home_work_outlined, label: 'VIEW\nPROPERTIES', accent: KasaCardAccent.primary, onTap: () => context.push('/properties')),
+            _QuickAction(icon: Icons.people_outline, label: 'VIEW\nTENANTS', accent: KasaCardAccent.secondary, onTap: () => context.push('/tenants')),
+            _QuickAction(icon: Icons.receipt_long_outlined, label: 'VIEW\nINVOICES', accent: KasaCardAccent.tertiary, onTap: () => context.push('/invoices')),
           ],
         ),
         const SizedBox(height: 14),
@@ -357,14 +398,14 @@ class _TenantBento extends StatelessWidget {
     final outstanding = toDouble(data['outstanding_balance']);
     final dueAmt = toDouble(data['next_due_amount'] ?? data['monthly_rent'] ?? 0);
     final dueDate = _parseDate(data['next_due_date']);
-    final leaseEnd = _parseDate(data['lease_end']);
+    final tenancyEnd = _parseDate(data['tenancy_end']);
     final now = DateTime.now();
     final daysUntilDue = dueDate?.difference(now).inDays;
-    final daysUntilLease = leaseEnd?.difference(now).inDays;
-    final leasePct = (leaseEnd != null && data['lease_start'] != null)
+    final daysUntilTenancy = tenancyEnd?.difference(now).inDays;
+    final tenancyPct = (tenancyEnd != null && data['tenancy_start'] != null)
         ? () {
-            final start = _parseDate(data['lease_start'])!;
-            final total = leaseEnd.difference(start).inDays;
+            final start = _parseDate(data['tenancy_start'])!;
+            final total = tenancyEnd.difference(start).inDays;
             final elapsed = now.difference(start).inDays;
             return (elapsed / total).clamp(0.0, 1.0);
           }()
@@ -413,7 +454,7 @@ class _TenantBento extends StatelessWidget {
         ),
         const SizedBox(height: 14),
 
-        // ── 2-col: Lease countdown + Tickets ──
+        // ── 2-col: Tenancy countdown + Tickets ──
         Row(
           children: [
             Expanded(
@@ -423,12 +464,19 @@ class _TenantBento extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _Label('LEASE ENDS', ink: cs.onSecondary.withValues(alpha: 0.75)),
+                    // WHY the open-ended case gets its own wording: most Kenyan
+                    // tenancies have no agreed end date, and the countdown then
+                    // rendered as "TENANCY ENDS / — / DAYS", which reads as
+                    // missing data rather than the normal state it is.
+                    _Label(
+                      tenancyEnd != null ? 'TENANCY ENDS' : 'TENANCY',
+                      ink: cs.onSecondary.withValues(alpha: 0.75),
+                    ),
                     const SizedBox(height: 8),
                     Text(
-                      '${daysUntilLease ?? '—'}',
+                      tenancyEnd != null ? '${daysUntilTenancy ?? 0}' : 'OPEN',
                       style: GoogleFonts.spaceGrotesk(
-                        fontSize: 52,
+                        fontSize: tenancyEnd != null ? 52 : 34,
                         fontWeight: FontWeight.w700,
                         letterSpacing: -1.56,
                         color: cs.onSecondary,
@@ -436,9 +484,9 @@ class _TenantBento extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      leaseEnd != null
-                          ? 'DAYS · ${DateFormat('d MMM yyyy').format(leaseEnd).toUpperCase()}'
-                          : 'DAYS',
+                      tenancyEnd != null
+                          ? 'DAYS · ${DateFormat('d MMM yyyy').format(tenancyEnd).toUpperCase()}'
+                          : 'NO END DATE AGREED',
                       style: GoogleFonts.spaceGrotesk(
                         fontSize: 10,
                         fontWeight: FontWeight.w700,
@@ -458,7 +506,7 @@ class _TenantBento extends StatelessWidget {
                         child: Align(
                           alignment: Alignment.centerLeft,
                           child: FractionallySizedBox(
-                            widthFactor: leasePct,
+                            widthFactor: tenancyPct,
                             child: Container(
                               decoration: BoxDecoration(
                                 color: cs.onSecondary,
@@ -469,6 +517,8 @@ class _TenantBento extends StatelessWidget {
                         ),
                       ),
                     ),
+                    const SizedBox(height: 12),
+                    _NoticeAction(data: data),
                   ],
                 ),
               ),
@@ -523,13 +573,15 @@ class _TenantBento extends StatelessWidget {
         const SizedBox(height: 14),
 
         // ── Quick actions ──
-        Row(
+        _ResponsiveTileGrid(
           children: [
-            Expanded(child: _QuickAction(icon: Icons.payments_outlined, label: 'PAY\nRENT', accent: KasaCardAccent.primary, onTap: () => context.go('/invoices'))),
-            const SizedBox(width: 10),
-            Expanded(child: _QuickAction(icon: Icons.construction_outlined, label: 'REPORT\nISSUE', accent: KasaCardAccent.tertiary, onTap: () => context.go('/maintenance'))),
-            const SizedBox(width: 10),
-            Expanded(child: _QuickAction(icon: Icons.description_outlined, label: 'VIEW\nLEASE', accent: KasaCardAccent.secondary, onTap: () {})),
+            _QuickAction(icon: Icons.payments_outlined, label: 'PAY\nRENT', accent: KasaCardAccent.primary, onTap: () => context.go('/invoices')),
+            _QuickAction(icon: Icons.construction_outlined, label: 'REPORT\nISSUE', accent: KasaCardAccent.tertiary, onTap: () => context.go('/maintenance')),
+            // WHY no third tile: this was "VIEW TENANCY" with an empty onTap —
+            // a button that looked live and did nothing. There is no tenancy
+            // detail screen for tenants to open, and the card above already
+            // shows their unit and dates, so the honest fix is to drop it
+            // rather than leave a dead target on the busiest screen.
           ],
         ),
         const SizedBox(height: 14),
@@ -587,6 +639,84 @@ class _TrendChip extends StatelessWidget {
           color: primary,
         ),
       ),
+    );
+  }
+}
+
+/// Lays tiles out in as many columns as the width comfortably allows, keeping
+/// every tile in a row the same height.
+///
+/// WHY not a fixed Row of Expanded children: that always forces N-across, so a
+/// 320dp phone squeezes three tiles into ~93dp each and clips their labels,
+/// while a foldable or tablet stretches the same three across 700dp of dead
+/// space. Deriving the column count from a minimum readable tile width fixes
+/// both ends, and [maxWidth] stops the row sprawling on a large screen.
+class _ResponsiveTileGrid extends StatelessWidget {
+  const _ResponsiveTileGrid({required this.children});
+
+  final List<Widget> children;
+
+  /// Narrowest a tile can get before its two-line label starts clipping.
+  static const double minTileWidth = 96;
+  static const double spacing = 10;
+
+  /// Past this the row stops growing and centres, so tiles keep a sane size on
+  /// tablets and unfolded foldables.
+  static const double maxWidth = 560;
+
+  @override
+  Widget build(BuildContext context) {
+    if (children.isEmpty) return const SizedBox.shrink();
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final available = math.min(constraints.maxWidth, maxWidth);
+        final fitted =
+            ((available + spacing) / (minTileWidth + spacing)).floor();
+        final columns = fitted.clamp(1, children.length);
+
+        final rows = <Widget>[];
+        for (var start = 0; start < children.length; start += columns) {
+          final end = math.min(start + columns, children.length);
+          final slice = children.sublist(start, end);
+
+          rows.add(
+            // IntrinsicHeight so a label that wraps to a third line lifts its
+            // neighbours with it instead of leaving the row ragged.
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (var column = 0; column < columns; column++) ...[
+                    if (column > 0) const SizedBox(width: spacing),
+                    // Empty slots keep a short final row aligned with the one
+                    // above rather than stretching its tiles wider.
+                    Expanded(
+                      child: column < slice.length
+                          ? slice[column]
+                          : const SizedBox.shrink(),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          );
+        }
+
+        return Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: maxWidth),
+            child: Column(
+              children: [
+                for (var i = 0; i < rows.length; i++) ...[
+                  if (i > 0) const SizedBox(height: spacing),
+                  rows[i],
+                ],
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -752,14 +882,24 @@ class _ActivityCard extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const _Label('PORTFOLIO SUMMARY'),
+                // WHY the padding and minimum size: the bare label measured
+                // 49x16dp, well under the 44dp minimum touch target, so it was
+                // a link people had to aim at.
                 GestureDetector(
                   onTap: () => context.push('/reports'),
-                  child: Text(
-                    'REPORTS',
-                    style: GoogleFonts.spaceGrotesk(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: cs.kasaTextSub,
+                  behavior: HitTestBehavior.opaque,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
+                      child: Text(
+                        'REPORTS',
+                        style: GoogleFonts.spaceGrotesk(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: cs.kasaTextSub,
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -1000,4 +1140,143 @@ String _fmt(dynamic v) {
   if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
   if (n >= 1000) return '${(n / 1000).toStringAsFixed(0)}K';
   return n.toStringAsFixed(0);
+}
+
+/// The tenant's written notice to vacate, shown on their tenancy card.
+///
+/// WHY it lives here: an open-ended tenancy ends by notice rather than by
+/// reaching a date, so this is the action that actually terminates most Kenyan
+/// tenancies — it belongs next to the tenancy status, not buried in settings.
+class _NoticeAction extends ConsumerStatefulWidget {
+  const _NoticeAction({required this.data});
+  final Map<String, dynamic> data;
+
+  @override
+  ConsumerState<_NoticeAction> createState() => _NoticeActionState();
+}
+
+class _NoticeActionState extends ConsumerState<_NoticeAction> {
+  bool _sending = false;
+
+  Future<void> _giveNotice() async {
+    final tenancyId = widget.data['tenancy_id'];
+    if (tenancyId == null) return;
+
+    final reasonCtrl = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Give 30 days notice?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Your landlord will be told straight away, and you are expected '
+              'to move out 30 days from today. This cannot be undone in the app.',
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: reasonCtrl,
+              maxLines: 3,
+              maxLength: 300,
+              decoration: const InputDecoration(
+                labelText: 'Reason (optional)',
+                alignLabelWithHint: true,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Give notice'),
+          ),
+        ],
+      ),
+    );
+
+    final reason = reasonCtrl.text.trim();
+    reasonCtrl.dispose();
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _sending = true);
+    try {
+      final resp = await ref.read(dioProvider).post(
+            '/api/v1/tenants/tenancies/$tenancyId/give-notice/',
+            data: {'reason': reason},
+          );
+      ref.invalidate(dashboardProvider);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(resp.data['message']?.toString() ?? 'Notice given.'),
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(apiError(e)),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final effective = widget.data['notice_effective_date'];
+
+    // Already given — show the date rather than a button that would only 409.
+    if (effective != null) {
+      final on = DateTime.tryParse(effective.toString());
+      return Text(
+        on != null
+            ? 'NOTICE GIVEN · MOVING ${DateFormat('d MMM').format(on).toUpperCase()}'
+            : 'NOTICE GIVEN',
+        style: GoogleFonts.spaceGrotesk(
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          color: cs.onSecondary,
+        ),
+      );
+    }
+
+    if (widget.data['tenancy_id'] == null) return const SizedBox.shrink();
+
+    return SizedBox(
+      width: double.infinity,
+      child: TextButton(
+        onPressed: _sending ? null : _giveNotice,
+        style: TextButton.styleFrom(
+          foregroundColor: cs.onSecondary,
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          minimumSize: const Size(44, 44),
+          side: BorderSide(color: cs.onSecondary.withValues(alpha: 0.4), width: 1.5),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+        child: _sending
+            ? SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: cs.onSecondary),
+              )
+            : Text(
+                'GIVE 30 DAYS NOTICE',
+                style: GoogleFonts.spaceGrotesk(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: cs.onSecondary,
+                ),
+              ),
+      ),
+    );
+  }
 }

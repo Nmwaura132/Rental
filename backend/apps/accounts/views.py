@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 from apps.core.permissions import IsLandlordOrCaretaker
 
 from .serializers import (
+    TenantPickerSerializer,
     CustomTokenObtainPairSerializer,
     UserProfileSerializer,
     UserRegistrationSerializer,
@@ -33,18 +34,39 @@ def _tenant_qs_for_manager(user):
     tenants = User.objects.filter(role=User.Role.TENANT, is_active=True)
     if user.is_landlord:
         return tenants.filter(
-            Q(created_by=user) | Q(leases__unit__property__owner=user)
+            Q(created_by=user) | Q(tenancies__unit__property__owner=user)
         ).distinct()
     if user.is_caretaker:
         return tenants.filter(
-            Q(created_by=user) | Q(leases__unit__property__caretaker=user)
+            Q(created_by=user) | Q(tenancies__unit__property__caretaker=user)
         ).distinct()
     return User.objects.none()
 
 
+class CaretakerListView(generics.ListAPIView):
+    """Caretakers this landlord has taken on, for assigning to a property.
+
+    Scoped to created_by: a landlord should see the people they hired, not
+    every caretaker account on the platform.
+    """
+
+    serializer_class = TenantPickerSerializer
+    permission_classes = [IsLandlordOrCaretaker]
+    queryset = User.objects.none()  # for drf-spectacular schema introspection
+
+    def get_queryset(self):
+        if not self.request.user.is_landlord:
+            return User.objects.none()
+        return User.objects.filter(
+            role=User.Role.CARETAKER,
+            is_active=True,
+            created_by=self.request.user,
+        ).order_by("first_name", "last_name")
+
+
 class TenantListView(generics.ListAPIView):
-    """List all active tenants — for landlords/caretakers to select when creating leases."""
-    serializer_class = UserProfileSerializer
+    """List all active tenants — for landlords/caretakers to select when creating tenancies."""
+    serializer_class = TenantPickerSerializer
     permission_classes = [permissions.IsAuthenticated]
     queryset = User.objects.none()  # for drf-spectacular schema introspection
 

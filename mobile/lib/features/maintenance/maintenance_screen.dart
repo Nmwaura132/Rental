@@ -1248,15 +1248,15 @@ class _CreateRequestSheetState extends ConsumerState<_CreateRequestSheet> {
   bool _loading = false;
   XFile? _photo;
   final _picker = ImagePicker();
-  int? _leaseId;
-  String? _leaseLabel;
-  bool _leasesLoading = true;
-  String? _leasesError;
+  int? _tenancyId;
+  String? _tenancyLabel;
+  bool _tenanciesLoading = true;
+  String? _tenanciesError;
 
   @override
   void initState() {
     super.initState();
-    _loadLease();
+    _loadTenancy();
   }
 
   @override
@@ -1266,30 +1266,30 @@ class _CreateRequestSheetState extends ConsumerState<_CreateRequestSheet> {
     super.dispose();
   }
 
-  Future<void> _loadLease() async {
+  Future<void> _loadTenancy() async {
     try {
       final dio = ref.read(dioProvider);
-      final leases = await fetchAllPages(
+      final tenancies = await fetchAllPages(
         dio,
-        '/api/v1/tenants/leases/',
+        '/api/v1/tenants/tenancies/',
         queryParameters: {'status': 'active'},
       );
-      if (leases.isNotEmpty) {
-        final first = leases.first as Map<String, dynamic>;
+      if (tenancies.isNotEmpty) {
+        final first = tenancies.first as Map<String, dynamic>;
         final unitNum = first['unit_number'] ?? first['unit'] ?? '';
         final propName = first['property_name'] ?? '';
         if (mounted) {
           setState(() {
-            _leaseId = first['id'] as int?;
-            _leaseLabel = propName.isNotEmpty ? '$propName — Unit $unitNum' : 'Unit $unitNum';
-            _leasesLoading = false;
+            _tenancyId = first['id'] as int?;
+            _tenancyLabel = propName.isNotEmpty ? '$propName — Unit $unitNum' : 'Unit $unitNum';
+            _tenanciesLoading = false;
           });
         }
       } else {
-        if (mounted) setState(() { _leasesLoading = false; _leasesError = 'No active lease found.'; });
+        if (mounted) setState(() { _tenanciesLoading = false; _tenanciesError = 'No active tenancy found.'; });
       }
     } catch (e) {
-      if (mounted) setState(() { _leasesLoading = false; _leasesError = 'Could not load lease info.'; });
+      if (mounted) setState(() { _tenanciesLoading = false; _tenanciesError = 'Could not load tenancy info.'; });
     }
   }
 
@@ -1320,13 +1320,13 @@ class _CreateRequestSheetState extends ConsumerState<_CreateRequestSheet> {
   }
 
   Future<void> _submit() async {
-    if (_leaseId == null) return;
+    if (_tenancyId == null) return;
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loading = true);
     try {
       final dio = ref.read(dioProvider);
       final formData = FormData.fromMap({
-        'lease': _leaseId.toString(),
+        'tenancy': _tenancyId.toString(),
         'title': _titleCtrl.text.trim(),
         'description': _descCtrl.text.trim(),
         'priority': _priority,
@@ -1379,13 +1379,13 @@ class _CreateRequestSheetState extends ConsumerState<_CreateRequestSheet> {
                     ?.copyWith(fontWeight: FontWeight.bold)),
             const SizedBox(height: 16),
 
-            // Lease info
-            if (_leasesLoading)
+            // Tenancy info
+            if (_tenanciesLoading)
               const Center(child: Padding(
                 padding: EdgeInsets.symmetric(vertical: 12),
                 child: CircularProgressIndicator(),
               ))
-            else if (_leasesError != null)
+            else if (_tenanciesError != null)
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -1395,7 +1395,7 @@ class _CreateRequestSheetState extends ConsumerState<_CreateRequestSheet> {
                 child: Row(children: [
                   Icon(Icons.error_outline, color: cs.onErrorContainer, size: 18),
                   const SizedBox(width: 8),
-                  Text(_leasesError!,
+                  Text(_tenanciesError!,
                       style: TextStyle(color: cs.onErrorContainer, fontSize: 13)),
                 ]),
               )
@@ -1410,7 +1410,7 @@ class _CreateRequestSheetState extends ConsumerState<_CreateRequestSheet> {
                   Icon(Icons.home_outlined, color: cs.primary, size: 18),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: Text(_leaseLabel ?? '',
+                    child: Text(_tenancyLabel ?? '',
                         style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w500,
@@ -1523,7 +1523,7 @@ class _CreateRequestSheetState extends ConsumerState<_CreateRequestSheet> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: (_loading || _leaseId == null) ? null : _submit,
+                  onPressed: (_loading || _tenancyId == null) ? null : _submit,
                   child: _loading
                       ? SizedBox(
                           height: 20,

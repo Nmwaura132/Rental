@@ -39,7 +39,7 @@ def test_stk_query_success_without_receipt_requires_manual_review(invoice, monke
         merchant_request_id="merchant-test",
         phone="+254700111111",
         amount=Decimal("15000.00"),
-        account_ref=invoice.lease.unit.unit_number,
+        account_ref=invoice.tenancy.unit.unit_number,
         invoice=invoice,
     )
     MpesaSTKRequest.objects.filter(pk=request.pk).update(
@@ -66,7 +66,7 @@ def test_make_idempotency_key_stable():
 
 
 @pytest.mark.django_db
-def test_duplicate_mpesa_callback_does_not_double_pay(invoice, lease):
+def test_duplicate_mpesa_callback_does_not_double_pay(invoice, tenancy):
     """Safaricom retries confirmation up to 3x. The idempotency_key + skip
     inside the locked block must prevent a second Payment row."""
     receipt = "RTESTREC1"
@@ -75,14 +75,14 @@ def test_duplicate_mpesa_callback_does_not_double_pay(invoice, lease):
     process_mpesa_payment(
         receipt_number=receipt,
         amount="15000",
-        account_ref=lease.unit.unit_number,
+        account_ref=tenancy.unit.unit_number,
         phone="+254700111111",
         idempotency_key=key,
     )
     process_mpesa_payment(  # duplicate
         receipt_number=receipt,
         amount="15000",
-        account_ref=lease.unit.unit_number,
+        account_ref=tenancy.unit.unit_number,
         phone="+254700111111",
         idempotency_key=key,
     )
@@ -96,14 +96,14 @@ def test_duplicate_mpesa_callback_does_not_double_pay(invoice, lease):
 
 
 @pytest.mark.django_db
-def test_amount_is_parsed_as_decimal_not_float(invoice, lease):
+def test_amount_is_parsed_as_decimal_not_float(invoice, tenancy):
     """C2B amounts arrive as strings/numbers. The task must coerce via
     Decimal(str(...)) so cents don't drift across additions."""
     # 100.50 chosen because float() would store 100.49999... and break ledgers.
     process_mpesa_payment(
         receipt_number="RTESTFLOAT",
         amount="100.50",
-        account_ref=lease.unit.unit_number,
+        account_ref=tenancy.unit.unit_number,
         phone="+254700111111",
         idempotency_key=make_idempotency_key("RTESTFLOAT"),
     )
@@ -112,11 +112,11 @@ def test_amount_is_parsed_as_decimal_not_float(invoice, lease):
 
 
 @pytest.mark.django_db
-def test_partial_payment_marks_invoice_partially_paid(invoice, lease):
+def test_partial_payment_marks_invoice_partially_paid(invoice, tenancy):
     process_mpesa_payment(
         receipt_number="RPARTIAL",
         amount="5000",
-        account_ref=lease.unit.unit_number,
+        account_ref=tenancy.unit.unit_number,
         phone="+254700111111",
         idempotency_key=make_idempotency_key("RPARTIAL"),
     )
@@ -126,7 +126,7 @@ def test_partial_payment_marks_invoice_partially_paid(invoice, lease):
 
 
 @pytest.mark.django_db
-def test_partial_payment_keeps_past_due_invoice_overdue(invoice, lease):
+def test_partial_payment_keeps_past_due_invoice_overdue(invoice, tenancy):
     invoice.due_date = date.today() - timedelta(days=1)
     invoice.status = Invoice.Status.OVERDUE
     invoice.save()
@@ -134,7 +134,7 @@ def test_partial_payment_keeps_past_due_invoice_overdue(invoice, lease):
     process_mpesa_payment(
         receipt_number="ROVERDUE",
         amount="5000",
-        account_ref=lease.unit.unit_number,
+        account_ref=tenancy.unit.unit_number,
         phone="+254700111111",
         idempotency_key=make_idempotency_key("ROVERDUE"),
     )
@@ -144,8 +144,8 @@ def test_partial_payment_keeps_past_due_invoice_overdue(invoice, lease):
 
 
 @pytest.mark.django_db
-def test_invalid_account_ref_does_not_create_payment(lease):
-    """A wrong BillRefNumber means no matching lease — skip silently."""
+def test_invalid_account_ref_does_not_create_payment(tenancy):
+    """A wrong BillRefNumber means no matching tenancy — skip silently."""
     process_mpesa_payment(
         receipt_number="RUNKNOWN",
         amount="5000",
@@ -157,13 +157,13 @@ def test_invalid_account_ref_does_not_create_payment(lease):
 
 
 @pytest.mark.django_db
-def test_payment_matches_on_payment_code_not_just_unit_number(invoice, lease):
+def test_payment_matches_on_payment_code_not_just_unit_number(invoice, tenancy):
     """The intended path: a tenant types the short code printed on their
     invoice/SMS, not the landlord's own unit label."""
     process_mpesa_payment(
         receipt_number="RCODE",
         amount="15000",
-        account_ref=lease.unit.payment_code,
+        account_ref=tenancy.unit.payment_code,
         phone="+254700111111",
         idempotency_key=make_idempotency_key("RCODE"),
     )
@@ -172,22 +172,22 @@ def test_payment_matches_on_payment_code_not_just_unit_number(invoice, lease):
 
 
 @pytest.mark.django_db
-def test_same_unit_number_on_different_properties_does_not_cross_match(lease):
+def test_same_unit_number_on_different_properties_does_not_cross_match(tenancy):
     """Two landlords each naming a unit 'A1' must never let one's tenant pay
-    into the other's lease — unit_number is only unique per property."""
+    into the other's tenancy — unit_number is only unique per property."""
     from apps.properties.models import Property, Unit
 
-    other_landlord = lease.unit.property.owner.__class__.objects.create_user(
+    other_landlord = tenancy.unit.property.owner.__class__.objects.create_user(
         phone_number="+254700999000",
         password="OtherLandlord@Test1",
         first_name="Other",
         last_name="Landlord",
-        role=lease.unit.property.owner.__class__.Role.LANDLORD,
+        role=tenancy.unit.property.owner.__class__.Role.LANDLORD,
     )
     other_property = Property.objects.create(owner=other_landlord, name="Other Apartments")
     Unit.objects.create(
         property=other_property,
-        unit_number=lease.unit.unit_number,  # deliberately the same label ("A1")
+        unit_number=tenancy.unit.unit_number,  # deliberately the same label ("A1")
         unit_type=Unit.UnitType.ONE_BED,
         rent_amount=Decimal("15000.00"),
         deposit_amount=Decimal("30000.00"),
@@ -196,7 +196,7 @@ def test_same_unit_number_on_different_properties_does_not_cross_match(lease):
     process_mpesa_payment(
         receipt_number="RAMBIG",
         amount="15000",
-        account_ref=lease.unit.unit_number,  # ambiguous: matches both units' unit_number
+        account_ref=tenancy.unit.unit_number,  # ambiguous: matches both units' unit_number
         phone="+254700111111",
         idempotency_key=make_idempotency_key("RAMBIG"),
     )

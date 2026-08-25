@@ -24,6 +24,10 @@ class Notification(models.Model):
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING, db_index=True)
     error = models.TextField(blank=True)
     sent_at = models.DateTimeField(null=True, blank=True)
+    # WHY this exists: the app already filtered and styled on "is_read", but
+    # nothing ever recorded it, so every notification read as unread forever and
+    # the bell badge could never clear.
+    read_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

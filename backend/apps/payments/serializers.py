@@ -32,7 +32,7 @@ class InvoiceLineItemSerializer(serializers.ModelSerializer):
 
 class InvoiceSerializer(serializers.ModelSerializer):
     FINANCIAL_FIELDS = {
-        "lease",
+        "tenancy",
         "amount_due",
         "due_date",
         "period_start",
@@ -44,13 +44,13 @@ class InvoiceSerializer(serializers.ModelSerializer):
     balance = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     payments = PaymentSerializer(many=True, read_only=True)
     line_items = InvoiceLineItemSerializer(many=True, required=False)
-    tenant_name = serializers.CharField(source="lease.tenant.get_full_name", read_only=True)
-    unit_number = serializers.CharField(source="lease.unit.unit_number", read_only=True)
+    tenant_name = serializers.CharField(source="tenancy.tenant.get_full_name", read_only=True)
+    unit_number = serializers.CharField(source="tenancy.unit.unit_number", read_only=True)
 
     class Meta:
         model = Invoice
         fields = [
-            "id", "invoice_number", "lease", "tenant_name", "unit_number",
+            "id", "invoice_number", "tenancy", "tenant_name", "unit_number",
             "amount_due", "amount_paid", "balance", "due_date",
             "status", "period_start", "period_end", "notes",
             "payments", "line_items",

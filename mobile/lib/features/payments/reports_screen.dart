@@ -16,12 +16,12 @@ final _propertiesProvider =
   return List<Map<String, dynamic>>.from(data);
 });
 
-final _leasesProvider = FutureProvider.autoDispose
+final _tenanciesProvider = FutureProvider.autoDispose
     .family<List<Map<String, dynamic>>, int>((ref, propertyId) async {
   final dio = ref.watch(dioProvider);
   final data = await fetchAllPages(
     dio,
-    '/api/v1/tenants/leases/',
+    '/api/v1/tenants/tenancies/',
     queryParameters: {'property': propertyId},
   );
   return List<Map<String, dynamic>>.from(data);
@@ -38,7 +38,7 @@ class ReportsScreen extends ConsumerStatefulWidget {
 
 class _ReportsScreenState extends ConsumerState<ReportsScreen> {
   Map<String, dynamic>? _selectedProperty;
-  Map<String, dynamic>? _selectedLease;
+  Map<String, dynamic>? _selectedTenancy;
 
   // State per report card: null = idle, 'loading' = generating, URL = done
   final Map<String, String?> _results = {
@@ -68,9 +68,9 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
       );
       return;
     }
-    if (type == 'ledger' && _selectedLease == null) {
+    if (type == 'ledger' && _selectedTenancy == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a tenant lease first.')),
+        const SnackBar(content: Text('Please select a tenant tenancy first.')),
       );
       return;
     }
@@ -79,7 +79,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
       final dio = ref.read(dioProvider);
       final params = <String, dynamic>{'type': type};
       if (type == 'ledger') {
-        params['lease'] = _selectedLease!['id'];
+        params['tenancy'] = _selectedTenancy!['id'];
       } else {
         params['property'] = prop['id'];
       }
@@ -137,7 +137,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                 orElse: () => props.first,
               );
           final propertyId = _selectedProperty!['id'] as int;
-          final leasesAsync = ref.watch(_leasesProvider(propertyId));
+          final tenanciesAsync = ref.watch(_tenanciesProvider(propertyId));
 
           return ListView(
             padding: const EdgeInsets.all(16),
@@ -159,7 +159,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                           .toList(),
                       onChanged: (p) => setState(() {
                         _selectedProperty = p;
-                        _selectedLease = null;
+                        _selectedTenancy = null;
                         // Clear stale results on property change
                         for (final k in _results.keys) {
                           _results[k] = null;
@@ -187,40 +187,40 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const SizedBox(height: 8),
-                    leasesAsync.when(
+                    tenanciesAsync.when(
                       loading: () => const LinearProgressIndicator(),
                       error: (e, _) => Text(apiError(e)),
-                      data: (leases) {
-                        if (leases.isEmpty) {
+                      data: (tenancies) {
+                        if (tenancies.isEmpty) {
                           return const Text(
-                            'No leases are available for this property.',
+                            'No tenancies are available for this property.',
                           );
                         }
-                        final selectedLeaseId = _selectedLease?['id'];
-                        _selectedLease =
-                            leases.cast<Map<String, dynamic>?>().firstWhere(
-                                  (lease) => lease?['id'] == selectedLeaseId,
-                                  orElse: () => leases.first,
+                        final selectedTenancyId = _selectedTenancy?['id'];
+                        _selectedTenancy =
+                            tenancies.cast<Map<String, dynamic>?>().firstWhere(
+                                  (tenancy) => tenancy?['id'] == selectedTenancyId,
+                                  orElse: () => tenancies.first,
                                 );
                         return DropdownButtonFormField<Map<String, dynamic>>(
-                          initialValue: _selectedLease,
+                          initialValue: _selectedTenancy,
                           isExpanded: true,
                           decoration: const InputDecoration(
-                            labelText: 'Tenant lease',
+                            labelText: 'Tenant tenancy',
                             isDense: true,
                           ),
-                          items: leases
+                          items: tenancies
                               .map(
-                                (lease) => DropdownMenuItem(
-                                  value: lease,
+                                (tenancy) => DropdownMenuItem(
+                                  value: tenancy,
                                   child: Text(
-                                    '${lease['tenant_name']} — ${lease['unit_number']}',
+                                    '${tenancy['tenant_name']} — ${tenancy['unit_number']}',
                                   ),
                                 ),
                               )
                               .toList(),
-                          onChanged: (lease) =>
-                              setState(() => _selectedLease = lease),
+                          onChanged: (tenancy) =>
+                              setState(() => _selectedTenancy = tenancy),
                         );
                       },
                     ),

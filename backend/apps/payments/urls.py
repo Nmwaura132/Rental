@@ -15,6 +15,7 @@ from .bank_views import (
     BankNotificationMatchView,
 )
 from .report_views import ReportsView
+from .mri_views import MRIStatementView
 
 router = DefaultRouter()
 router.register("invoices", InvoiceViewSet, basename="invoice")
@@ -23,6 +24,7 @@ router.register("", PaymentViewSet, basename="payment")
 urlpatterns = [
     path("dashboard/", DashboardStatsView.as_view(), name="dashboard-stats"),
     path("reports/", ReportsView.as_view(), name="reports"),
+    path("mri/", MRIStatementView.as_view(), name="mri-statement"),
     # M-Pesa C2B Paybill — registration + webhooks
     path("mpesa/register/", MpesaRegisterC2BView.as_view(), name="mpesa-register-c2b"),
     path("mpesa/validate/", MpesaC2BValidateView.as_view(), name="mpesa-validate"),

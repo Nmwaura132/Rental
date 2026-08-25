@@ -300,13 +300,13 @@ class BankNotificationListView(APIView):
 
     def get(self, request):
         owned_invoice_refs = Invoice.objects.filter(
-            lease__unit__property__owner=request.user
+            tenancy__unit__property__owner=request.user
         ).values("invoice_number")
         owned_units = Unit.objects.filter(property__owner=request.user)
         owned_unit_refs = owned_units.values("unit_number")
         owned_payment_codes = owned_units.values("payment_code")
         qs = BankPaymentNotification.objects.filter(
-            Q(payment__invoice__lease__unit__property__owner=request.user)
+            Q(payment__invoice__tenancy__unit__property__owner=request.user)
             | Q(payment_ref__in=owned_invoice_refs)
             | Q(payment_ref__in=owned_unit_refs)
             | Q(payment_ref__in=owned_payment_codes)
@@ -340,14 +340,14 @@ class BankNotificationMatchView(APIView):
 
     def post(self, request, pk):
         owned_invoice_refs = Invoice.objects.filter(
-            lease__unit__property__owner=request.user
+            tenancy__unit__property__owner=request.user
         ).values("invoice_number")
         owned_units = Unit.objects.filter(property__owner=request.user)
         owned_unit_refs = owned_units.values("unit_number")
         owned_payment_codes = owned_units.values("payment_code")
         try:
             notification = BankPaymentNotification.objects.filter(
-                Q(payment__invoice__lease__unit__property__owner=request.user)
+                Q(payment__invoice__tenancy__unit__property__owner=request.user)
                 | Q(payment_ref__in=owned_invoice_refs)
                 | Q(payment_ref__in=owned_unit_refs)
                 | Q(payment_ref__in=owned_payment_codes)

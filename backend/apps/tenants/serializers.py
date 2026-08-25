@@ -1,26 +1,33 @@
 from rest_framework import serializers
-from .models import Lease, MaintenanceRequest, MaintenanceNote
+from .models import Tenancy, MaintenanceRequest, MaintenanceNote
 
 
-class LeaseSerializer(serializers.ModelSerializer):
+class TenancySerializer(serializers.ModelSerializer):
     tenant_name = serializers.CharField(source="tenant.get_full_name", read_only=True)
     tenant_phone = serializers.CharField(source="tenant.phone_number", read_only=True)
     unit_number = serializers.CharField(source="unit.unit_number", read_only=True)
     property_name = serializers.CharField(source="unit.property.name", read_only=True)
     property_id = serializers.IntegerField(source="unit.property_id", read_only=True)
-    lease_pdf_url = serializers.SerializerMethodField()
+    tenancy_pdf_url = serializers.SerializerMethodField()
 
     class Meta:
-        model = Lease
+        model = Tenancy
         fields = [
             "id", "tenant", "unit", "start_date", "end_date", "rent_amount",
             "deposit_amount", "deposit_paid", "status", "notes", "created_at",
             "tenant_name", "tenant_phone", "unit_number", "property_name", "property_id",
-            "lease_pdf_url",
+            "tenancy_pdf_url",
+            "notice_given_at", "notice_effective_date", "notice_reason",
         ]
-        read_only_fields = ["id", "document_key", "lease_pdf_url", "created_at"]
+        # WHY read-only: notice is given through the give-notice action, which
+        # fixes the effective date at the full notice period. Writable fields
+        # here would let a client set any date it liked.
+        read_only_fields = [
+            "id", "document_key", "tenancy_pdf_url", "created_at",
+            "notice_given_at", "notice_effective_date", "notice_reason",
+        ]
 
-    def get_lease_pdf_url(self, obj) -> str | None:
+    def get_tenancy_pdf_url(self, obj) -> str | None:
         if not obj.document_key:
             return None
         from django.conf import settings
@@ -50,13 +57,13 @@ class MaintenanceRequestSerializer(serializers.ModelSerializer):
     notes_count = serializers.IntegerField(source="notes.count", read_only=True)
     # WHY: the mobile list tile destructures these for the landlord-side badges
     # (so the landlord knows whose unit a request belongs to without tapping in).
-    # The model only has `lease` FK; we expose the joined names as read-only
+    # The model only has `tenancy` FK; we expose the joined names as read-only
     # fields so a single GET /maintenance/ call covers the list view's needs.
-    tenant_name = serializers.CharField(source="lease.tenant.get_full_name", read_only=True)
-    tenant_phone = serializers.CharField(source="lease.tenant.phone_number", read_only=True)
-    unit_number = serializers.CharField(source="lease.unit.unit_number", read_only=True)
-    property_name = serializers.CharField(source="lease.unit.property.name", read_only=True)
-    property_id = serializers.IntegerField(source="lease.unit.property_id", read_only=True)
+    tenant_name = serializers.CharField(source="tenancy.tenant.get_full_name", read_only=True)
+    tenant_phone = serializers.CharField(source="tenancy.tenant.phone_number", read_only=True)
+    unit_number = serializers.CharField(source="tenancy.unit.unit_number", read_only=True)
+    property_name = serializers.CharField(source="tenancy.unit.property.name", read_only=True)
+    property_id = serializers.IntegerField(source="tenancy.unit.property_id", read_only=True)
 
     class Meta:
         model = MaintenanceRequest

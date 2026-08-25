@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -8,6 +9,7 @@ import '../../core/constants.dart';
 import '../../core/providers/user_role_provider.dart';
 import '../../core/theme/kasa_tokens.dart';
 import '../../core/utils/api_error.dart';
+import '../../core/utils/phone.dart';
 import '../../core/widgets/kasa_primitives.dart';
 import '../../shared/widgets/shimmer_loading.dart';
 
@@ -189,6 +191,7 @@ class PropertiesScreen extends ConsumerWidget {
                                             builder: (_) => _EditPropertyDialog(
                                               propertyId: p['id'] as int,
                                               currentName: p['name'] as String,
+                                              currentCaretakerId: p['caretaker'] as int?,
                                               onDone: () => ref.invalidate(propertiesProvider),
                                             ),
                                           );
@@ -694,10 +697,12 @@ class _EditPropertyDialog extends ConsumerStatefulWidget {
   const _EditPropertyDialog({
     required this.propertyId,
     required this.currentName,
+    required this.currentCaretakerId,
     required this.onDone,
   });
   final int propertyId;
   final String currentName;
+  final int? currentCaretakerId;
   final VoidCallback onDone;
 
   @override
@@ -709,10 +714,48 @@ class _EditPropertyDialogState extends ConsumerState<_EditPropertyDialog> {
   late final TextEditingController _nameCtrl;
   bool _loading = false;
 
+  List<Map<String, dynamic>> _caretakers = [];
+  int? _caretakerId;
+  bool _caretakersLoading = true;
+
   @override
   void initState() {
     super.initState();
     _nameCtrl = TextEditingController(text: widget.currentName);
+    _caretakerId = widget.currentCaretakerId;
+    _loadCaretakers();
+  }
+
+  Future<void> _loadCaretakers() async {
+    try {
+      final rows = await fetchAllPages(
+        ref.read(dioProvider),
+        '/api/v1/auth/caretakers/',
+      );
+      if (!mounted) return;
+      setState(() {
+        _caretakers = rows.cast<Map<String, dynamic>>();
+        // A caretaker assigned before being removed from this landlord's list
+        // would otherwise leave the dropdown on a value it has no item for,
+        // which throws.
+        if (!_caretakers.any((c) => c['id'] == _caretakerId)) {
+          _caretakerId = null;
+        }
+        _caretakersLoading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _caretakersLoading = false);
+    }
+  }
+
+  Future<void> _addCaretaker() async {
+    final created = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (_) => const _AddCaretakerDialog(),
+    );
+    if (created == null) return;
+    await _loadCaretakers();
+    if (mounted) setState(() => _caretakerId = created['id'] as int?);
   }
 
   @override
@@ -727,7 +770,12 @@ class _EditPropertyDialogState extends ConsumerState<_EditPropertyDialog> {
     try {
       await ref.read(dioProvider).patch(
         '/api/v1/properties/${widget.propertyId}/',
-        data: {'name': _nameCtrl.text.trim()},
+        data: {
+          'name': _nameCtrl.text.trim(),
+          // Sent even when null so clearing the picker actually unassigns,
+          // rather than silently leaving the old caretaker in place.
+          'caretaker': _caretakerId,
+        },
       );
       widget.onDone();
       if (mounted) Navigator.pop(context);
@@ -749,14 +797,59 @@ class _EditPropertyDialogState extends ConsumerState<_EditPropertyDialog> {
       title: const Text('Edit Property'),
       content: Form(
         key: _formKey,
-        child: TextFormField(
-          controller: _nameCtrl,
-          decoration: const InputDecoration(
-            labelText: 'Property Name *',
-            prefixIcon: Icon(Icons.home_work),
-          ),
-          textCapitalization: TextCapitalization.words,
-          validator: (v) => v!.trim().isEmpty ? 'Required' : null,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextFormField(
+              controller: _nameCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Property Name *',
+                prefixIcon: Icon(Icons.home_work),
+              ),
+              textCapitalization: TextCapitalization.words,
+              validator: (v) => v!.trim().isEmpty ? 'Required' : null,
+            ),
+            const SizedBox(height: 16),
+            if (_caretakersLoading)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: LinearProgressIndicator(),
+              )
+            else
+              DropdownButtonFormField<int?>(
+                initialValue: _caretakerId,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Caretaker',
+                  prefixIcon: Icon(Icons.engineering_outlined),
+                ),
+                items: [
+                  const DropdownMenuItem<int?>(
+                    value: null,
+                    child: Text('No caretaker'),
+                  ),
+                  for (final c in _caretakers)
+                    DropdownMenuItem<int?>(
+                      value: c['id'] as int?,
+                      child: Text(
+                        '${c['first_name'] ?? ''} ${c['last_name'] ?? ''}'.trim(),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                ],
+                onChanged: (v) => setState(() => _caretakerId = v),
+              ),
+            const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _loading ? null : _addCaretaker,
+                icon: const Icon(Icons.person_add_alt, size: 18),
+                label: const Text('Add a caretaker'),
+              ),
+            ),
+          ],
         ),
       ),
       actions: [
@@ -772,6 +865,165 @@ class _EditPropertyDialogState extends ConsumerState<_EditPropertyDialog> {
                   height: 20,
                   child: CircularProgressIndicator(strokeWidth: 2))
               : const Text('Save'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Creates a caretaker account for the signed-in landlord.
+///
+/// WHY this exists: until now a caretaker could only be made in Django admin,
+/// so the role was unreachable from the product — a landlord could see the
+/// caretaker field but had no way to fill it.
+class _AddCaretakerDialog extends ConsumerStatefulWidget {
+  const _AddCaretakerDialog();
+
+  @override
+  ConsumerState<_AddCaretakerDialog> createState() => _AddCaretakerDialogState();
+}
+
+class _AddCaretakerDialogState extends ConsumerState<_AddCaretakerDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _firstCtrl = TextEditingController();
+  final _lastCtrl = TextEditingController();
+  final _phoneCtrl = TextEditingController();
+  final _passCtrl = TextEditingController();
+  bool _loading = false;
+  bool _obscure = true;
+
+  @override
+  void dispose() {
+    _firstCtrl.dispose();
+    _lastCtrl.dispose();
+    _phoneCtrl.dispose();
+    _passCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _loading = true);
+    try {
+      final phone = normalizeKenyanPhone(_phoneCtrl.text);
+      await ref.read(dioProvider).post('/api/v1/auth/register/', data: {
+        'phone_number': phone,
+        'first_name': _firstCtrl.text.trim(),
+        'last_name': _lastCtrl.text.trim(),
+        'role': 'caretaker',
+        'password': _passCtrl.text,
+        'password_confirm': _passCtrl.text,
+      });
+
+      // The register response returns only a message and phone, so re-read the
+      // list to get the new id rather than guessing at it.
+      final rows = await fetchAllPages(
+        ref.read(dioProvider),
+        '/api/v1/auth/caretakers/',
+      );
+      final created = rows.cast<Map<String, dynamic>>().firstWhere(
+            (c) => c['phone_number'] == phone,
+            orElse: () => <String, dynamic>{},
+          );
+
+      if (mounted) Navigator.pop(context, created.isEmpty ? null : created);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(apiError(e)),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Add Caretaker'),
+      content: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextFormField(
+                controller: _firstCtrl,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(
+                  labelText: 'First Name *',
+                  prefixIcon: Icon(Icons.person_outline),
+                ),
+                validator: (v) => v!.trim().isEmpty ? 'Required' : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _lastCtrl,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(
+                  labelText: 'Last Name *',
+                  prefixIcon: Icon(Icons.person_outline),
+                ),
+                validator: (v) => v!.trim().isEmpty ? 'Required' : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _phoneCtrl,
+                keyboardType: TextInputType.phone,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(12),
+                ],
+                decoration: const InputDecoration(
+                  labelText: 'Phone Number *',
+                  prefixIcon: Icon(Icons.phone_rounded),
+                  prefixText: '+254 ',
+                  hintText: '712 345 678',
+                ),
+                validator: validateKenyanPhone,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _passCtrl,
+                obscureText: _obscure,
+                decoration: InputDecoration(
+                  labelText: 'Temporary Password *',
+                  prefixIcon: const Icon(Icons.lock_rounded),
+                  helperText: 'Share this with them; they can change it later.',
+                  suffixIcon: IconButton(
+                    icon: Icon(_obscure
+                        ? Icons.visibility_rounded
+                        : Icons.visibility_off_rounded),
+                    onPressed: () => setState(() => _obscure = !_obscure),
+                    tooltip: _obscure ? 'Show password' : 'Hide password',
+                  ),
+                ),
+                validator: (v) {
+                  if (v == null || v.isEmpty) return 'Required';
+                  if (v.length < 8) return 'Minimum 8 characters';
+                  return null;
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _loading ? null : () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: _loading ? null : _submit,
+          child: _loading
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('Create'),
         ),
       ],
     );

@@ -1911,11 +1911,11 @@ class _CreateInvoiceDialog extends ConsumerStatefulWidget {
 }
 
 class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
-  List<Map<String, dynamic>> _leases = [];
+  List<Map<String, dynamic>> _tenancies = [];
   bool _initialLoading = true;
   String? _loadError;
 
-  int? _selectedLeaseId;
+  int? _selectedTenancyId;
   final _notesCtrl = TextEditingController();
   DateTime _periodStart = DateTime(DateTime.now().year, DateTime.now().month, 1);
   // Day 0 of next month = last day of current month (Dart overflow handling).
@@ -1934,7 +1934,7 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
   @override
   void initState() {
     super.initState();
-    Future.microtask(_loadLeases);
+    Future.microtask(_loadTenancies);
   }
 
   @override
@@ -1946,17 +1946,17 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
     super.dispose();
   }
 
-  Future<void> _loadLeases() async {
+  Future<void> _loadTenancies() async {
     try {
       final dio = ref.read(dioProvider);
       final raw = await fetchAllPages(
         dio,
-        '/api/v1/tenants/leases/',
+        '/api/v1/tenants/tenancies/',
         queryParameters: {'status': 'active'},
       );
       if (!mounted) return;
       setState(() {
-        _leases = raw.cast<Map<String, dynamic>>();
+        _tenancies = raw.cast<Map<String, dynamic>>();
         _initialLoading = false;
       });
     } catch (e) {
@@ -2048,9 +2048,9 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
   }
 
   Future<void> _submit() async {
-    if (_selectedLeaseId == null) {
+    if (_selectedTenancyId == null) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Select a lease.')));
+          .showSnackBar(const SnackBar(content: Text('Select a tenancy.')));
       return;
     }
 
@@ -2094,7 +2094,7 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
     try {
       final dio = ref.read(dioProvider);
       await dio.post('/api/v1/payments/invoices/', data: {
-        'lease': _selectedLeaseId,
+        'tenancy': _selectedTenancyId,
         'amount_due': total,
         'period_start': _apiDate.format(_periodStart),
         'period_end': _apiDate.format(_periodEnd),
@@ -2242,16 +2242,16 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Lease picker
+                      // Tenancy picker
                       DropdownButtonFormField<int>(
                         decoration: const InputDecoration(
-                            labelText: 'Lease / Tenant *', isDense: true),
-                        initialValue: _selectedLeaseId,
-                        hint: _leases.isEmpty
-                            ? const Text('No active leases')
-                            : const Text('Select lease'),
+                            labelText: 'Tenancy / Tenant *', isDense: true),
+                        initialValue: _selectedTenancyId,
+                        hint: _tenancies.isEmpty
+                            ? const Text('No active tenancies')
+                            : const Text('Select tenancy'),
                         isExpanded: true,
-                        items: _leases
+                        items: _tenancies
                             .map((l) => DropdownMenuItem<int>(
                                   value: l['id'] as int,
                                   child: Text(
@@ -2262,22 +2262,22 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
                             .toList(),
                         onChanged: (v) {
                           setState(() {
-                            _selectedLeaseId = v;
+                            _selectedTenancyId = v;
                             for (final item in _lineItems) {
                               item.dispose();
                             }
                             _lineItems = [];
                           });
                           if (v != null) {
-                            final lease = _leases.firstWhere(
+                            final tenancy = _tenancies.firstWhere(
                                 (l) => l['id'] == v, orElse: () => {});
-                            if (lease.isNotEmpty) {
+                            if (tenancy.isNotEmpty) {
                               final rentAmount = double.tryParse(
-                                      (lease['rent_amount'] ?? '0')
+                                      (tenancy['rent_amount'] ?? '0')
                                           .toString()) ??
                                   0;
                               _loadPropertyCharges(
-                                  rentAmount, lease['property_id'] as int?);
+                                  rentAmount, tenancy['property_id'] as int?);
                             }
                           }
                         },
@@ -2324,11 +2324,11 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
                       const SizedBox(height: 20),
 
                       // ── Charges / Line Items ──────────────────────────────
-                      if (_selectedLeaseId == null)
+                      if (_selectedTenancyId == null)
                         const Padding(
                           padding: EdgeInsets.symmetric(vertical: 16),
                           child: Center(
-                            child: Text('Select a lease to see charges.',
+                            child: Text('Select a tenancy to see charges.',
                                 style: TextStyle(color: Colors.grey)),
                           ),
                         )

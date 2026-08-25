@@ -29,6 +29,9 @@ class Property(models.Model):
     address = models.TextField(blank=True, default="")
     county = models.CharField(max_length=60, blank=True, default="")
     town = models.CharField(max_length=60, blank=True, default="")
+    # Land Reference number, as it appears on the title. eRITS registers each
+    # property individually and asks for this to tie it to the land registry.
+    lr_number = models.CharField(max_length=60, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from apps.properties.models import Property, Unit
 from apps.payments.models import Payment
-from apps.tenants.models import Lease
+from apps.tenants.models import Tenancy
 
 
 def _registration_payload(phone_number):
@@ -86,8 +86,8 @@ def test_password_change_revokes_existing_access_token(db, landlord):
     assert stale_token_response.status_code == 401
 
 
-def test_tenant_cannot_delete_their_leased_property(
-    db, tenant, property_, lease
+def test_tenant_cannot_delete_their_tenanted_property(
+    db, tenant, property_, tenancy
 ):
     client = APIClient()
     client.force_authenticate(user=tenant)
@@ -98,8 +98,8 @@ def test_tenant_cannot_delete_their_leased_property(
     assert Property.objects.filter(id=property_.id).exists()
 
 
-def test_landlord_cannot_delete_property_with_lease_history(
-    db, landlord, property_, lease
+def test_landlord_cannot_delete_property_with_tenancy_history(
+    db, landlord, property_, tenancy
 ):
     client = APIClient()
     client.force_authenticate(user=landlord)
@@ -108,11 +108,11 @@ def test_landlord_cannot_delete_property_with_lease_history(
 
     assert response.status_code == 409
     assert Property.objects.filter(id=property_.id).exists()
-    assert Lease.objects.filter(id=lease.id).exists()
+    assert Tenancy.objects.filter(id=tenancy.id).exists()
 
 
-def test_tenant_cannot_rename_their_leased_property(
-    db, tenant, property_, lease
+def test_tenant_cannot_rename_their_tenanted_property(
+    db, tenant, property_, tenancy
 ):
     client = APIClient()
     client.force_authenticate(user=tenant)
@@ -128,8 +128,8 @@ def test_tenant_cannot_rename_their_leased_property(
     assert property_.name == "Kasa Test Apartments"
 
 
-def test_tenant_cannot_add_a_unit_to_their_leased_property(
-    db, tenant, property_, lease
+def test_tenant_cannot_add_a_unit_to_their_tenanted_property(
+    db, tenant, property_, tenancy
 ):
     client = APIClient()
     client.force_authenticate(user=tenant)
@@ -183,7 +183,7 @@ def test_landlord_cannot_add_a_unit_to_another_landlords_property(
     assert response.status_code == 403
 
 
-def test_landlord_cannot_create_an_invoice_for_another_landlords_lease(
+def test_landlord_cannot_create_an_invoice_for_another_landlords_tenancy(
     db, landlord
 ):
     other_landlord = get_user_model().objects.create_user(
@@ -211,7 +211,7 @@ def test_landlord_cannot_create_an_invoice_for_another_landlords_lease(
         rent_amount=Decimal("10000.00"),
         deposit_amount=Decimal("10000.00"),
     )
-    other_lease = Lease.objects.create(
+    other_tenancy = Tenancy.objects.create(
         tenant=other_tenant,
         unit=other_unit,
         start_date=date.today(),
@@ -224,7 +224,7 @@ def test_landlord_cannot_create_an_invoice_for_another_landlords_lease(
     response = client.post(
         "/api/v1/payments/invoices/",
         {
-            "lease": other_lease.id,
+            "tenancy": other_tenancy.id,
             "amount_due": "10000.00",
             "due_date": date.today().isoformat(),
             "period_start": date.today().isoformat(),
@@ -236,7 +236,7 @@ def test_landlord_cannot_create_an_invoice_for_another_landlords_lease(
     assert response.status_code == 403
 
 
-def test_landlord_cannot_create_a_lease_for_another_landlords_unit(
+def test_landlord_cannot_create_a_tenancy_for_another_landlords_unit(
     db, landlord, tenant
 ):
     other_landlord = get_user_model().objects.create_user(
@@ -261,7 +261,7 @@ def test_landlord_cannot_create_a_lease_for_another_landlords_unit(
     client.force_authenticate(user=landlord)
 
     response = client.post(
-        "/api/v1/tenants/leases/",
+        "/api/v1/tenants/tenancies/",
         {
             "tenant": tenant.id,
             "unit": other_unit.id,
@@ -290,19 +290,19 @@ def test_tenant_cannot_change_their_invoice_amount(db, tenant, invoice):
     assert invoice.amount_due != 1
 
 
-def test_tenant_cannot_terminate_their_own_lease(db, tenant, lease):
+def test_tenant_cannot_terminate_their_own_tenancy(db, tenant, tenancy):
     client = APIClient()
     client.force_authenticate(user=tenant)
 
     response = client.patch(
-        f"/api/v1/tenants/leases/{lease.id}/",
+        f"/api/v1/tenants/tenancies/{tenancy.id}/",
         {"status": "terminated"},
         format="json",
     )
 
     assert response.status_code == 403
-    lease.refresh_from_db()
-    assert lease.status == "active"
+    tenancy.refresh_from_db()
+    assert tenancy.status == "active"
 
 
 def test_caretaker_can_view_but_cannot_record_payments(

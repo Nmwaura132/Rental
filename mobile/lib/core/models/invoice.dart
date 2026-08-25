@@ -6,7 +6,7 @@ part 'invoice.g.dart';
 class Invoice {
   final int id;
   final String invoiceNumber;
-  final int lease;
+  final int tenancy;
   final String tenantName;
   final String unitNumber;
   final double amountDue;
@@ -20,7 +20,7 @@ class Invoice {
   const Invoice({
     required this.id,
     required this.invoiceNumber,
-    required this.lease,
+    required this.tenancy,
     required this.tenantName,
     required this.unitNumber,
     required this.amountDue,

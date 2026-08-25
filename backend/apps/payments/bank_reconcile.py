@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 def reconcile_bank_notification(notification, *, invoice_id=None) -> bool:
-    from apps.tenants.models import Lease
+    from apps.tenants.models import Tenancy
 
     from .models import BankPaymentNotification, Invoice, Payment
     from .services import apply_confirmed_payment
@@ -38,13 +38,13 @@ def reconcile_bank_notification(notification, *, invoice_id=None) -> bool:
     if not invoice and invoice_id is None and reference:
         from apps.properties.models import Unit
         unit = Unit.match_reference(reference)
-        lease = Lease.objects.filter(
+        tenancy = Tenancy.objects.filter(
             unit=unit,
-            status=Lease.Status.ACTIVE,
+            status=Tenancy.Status.ACTIVE,
         ).first() if unit else None
-        if lease:
+        if tenancy:
             invoice = Invoice.objects.filter(
-                lease=lease,
+                tenancy=tenancy,
                 status__in=open_statuses,
             ).order_by("due_date").first()
 
@@ -85,8 +85,8 @@ def reconcile_bank_notification(notification, *, invoice_id=None) -> bool:
             from django.core.cache import cache
             from apps.notifications.tasks import send_payment_receipt_sms
 
-            cache.delete(f"dashboard:{invoice.lease.tenant_id}")
-            cache.delete(f"dashboard:{invoice.lease.unit.property.owner_id}")
+            cache.delete(f"dashboard:{invoice.tenancy.tenant_id}")
+            cache.delete(f"dashboard:{invoice.tenancy.unit.property.owner_id}")
             send_payment_receipt_sms.delay(payment.id)
 
         transaction.on_commit(after_commit)

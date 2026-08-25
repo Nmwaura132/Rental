@@ -55,15 +55,15 @@ def send_payment_receipt_sms(self, payment_id):
 
     try:
         payment = Payment.objects.select_related(
-            "invoice__lease__tenant", "invoice__lease__unit__property"
+            "invoice__tenancy__tenant", "invoice__tenancy__unit__property"
         ).get(id=payment_id)
     except Payment.DoesNotExist as exc:
         # WHY: parent transaction may not have committed before this task ran.
         logger.warning("Payment %s not yet visible — retrying.", payment_id)
         raise self.retry(exc=exc, countdown=5)
 
-    tenant = payment.invoice.lease.tenant
-    unit = payment.invoice.lease.unit
+    tenant = payment.invoice.tenancy.tenant
+    unit = payment.invoice.tenancy.unit
     invoice = payment.invoice
 
     message = (
@@ -149,11 +149,11 @@ def send_rent_reminders():
         invoices = Invoice.objects.filter(
             due_date=target_date,
             status__in=[Invoice.Status.PENDING, Invoice.Status.PARTIALLY_PAID],
-        ).select_related("lease__tenant", "lease__unit__property")
+        ).select_related("tenancy__tenant", "tenancy__unit__property")
 
         for invoice in invoices:
-            tenant = invoice.lease.tenant
-            unit = invoice.lease.unit
+            tenant = invoice.tenancy.tenant
+            unit = invoice.tenancy.unit
             balance = invoice.balance
 
             if days == 0:

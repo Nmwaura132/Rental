@@ -1,6 +1,6 @@
 from django.core.exceptions import ValidationError
 from django.db import models
-from apps.tenants.models import Lease
+from apps.tenants.models import Tenancy
 
 
 class Invoice(models.Model):
@@ -11,7 +11,7 @@ class Invoice(models.Model):
         OVERDUE = "overdue", "Overdue"
         CANCELLED = "cancelled", "Cancelled"
 
-    lease = models.ForeignKey(Lease, on_delete=models.PROTECT, related_name="invoices", db_index=True)
+    tenancy = models.ForeignKey(Tenancy, on_delete=models.PROTECT, related_name="invoices", db_index=True)
     invoice_number = models.CharField(max_length=20, unique=True, db_index=True)
     amount_due = models.DecimalField(max_digits=10, decimal_places=2)
     amount_paid = models.DecimalField(max_digits=10, decimal_places=2, default=0)
@@ -30,11 +30,11 @@ class Invoice(models.Model):
             models.CheckConstraint(condition=models.Q(amount_due__gt=0), name="invoice_amount_due_positive"),
             models.CheckConstraint(condition=models.Q(amount_paid__gte=0), name="invoice_amount_paid_nonnegative"),
             models.CheckConstraint(condition=models.Q(period_end__gte=models.F("period_start")), name="invoice_period_valid"),
-            models.UniqueConstraint(fields=["lease", "period_start"], name="invoice_lease_period_unique"),
+            models.UniqueConstraint(fields=["tenancy", "period_start"], name="invoice_tenancy_period_unique"),
         ]
         indexes = [
             models.Index(fields=["status", "due_date"]),
-            models.Index(fields=["lease", "status"]),
+            models.Index(fields=["tenancy", "status"]),
         ]
 
     def __str__(self):

@@ -6,7 +6,7 @@ import 'package:rental_manager/core/api/api_client.dart';
 import 'package:rental_manager/features/payments/reports_screen.dart';
 
 void main() {
-  testWidgets('tenant ledger report sends the selected lease', (tester) async {
+  testWidgets('tenant ledger report sends the selected tenancy', (tester) async {
     tester.view.physicalSize = const Size(1080, 1920);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -26,7 +26,7 @@ void main() {
                 {'id': 10, 'name': 'Kasa Apartments'},
               ],
             };
-          } else if (path == '/api/v1/tenants/leases/') {
+          } else if (path == '/api/v1/tenants/tenancies/') {
             data = {
               'next': null,
               'results': [
@@ -73,7 +73,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(reportQuery?['type'], 'ledger');
-    expect(reportQuery?['lease'], '55');
+    expect(reportQuery?['tenancy'], '55');
     expect(reportQuery?.containsKey('property'), isFalse);
   });
 }
