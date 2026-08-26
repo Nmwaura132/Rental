@@ -252,6 +252,10 @@ class _LandlordBento extends StatelessWidget {
     final month = DateFormat('MMM yyyy').format(DateTime.now()).toUpperCase();
 
     return Column(
+      // Stretch so the hero card fills the width like every row below
+      // it. A Column centres by default, which sized the hero to its
+      // own text — leaving dead space that changed with the figure.
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // ── Hero: Total Revenue ──
         KasaCard(
@@ -415,6 +419,10 @@ class _TenantBento extends StatelessWidget {
         : 'NEXT DUE DATE';
 
     return Column(
+      // Stretch so the hero card fills the width like every row below
+      // it. A Column centres by default, which sized the hero to its
+      // own text — leaving dead space that changed with the figure.
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // ── Hero: Rent Due ──
         KasaCard(
