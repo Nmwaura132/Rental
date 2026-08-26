@@ -10,6 +10,7 @@ import '../../core/api/pagination.dart';
 import '../../core/constants.dart';
 import '../../core/theme/kasa_tokens.dart';
 import '../../core/utils/api_error.dart';
+import '../../core/utils/kra.dart';
 import '../../core/utils/phone.dart';
 import '../../core/widgets/kasa_primitives.dart';
 import '../../shared/widgets/shimmer_loading.dart';
@@ -35,7 +36,12 @@ String _tenancyDisplayStatus(Map<String, dynamic> tenancy) {
 }
 
 class TenantsScreen extends ConsumerStatefulWidget {
-  const TenantsScreen({super.key});
+  const TenantsScreen({super.key, this.startForUnitId});
+
+  /// Arriving from a vacant unit. The screen opens the add-tenant form at once
+  /// and, on success, the tenancy form — so filling a unit is one pass rather
+  /// than three separate trips through the app.
+  final int? startForUnitId;
 
   @override
   ConsumerState<TenantsScreen> createState() => _TenantsScreenState();
@@ -43,6 +49,37 @@ class TenantsScreen extends ConsumerStatefulWidget {
 
 class _TenantsScreenState extends ConsumerState<TenantsScreen> {
   String _filter = 'all';
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.startForUnitId != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _fillUnit());
+    }
+  }
+
+  Future<void> _fillUnit() async {
+    final unitId = widget.startForUnitId!;
+    final createdTenantId = await showDialog<int>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _AddTenantDialog(
+        onDone: () => ref.invalidate(tenanciesProvider),
+        forUnitId: unitId,
+      ),
+    );
+    if (createdTenantId == null || !mounted) return;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _AddTenancyDialog(
+        onDone: () => ref.invalidate(tenanciesProvider),
+        initialTenantId: createdTenantId,
+        initialUnitId: unitId,
+      ),
+    );
+  }
 
   static const _filters = [
     ('all', 'ALL'),
@@ -565,7 +602,12 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
 // ─── Add Tenant Dialog ────────────────────────────────────────────────────────
 
 class _AddTenantDialog extends ConsumerStatefulWidget {
-  const _AddTenantDialog({required this.onDone});
+  const _AddTenantDialog({required this.onDone, this.forUnitId});
+
+  /// Set when started from a vacant unit. On success the tenancy step opens
+  /// straight away with this tenant and unit already chosen, instead of making
+  /// the landlord re-enter what they just filled in.
+  final int? forUnitId;
   final VoidCallback onDone;
 
   @override
@@ -578,6 +620,7 @@ class _AddTenantDialogState extends ConsumerState<_AddTenantDialog> {
   final _lastCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _idCtrl = TextEditingController();
+  final _kraCtrl = TextEditingController();
   final _occupationCtrl = TextEditingController();
   final _kinNameCtrl = TextEditingController();
   final _kinPhoneCtrl = TextEditingController();
@@ -603,6 +646,7 @@ class _AddTenantDialogState extends ConsumerState<_AddTenantDialog> {
     _lastCtrl.dispose();
     _phoneCtrl.dispose();
     _idCtrl.dispose();
+    _kraCtrl.dispose();
     _occupationCtrl.dispose();
     _kinNameCtrl.dispose();
     _kinPhoneCtrl.dispose();
@@ -611,6 +655,24 @@ class _AddTenantDialogState extends ConsumerState<_AddTenantDialog> {
   }
 
   String _normalizePhone(String phone) => normalizeKenyanPhone(phone);
+
+  /// The register endpoint answers with a message and a phone number, not an
+  /// id, so read the list back rather than guessing at it.
+  Future<int?> _findCreatedTenant(String phone) async {
+    try {
+      final rows = await fetchAllPages(
+        ref.read(dioProvider),
+        '/api/v1/auth/tenants/',
+      );
+      for (final r in rows.cast<Map<String, dynamic>>()) {
+        if (r['phone_number'] == phone) return r['id'] as int?;
+      }
+    } catch (_) {
+      // Fall through: the tenant exists either way, the landlord just has to
+      // start the tenancy manually.
+    }
+    return null;
+  }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
@@ -633,6 +695,8 @@ class _AddTenantDialogState extends ConsumerState<_AddTenantDialog> {
         'phone_number': _normalizePhone(_phoneCtrl.text.trim()),
         'role': 'tenant',
         if (_idCtrl.text.trim().isNotEmpty) 'national_id': _idCtrl.text.trim(),
+        if (normalizeKraPin(_kraCtrl.text) != null)
+          'kra_pin': normalizeKraPin(_kraCtrl.text),
         if (occupation != null) 'occupation': occupation,
         if (_kinNameCtrl.text.trim().isNotEmpty)
           'next_of_kin_name': _kinNameCtrl.text.trim(),
@@ -671,9 +735,17 @@ class _AddTenantDialogState extends ConsumerState<_AddTenantDialog> {
       }
 
       widget.onDone();
-      if (mounted) {
-        final messenger = ScaffoldMessenger.of(context);
-        Navigator.pop(context);
+
+      // Started from a vacant unit: hand the new tenant's id back so the caller
+      // can carry straight on to the tenancy. Chaining from inside this dialog
+      // would mean using a context that the pop has already torn down.
+      final createdId =
+          widget.forUnitId == null ? null : await _findCreatedTenant(phone);
+      if (!mounted) return;
+
+      final messenger = ScaffoldMessenger.of(context);
+      Navigator.pop(context, createdId);
+      if (createdId == null) {
         messenger.showSnackBar(const SnackBar(
           content: Text('Tenant registered successfully.'),
           backgroundColor: Colors.green,
@@ -808,6 +880,25 @@ class _AddTenantDialogState extends ConsumerState<_AddTenantDialog> {
                           isDense: true,
                         ),
                         keyboardType: TextInputType.number,
+                      ),
+                      const SizedBox(height: 12),
+
+                      // WHY collected here: eRITS ties each registered property
+                      // to the PIN of whoever occupies it, and a monthly filing
+                      // missing tenant PINs is the thing KRA rejects. Asking at
+                      // move-in is far easier than chasing it on the 19th.
+                      TextFormField(
+                        controller: _kraCtrl,
+                        textCapitalization: TextCapitalization.characters,
+                        inputFormatters: const [UpperCaseTextFormatter()],
+                        decoration: const InputDecoration(
+                          labelText: 'KRA PIN',
+                          hintText: 'e.g. A012345678Z',
+                          helperText: 'Needed for your monthly rental tax filing',
+                          prefixIcon: Icon(Icons.receipt_long_outlined),
+                          isDense: true,
+                        ),
+                        validator: validateKraPin,
                       ),
                       const SizedBox(height: 12),
                       Row(
@@ -954,8 +1045,18 @@ class _AddTenantDialogState extends ConsumerState<_AddTenantDialog> {
 // ─── Add Tenancy Dialog ─────────────────────────────────────────────────────────
 
 class _AddTenancyDialog extends ConsumerStatefulWidget {
-  const _AddTenancyDialog({required this.onDone});
+  const _AddTenancyDialog({
+    required this.onDone,
+    this.initialTenantId,
+    this.initialUnitId,
+  });
   final VoidCallback onDone;
+
+  /// Set when arriving from a unit: the tenant just created, the unit they are
+  /// moving into, and that unit's rent and deposit. Without these the landlord
+  /// would re-pick, from scratch, everything they just told us.
+  final int? initialTenantId;
+  final int? initialUnitId;
 
   @override
   ConsumerState<_AddTenancyDialog> createState() => _AddTenancyDialogState();
@@ -993,7 +1094,25 @@ class _AddTenancyDialogState extends ConsumerState<_AddTenancyDialog> {
   @override
   void initState() {
     super.initState();
+    _selectedTenantId = widget.initialTenantId;
     Future.microtask(_loadInitialData);
+  }
+
+  /// The property dropdown gates the unit dropdown, so arriving with only a
+  /// unit means finding its property first. Reusing the two change handlers
+  /// keeps this on exactly the path a manual selection takes — including
+  /// filling rent and deposit from the unit.
+  void _applyInitialUnit() {
+    final unitId = widget.initialUnitId;
+    if (unitId == null) return;
+    for (final property in _properties) {
+      final units = (property['units'] as List? ?? []).cast<Map<String, dynamic>>();
+      if (units.any((u) => u['id'] == unitId)) {
+        _onPropertyChanged(property['id'] as int);
+        _onUnitChanged(unitId);
+        return;
+      }
+    }
   }
 
   @override
@@ -1023,6 +1142,7 @@ class _AddTenancyDialogState extends ConsumerState<_AddTenancyDialog> {
         }
         _initialLoading = false;
       });
+      _applyInitialUnit();
     } catch (e) {
       if (mounted) {
         setState(() {

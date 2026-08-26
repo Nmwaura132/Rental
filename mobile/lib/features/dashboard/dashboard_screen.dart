@@ -890,6 +890,27 @@ class _ActivityCard extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const _Label('PORTFOLIO SUMMARY'),
+                // Rental income tax sits beside reports because it is the other
+                // thing a landlord leaves this screen to go and do — and it has
+                // a deadline, unlike reports.
+                GestureDetector(
+                  onTap: () => context.push('/tax'),
+                  behavior: HitTestBehavior.opaque,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
+                      child: Text(
+                        'TAX',
+                        style: GoogleFonts.spaceGrotesk(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: cs.kasaTextSub,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
                 // WHY the padding and minimum size: the bare label measured
                 // 49x16dp, well under the 44dp minimum touch target, so it was
                 // a link people had to aim at.

@@ -11,8 +11,10 @@ import 'auth/biometric_service.dart';
 import '../features/dashboard/dashboard_screen.dart';
 import '../features/properties/properties_screen.dart';
 import '../features/properties/property_detail_screen.dart';
+import '../features/properties/unit_detail_screen.dart';
 import '../features/payments/invoices_screen.dart';
 import '../features/payments/reports_screen.dart';
+import '../features/payments/tax_screen.dart';
 import '../features/notifications/notifications_screen.dart';
 import '../features/tenants/tenants_screen.dart';
 import '../features/maintenance/maintenance_screen.dart';
@@ -60,7 +62,9 @@ final routerProvider = Provider<GoRouter>((ref) {
       if (isLoggedIn) {
         // Use cached Riverpod future so we bypass platform channel overhead on every navigation hop
         final role = await ref.read(userRoleProvider.future);
-        const tenantRestricted = ['/properties', '/tenants', '/reports'];
+        // /tax is the landlord's own KRA liability; the API refuses it for
+        // anyone else, so routing a tenant there would only show them a 403.
+        const tenantRestricted = ['/properties', '/tenants', '/reports', '/tax'];
         if (role == 'tenant' &&
             tenantRestricted.any(
                 (p) => state.matchedLocation.startsWith(p))) {
@@ -81,6 +85,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/notifications', builder: (_, __) => const NotificationsScreen()),
       GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
       GoRoute(path: '/reports', builder: (_, __) => const ReportsScreen()),
+      GoRoute(path: '/tax', builder: (_, __) => const TaxScreen()),
         
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) => MainShell(navigationShell: navigationShell),
@@ -102,6 +107,17 @@ final routerProvider = Provider<GoRouter>((ref) {
                       final id = int.tryParse(state.pathParameters['id'] ?? '') ?? 0;
                       return PropertyDetailScreen(propertyId: id);
                     },
+                    routes: [
+                      GoRoute(
+                        path: 'units/:unitId',
+                        builder: (context, state) {
+                          final unitId = int.tryParse(
+                                  state.pathParameters['unitId'] ?? '') ??
+                              0;
+                          return UnitDetailScreen(unitId: unitId);
+                        },
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -109,7 +125,13 @@ final routerProvider = Provider<GoRouter>((ref) {
           ),
           StatefulShellBranch(
             routes: [
-              GoRoute(path: '/tenants', builder: (_, __) => const TenantsScreen()),
+              GoRoute(
+                path: '/tenants',
+                builder: (_, state) => TenantsScreen(
+                  startForUnitId:
+                      int.tryParse(state.uri.queryParameters['unit'] ?? ''),
+                ),
+              ),
             ],
           ),
           StatefulShellBranch(

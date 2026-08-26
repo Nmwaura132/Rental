@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/api/api_client.dart';
 import '../../core/constants.dart';
@@ -245,6 +246,9 @@ class _PropertyDetailView extends ConsumerWidget {
                           unit: u,
                           status: uStatus,
                           canManage: canManage,
+                          onOpen: () => context.push(
+                            '/properties/$propertyId/units/${u['id']}',
+                          ),
                           onEdit: () => showDialog(
                             context: context,
                             barrierDismissible: false,
@@ -360,11 +364,17 @@ class _UnitCard extends StatelessWidget {
     required this.canManage,
     required this.onEdit,
     required this.onDelete,
+    required this.onOpen,
   });
   final Map<String, dynamic> unit;
   final String status;
   final bool canManage;
   final VoidCallback onEdit, onDelete;
+
+  /// Opens the unit's own screen. The row has always looked like a list item;
+  /// until now only the overflow menu did anything, so tapping the row itself
+  /// did nothing at all.
+  final VoidCallback onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -376,7 +386,10 @@ class _UnitCard extends StatelessWidget {
       _             => (cs.kasaTextSub, KasaChipVariant.neutral,   'VACANT'),
     };
 
-    return Container(
+    return GestureDetector(
+      onTap: onOpen,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(KasaRadius.md),
         boxShadow: [BoxShadow(color: cs.kasaShadow, offset: const Offset(4, 4), blurRadius: 0)],
@@ -454,6 +467,7 @@ class _UnitCard extends StatelessWidget {
             ),
           ),
         ),
+      ),
       ),
     );
   }
