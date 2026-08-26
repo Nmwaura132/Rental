@@ -132,41 +132,66 @@ def send_whatsapp(self, recipient_id, message, media_url=None):
         raise self.retry(exc=exc)
 
 
+# Days before the due date to remind on, and days after it to chase on.
+# Fixed offsets rather than "every day while unpaid" so a late tenant gets
+# chased without being texted daily.
+REMINDER_DAYS_BEFORE = [7, 3, 0]
+CHASE_DAYS_AFTER = [3, 7, 14]
+
+# WHY OVERDUE is included: mark_overdue_invoices runs at 00:05 and flips a late
+# invoice out of PENDING, so a status filter of PENDING/PARTIALLY_PAID alone
+# went silent from the morning after the due date onwards — reminders stopped
+# exactly when the tenant had actually failed to pay.
+_UNPAID = [
+    "pending",
+    "partially_paid",
+    "overdue",
+]
+
+
 @shared_task
 def send_rent_reminders():
-    """
-    Celery Beat task — runs daily.
-    Sends SMS reminders for invoices due in 7 days, 3 days, and today.
+    """Celery Beat task — runs daily.
+
+    Reminds before rent is due, and keeps chasing after it falls late.
     """
     from apps.payments.models import Invoice
     from datetime import timedelta
 
-    today = timezone.now().date()
-    reminder_days = [7, 3, 0]
+    today = timezone.localdate()
 
-    for days in reminder_days:
+    for days in REMINDER_DAYS_BEFORE + [-d for d in CHASE_DAYS_AFTER]:
         target_date = today + timedelta(days=days)
         invoices = Invoice.objects.filter(
             due_date=target_date,
-            status__in=[Invoice.Status.PENDING, Invoice.Status.PARTIALLY_PAID],
+            status__in=_UNPAID,
         ).select_related("tenancy__tenant", "tenancy__unit__property")
 
         for invoice in invoices:
             tenant = invoice.tenancy.tenant
             unit = invoice.tenancy.unit
             balance = invoice.balance
+            where = f"{unit.property.name} Unit {unit.unit_number}"
+            how = (
+                f"Pay via M-Pesa Paybill {settings.MPESA_SHORTCODE}, "
+                f"Acc: {unit.payment_code}."
+            )
 
-            if days == 0:
+            if days > 0:
                 msg = (
                     f"Dear {tenant.first_name}, your rent of KES {balance:,.0f} "
-                    f"for {unit.property.name} Unit {unit.unit_number} is due TODAY. "
-                    f"Pay via M-Pesa Paybill {settings.MPESA_SHORTCODE}, Acc: {unit.payment_code}."
+                    f"for {where} is due in {days} days. {how}"
+                )
+            elif days == 0:
+                msg = (
+                    f"Dear {tenant.first_name}, your rent of KES {balance:,.0f} "
+                    f"for {where} is due TODAY. {how}"
                 )
             else:
+                late = -days
                 msg = (
                     f"Dear {tenant.first_name}, your rent of KES {balance:,.0f} "
-                    f"for {unit.property.name} Unit {unit.unit_number} is due in {days} days. "
-                    f"Pay via M-Pesa Paybill {settings.MPESA_SHORTCODE}, Acc: {unit.payment_code}."
+                    f"for {where} is {late} days overdue. {how}"
                 )
 
             send_sms.delay(tenant.id, msg)
