@@ -120,7 +120,7 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
             permission_classes=[IsLandlord])
     def record_payment(self, request):
         """
-        Manually record a cash or bank payment — landlords/caretakers only.
+        Manually record a cash or bank payment — landlords only.
         Tenants pay via STK Push. Body: { invoice, method, amount }
         """
         invoice_id = request.data.get("invoice")
@@ -155,6 +155,26 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
 
         try:
             invoice = _invoice_qs_for_user(request.user).get(id=invoice_id)
+
+            # WHY only on the manual path: an M-Pesa or bank payment has already
+            # happened, so refusing it would lose a real receipt. A figure typed
+            # in by hand has not, and one exceeding the balance is a slip or a
+            # false entry — and because confirmed payments are immutable, it
+            # cannot be corrected afterwards. Sending the excess to the invoice
+            # it belongs to also keeps the KRA rent roll honest.
+            outstanding = invoice.amount_due - (invoice.amount_paid or Decimal("0"))
+            if amount > outstanding:
+                return Response(
+                    {
+                        "error": (
+                            f"That is more than this invoice is owed. Outstanding "
+                            f"balance is KES {outstanding:,.2f}. Record the excess "
+                            f"against the invoice it belongs to."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
             payment, _ = apply_confirmed_payment(
                 invoice_id=invoice.pk,
                 method=method,
@@ -162,6 +182,9 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
                 idempotency_key=f"{method}:{uuid.uuid4().hex}",
                 paid_at=timezone.now(),
                 payment_fields=bank_fields,
+                # A hand-entered payment is permanent and cannot be edited, so
+                # the record has to say who entered it.
+                recorded_by=request.user,
             )
         except Invoice.DoesNotExist:
             return Response({"error": "Invoice not found."}, status=status.HTTP_404_NOT_FOUND)

@@ -1,4 +1,5 @@
 from django.core.exceptions import ValidationError
+from django.conf import settings
 from django.db import models
 from apps.tenants.models import Tenancy
 
@@ -78,6 +79,19 @@ class Payment(models.Model):
 
     # Idempotency — prevents double-recording webhook retries
     idempotency_key = models.CharField(max_length=60, unique=True, db_index=True)
+
+    # WHY: a confirmed payment cannot be edited or deleted, so a cash entry made
+    # by hand is permanent. Without this it was also anonymous — the record said
+    # money arrived but not who said so. Null for payments that arrived through
+    # M-Pesa or a bank feed, where no person entered them.
+    recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="recorded_payments",
+        help_text="The user who entered this payment by hand, if anyone did.",
+    )
 
     paid_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

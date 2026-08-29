@@ -363,7 +363,26 @@ def poll_equity_statement(date_from: str | None = None, date_to: str | None = No
 
         try:
             from decimal import Decimal
-            amount = Decimal(str(txn.get("amount", txn.get("runningBalance", 0))))
+            # WHY not fall back to runningBalance: that is the account balance
+            # after the transaction, not the transaction. Substituting it would
+            # record a payment of the whole account balance — off by orders of
+            # magnitude — rather than admitting the figure is missing. A
+            # statement line with no amount is skipped and logged instead.
+            raw_amount = txn.get("amount")
+            if raw_amount is None:
+                logger.warning(
+                    "Equity statement txn %s has no amount; skipping rather than guessing.",
+                    ref,
+                )
+                continue
+            amount = Decimal(str(raw_amount))
+            if amount <= 0:
+                logger.warning(
+                    "Equity statement txn %s has non-positive amount %s; skipping.",
+                    ref,
+                    amount,
+                )
+                continue
             date_str = txn.get("date", txn.get("transactionDate", ""))
             from datetime import timezone
             from django.utils import timezone as dj_timezone

@@ -16,6 +16,29 @@ User = get_user_model()
 
 
 @pytest.fixture(autouse=True)
+def isolated_cache(settings):
+    """Give every test its own cache.
+
+    WHY: the app cache is Redis, and the test suite was pointed at the same
+    instance the dev stack uses. Anything a test left behind — a password-reset
+    OTP, an attempt counter, a throttle bucket — survived into the next test and
+    the next run, so results depended on execution order and on what had been
+    run earlier that day. A locmem cache per test removes the shared state.
+    """
+    settings.CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "kasa-tests",
+        }
+    }
+    from django.core.cache import cache
+
+    cache.clear()
+    yield
+    cache.clear()
+
+
+@pytest.fixture(autouse=True)
 def isolate_external_celery_tasks(monkeypatch):
     from apps.notifications.tasks import send_payment_receipt_sms, send_sms
 

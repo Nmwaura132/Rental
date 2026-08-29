@@ -26,6 +26,7 @@ def apply_confirmed_payment(
     idempotency_key: str,
     paid_at,
     payment_fields: dict | None = None,
+    recorded_by=None,
 ) -> tuple[Payment, bool]:
     amount = Decimal(str(amount))
     if amount <= 0:
@@ -47,6 +48,7 @@ def apply_confirmed_payment(
         amount=amount,
         idempotency_key=idempotency_key,
         paid_at=paid_at,
+        recorded_by=recorded_by,
         **(payment_fields or {}),
     )
     invoice.amount_paid = (invoice.amount_paid or Decimal("0")) + amount

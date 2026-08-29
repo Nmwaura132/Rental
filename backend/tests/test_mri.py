@@ -17,7 +17,15 @@ from apps.payments.models import Invoice, Payment
 
 
 PERIOD_START = date.today().replace(day=1)
-PERIOD_END = PERIOD_START + timedelta(days=27)
+# The real end of this month, not a fixed 27 days on. An earlier version used
+# PERIOD_START + 27 days, which stops at the 28th — so a payment made on the
+# 29th, 30th or 31st fell outside the window and the suite failed only on those
+# dates.
+PERIOD_END = (
+    PERIOD_START.replace(year=PERIOD_START.year + 1, month=1)
+    if PERIOD_START.month == 12
+    else PERIOD_START.replace(month=PERIOD_START.month + 1)
+) - timedelta(days=1)
 
 
 def _confirm(invoice, amount, *, key, when=None):
