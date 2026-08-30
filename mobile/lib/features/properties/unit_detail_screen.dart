@@ -9,6 +9,7 @@ import '../../core/theme/kasa_tokens.dart';
 import '../../core/utils/api_error.dart';
 import '../../core/utils/currency.dart';
 import '../../core/widgets/kasa_primitives.dart';
+import '../tenants/tenants_screen.dart';
 
 final unitOccupancyProvider = FutureProvider.autoDispose
     .family<Map<String, dynamic>, int>((ref, unitId) async {
@@ -81,13 +82,13 @@ class UnitDetailScreen extends ConsumerWidget {
 
 // ─── Vacant ───────────────────────────────────────────────────────────────────
 
-class _VacantUnit extends StatelessWidget {
+class _VacantUnit extends ConsumerWidget {
   const _VacantUnit({required this.data, required this.unitId});
   final Map<String, dynamic> data;
   final int unitId;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final cs = Theme.of(context).colorScheme;
     final unit = data['unit'] as Map<String, dynamic>;
 
@@ -117,10 +118,13 @@ class _VacantUnit extends StatelessWidget {
         KasaButton(
           label: 'ADD TENANT',
           variant: KasaButtonVariant.primary,
-          // Carries the unit through, so the tenancy step opens already
-          // knowing where this tenant is going. Rent and deposit are read from
-          // the unit there rather than passed, so they cannot disagree with it.
-          onTap: () => context.push('/tenants?unit=$unitId'),
+          // Runs both steps here rather than routing to the tenants tab: that
+          // tab is a shell branch, and pushing it from inside the properties
+          // branch only bounced back to the property list.
+          onTap: () async {
+            await startTenancyForUnit(context, ref, unitId);
+            ref.invalidate(unitOccupancyProvider(unitId));
+          },
         ),
       ],
     );

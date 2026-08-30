@@ -35,13 +35,56 @@ String _tenancyDisplayStatus(Map<String, dynamic> tenancy) {
   return 'active';
 }
 
-class TenantsScreen extends ConsumerStatefulWidget {
-  const TenantsScreen({super.key, this.startForUnitId});
+/// Runs add-tenant, then add-tenancy, for one specific unit.
+///
+/// WHY this is a function rather than a route: /tenants is a branch of the
+/// bottom-nav shell, and pushing a branch route from inside another branch does
+/// not open it — go_router resolves it back to the current branch's root, so
+/// the button appeared to do nothing but return to the property list. Showing
+/// the dialogs directly keeps the landlord on the unit they started from.
+Future<void> startTenancyForUnit(
+  BuildContext context,
+  WidgetRef ref,
+  int unitId,
+) async {
+  // WHY a route and not showDialog: _AddTenantForm is a page body, not a
+  // dialog — it expects the Scaffold to supply the Material ancestor its
+  // TextFields need. Handing it to showDialog produced "No Material widget
+  // found" across the whole form.
+  final createdTenantId =
+      await Navigator.of(context, rootNavigator: true).push<int>(
+    MaterialPageRoute(
+      fullscreenDialog: true,
+      builder: (ctx) => Scaffold(
+        appBar: AppBar(
+          title: const Text('Add Tenant'),
+          leading: IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: () => Navigator.of(ctx).pop(),
+          ),
+        ),
+        body: _AddTenantForm(
+          onDone: () => ref.invalidate(tenanciesProvider),
+          forUnitId: unitId,
+        ),
+      ),
+    ),
+  );
+  if (createdTenantId == null || !context.mounted) return;
 
-  /// Arriving from a vacant unit. The screen opens the add-tenant form at once
-  /// and, on success, the tenancy form — so filling a unit is one pass rather
-  /// than three separate trips through the app.
-  final int? startForUnitId;
+  await showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => _AddTenancyDialog(
+      onDone: () => ref.invalidate(tenanciesProvider),
+      initialTenantId: createdTenantId,
+      initialUnitId: unitId,
+    ),
+  );
+}
+
+class TenantsScreen extends ConsumerStatefulWidget {
+  const TenantsScreen({super.key});
 
   @override
   ConsumerState<TenantsScreen> createState() => _TenantsScreenState();
@@ -49,37 +92,6 @@ class TenantsScreen extends ConsumerStatefulWidget {
 
 class _TenantsScreenState extends ConsumerState<TenantsScreen> {
   String _filter = 'all';
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.startForUnitId != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _fillUnit());
-    }
-  }
-
-  Future<void> _fillUnit() async {
-    final unitId = widget.startForUnitId!;
-    final createdTenantId = await showDialog<int>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => _AddTenantDialog(
-        onDone: () => ref.invalidate(tenanciesProvider),
-        forUnitId: unitId,
-      ),
-    );
-    if (createdTenantId == null || !mounted) return;
-
-    await showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => _AddTenancyDialog(
-        onDone: () => ref.invalidate(tenanciesProvider),
-        initialTenantId: createdTenantId,
-        initialUnitId: unitId,
-      ),
-    );
-  }
 
   static const _filters = [
     ('all', 'ALL'),
@@ -582,7 +594,7 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                 onPressed: () => Navigator.of(ctx).pop(),
               ),
             ),
-            body: _AddTenantDialog(
+            body: _AddTenantForm(
               onDone: () => ref.invalidate(tenanciesProvider),
             ),
           ),
@@ -603,8 +615,8 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
 
 // ─── Add Tenant Dialog ────────────────────────────────────────────────────────
 
-class _AddTenantDialog extends ConsumerStatefulWidget {
-  const _AddTenantDialog({required this.onDone, this.forUnitId});
+class _AddTenantForm extends ConsumerStatefulWidget {
+  const _AddTenantForm({required this.onDone, this.forUnitId});
 
   /// Set when started from a vacant unit. On success the tenancy step opens
   /// straight away with this tenant and unit already chosen, instead of making
@@ -613,10 +625,10 @@ class _AddTenantDialog extends ConsumerStatefulWidget {
   final VoidCallback onDone;
 
   @override
-  ConsumerState<_AddTenantDialog> createState() => _AddTenantDialogState();
+  ConsumerState<_AddTenantForm> createState() => _AddTenantFormState();
 }
 
-class _AddTenantDialogState extends ConsumerState<_AddTenantDialog> {
+class _AddTenantFormState extends ConsumerState<_AddTenantForm> {
   final _formKey = GlobalKey<FormState>();
   final _firstCtrl = TextEditingController();
   final _lastCtrl = TextEditingController();
@@ -633,6 +645,32 @@ class _AddTenantDialogState extends ConsumerState<_AddTenantDialog> {
   XFile? _idFrontPhoto;
   XFile? _idBackPhoto;
   final _picker = ImagePicker();
+
+  // Set only when the landlord started from a vacant unit, in which case this
+  // form also opens the tenancy — the unit, rent and deposit are already known,
+  // so asking for them again on a second screen was pure repetition.
+  DateTime _startDate = DateTime.now();
+  bool _depositPaid = false;
+  Map<String, dynamic>? _unit;
+  final _uiDate = DateFormat('dd MMM yyyy');
+  final _apiDateFmt = DateFormat('yyyy-MM-dd');
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.forUnitId != null) _loadUnit();
+  }
+
+  Future<void> _loadUnit() async {
+    try {
+      final res = await ref
+          .read(dioProvider)
+          .get('/api/v1/properties/units/${widget.forUnitId}/');
+      if (mounted) setState(() => _unit = Map<String, dynamic>.from(res.data));
+    } catch (_) {
+      // Falling back to the two-step flow is handled at submit time.
+    }
+  }
 
   static const _occupationTypes = [
     'Employed',
@@ -674,6 +712,30 @@ class _AddTenantDialogState extends ConsumerState<_AddTenantDialog> {
       // start the tenancy manually.
     }
     return null;
+  }
+
+  /// Opens the tenancy on the unit the landlord started from. Returns the
+  /// message to show, or null if it could not be created.
+  Future<String?> _openTenancy(int tenantId) async {
+    final rent = _unit!['rent_amount'];
+    final deposit = _unit!['deposit_amount'];
+    try {
+      await ref.read(dioProvider).post('/api/v1/tenants/tenancies/', data: {
+        'tenant': tenantId,
+        'unit': widget.forUnitId,
+        'start_date': _apiDateFmt.format(_startDate),
+        'rent_amount': rent,
+        'deposit_amount': deposit,
+        'deposit_paid': _depositPaid,
+      });
+    } catch (_) {
+      return null;
+    }
+    final total = _depositPaid
+        ? (num.tryParse('$rent') ?? 0)
+        : (num.tryParse('$rent') ?? 0) + (num.tryParse('$deposit') ?? 0);
+    return 'Tenant added. Invoice of '
+        'KES ${NumberFormat('#,###').format(total)} sent to them.';
   }
 
   Future<void> _submit() async {
@@ -738,21 +800,27 @@ class _AddTenantDialogState extends ConsumerState<_AddTenantDialog> {
 
       widget.onDone();
 
-      // Started from a vacant unit: hand the new tenant's id back so the caller
-      // can carry straight on to the tenancy. Chaining from inside this dialog
-      // would mean using a context that the pop has already torn down.
       final createdId =
           widget.forUnitId == null ? null : await _findCreatedTenant(phone);
+
+      // Started from a vacant unit, and we know the unit's terms: open the
+      // tenancy here rather than sending the landlord to a second screen that
+      // would only ask for what this one already has. The backend raises the
+      // move-in invoice from it.
+      String? billed;
+      if (createdId != null && _unit != null) {
+        billed = await _openTenancy(createdId);
+      }
       if (!mounted) return;
 
       final messenger = ScaffoldMessenger.of(context);
-      Navigator.pop(context, createdId);
-      if (createdId == null) {
-        messenger.showSnackBar(const SnackBar(
-          content: Text('Tenant registered successfully.'),
-          backgroundColor: Colors.green,
-        ));
-      }
+      // A null id, or a unit we could not read, leaves the caller to run the
+      // tenancy step by hand — that is what it falls back to.
+      Navigator.pop(context, billed == null ? createdId : null);
+      messenger.showSnackBar(SnackBar(
+        content: Text(billed ?? 'Tenant registered successfully.'),
+        backgroundColor: Colors.green,
+      ));
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -1004,6 +1072,48 @@ class _AddTenantDialogState extends ConsumerState<_AddTenantDialog> {
                         style: TextStyle(fontSize: 11, color: Colors.grey),
                       ),
                       const SizedBox(height: 4),
+                      if (widget.forUnitId != null) ...[
+                        _sectionLabel('Tenancy'),
+                        if (_unit != null)
+                          _MoveInSummary(
+                            unit: _unit!,
+                            depositPaid: _depositPaid,
+                          ),
+                        const SizedBox(height: 8),
+                        InkWell(
+                          onTap: () async {
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: _startDate,
+                              firstDate: DateTime(2020),
+                              lastDate: DateTime.now()
+                                  .add(const Duration(days: 365)),
+                            );
+                            if (picked != null) {
+                              setState(() => _startDate = picked);
+                            }
+                          },
+                          child: InputDecorator(
+                            decoration: const InputDecoration(
+                              labelText: 'Move-in date',
+                              prefixIcon: Icon(Icons.event),
+                              isDense: true,
+                            ),
+                            child: Text(_uiDate.format(_startDate)),
+                          ),
+                        ),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          value: _depositPaid,
+                          onChanged: (v) => setState(() => _depositPaid = v),
+                          title: const Text('Deposit already paid'),
+                          subtitle: const Text(
+                            'Leave off to bill it with the first rent',
+                            style: TextStyle(fontSize: 11),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                      ],
                     ],
                   ),
                 ),
@@ -1491,6 +1601,68 @@ class _IdPhotoTile extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// What the tenant will be billed to move in. Shown before the landlord
+/// commits, so the figures are never a surprise on either side.
+class _MoveInSummary extends StatelessWidget {
+  const _MoveInSummary({required this.unit, required this.depositPaid});
+
+  final Map<String, dynamic> unit;
+  final bool depositPaid;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final money = NumberFormat('#,###');
+    final rent = num.tryParse('${unit['rent_amount']}') ?? 0;
+    final deposit = num.tryParse('${unit['deposit_amount']}') ?? 0;
+    final total = depositPaid ? rent : rent + deposit;
+
+    Widget row(String label, String value, {bool strong = false}) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 3),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: strong ? cs.onSurface : cs.kasaTextSub,
+                  fontWeight: strong ? FontWeight.w700 : FontWeight.w400,
+                ),
+              ),
+              Text(
+                value,
+                style: GoogleFonts.spaceGrotesk(
+                  fontSize: strong ? 14 : 12,
+                  fontWeight: strong ? FontWeight.w700 : FontWeight.w500,
+                  color: cs.onSurface,
+                ),
+              ),
+            ],
+          ),
+        );
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: cs.kasaElev,
+        borderRadius: BorderRadius.circular(KasaRadius.sm),
+        border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
+      ),
+      child: Column(
+        children: [
+          row('Unit ${unit['unit_number']} — first month rent',
+              'KES ${money.format(rent)}'),
+          if (!depositPaid)
+            row('Security deposit', 'KES ${money.format(deposit)}'),
+          const Divider(height: 14),
+          row('Invoice to tenant', 'KES ${money.format(total)}', strong: true),
+        ],
+      ),
     );
   }
 }

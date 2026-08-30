@@ -125,13 +125,7 @@ final routerProvider = Provider<GoRouter>((ref) {
           ),
           StatefulShellBranch(
             routes: [
-              GoRoute(
-                path: '/tenants',
-                builder: (_, state) => TenantsScreen(
-                  startForUnitId:
-                      int.tryParse(state.uri.queryParameters['unit'] ?? ''),
-                ),
-              ),
+              GoRoute(path: '/tenants', builder: (_, __) => const TenantsScreen()),
             ],
           ),
           StatefulShellBranch(
