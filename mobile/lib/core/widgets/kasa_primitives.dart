@@ -394,3 +394,31 @@ class KasaAvatar extends StatelessWidget {
     );
   }
 }
+
+// ─── KasaContentSwitcher ──────────────────────────────────────────────────────
+
+/// Crossfades between a list screen's loading, error and loaded states.
+///
+/// WHY shared rather than inline at each screen: only one of the four list
+/// screens had a transition at all, and that one used AnimatedSwitcher's
+/// default curve, which is linear — a mechanical-looking fade. Keeping the
+/// duration and curve in one place stops the four drifting apart again.
+class KasaContentSwitcher extends StatelessWidget {
+  const KasaContentSwitcher({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    // Skipped entirely when the viewer has asked for less motion; the content
+    // still swaps, it just does not fade.
+    if (MediaQuery.of(context).disableAnimations) return child;
+
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 260),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      child: child,
+    );
+  }
+}

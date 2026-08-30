@@ -156,259 +156,201 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
           ),
           const SizedBox(height: 10),
           Expanded(
-            child: tenancies.when(
-              loading: () => const SkeletonList(),
-              error: (e, _) => Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.cloud_off_outlined, size: 56, color: cs.kasaTextSub),
-                    const SizedBox(height: 12),
-                    Text(apiError(e),
-                        style: GoogleFonts.inter(color: cs.kasaTextSub)),
-                    const SizedBox(height: 16),
-                    KasaButton(
-                      label: 'RETRY',
-                      variant: KasaButtonVariant.ghost,
-                      leading: Icon(Icons.refresh, size: 16, color: cs.secondary),
-                      onTap: () => ref.invalidate(tenanciesProvider),
-                    ),
-                  ],
+            child: KasaContentSwitcher(
+              child: tenancies.when(
+                loading: () => const SkeletonList(),
+                error: (e, _) => Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.cloud_off_outlined, size: 56, color: cs.kasaTextSub),
+                      const SizedBox(height: 12),
+                      Text(apiError(e),
+                          style: GoogleFonts.inter(color: cs.kasaTextSub)),
+                      const SizedBox(height: 16),
+                      KasaButton(
+                        label: 'RETRY',
+                        variant: KasaButtonVariant.ghost,
+                        leading: Icon(Icons.refresh, size: 16, color: cs.secondary),
+                        onTap: () => ref.invalidate(tenanciesProvider),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              data: (raw) {
-                final list = _applyFilter(raw);
-                return list.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.people_outline, size: 64, color: cs.kasaTextSub),
-                            const SizedBox(height: 12),
-                            Text(
-                              raw.isEmpty ? 'No tenants yet.' : 'No results.',
-                              style: GoogleFonts.spaceGrotesk(
-                                  fontWeight: FontWeight.w700,
-                                  color: cs.kasaTextSub)),
-                            const SizedBox(height: 4),
-                            Text(
-                              raw.isEmpty ? 'Tap ADD to register a tenant.' : 'Try a different filter.',
-                              style: GoogleFonts.inter(
-                                  fontSize: 12, color: cs.kasaTextSub)),
-                          ],
-                        ),
-                      )
-                    : RefreshIndicator(
-                        onRefresh: () => ref.refresh(tenanciesProvider.future),
-                        child: ListView.builder(
-                          padding: const EdgeInsets.fromLTRB(20, 4, 20, 100),
-                          itemCount: list.length,
-                          itemBuilder: (_, i) {
-                            final tenancy = list[i];
-                            final name =
-                                tenancy['tenant_name'] as String? ?? 'Unknown';
-                            final apiStatus = tenancy['status'] as String? ?? 'unknown';
-                            final displayStatus = _tenancyDisplayStatus(tenancy);
-                            final property = tenancy['property_name'] as String? ?? '';
-                            final unit = tenancy['unit_number'] as String? ?? '';
-                            final phone = tenancy['tenant_phone'] as String?;
-                            final rent = tenancy['rent_amount'];
-                            final endDate = tenancy['end_date'] as String?;
+                data: (raw) {
+                  final list = _applyFilter(raw);
+                  return list.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.people_outline, size: 64, color: cs.kasaTextSub),
+                              const SizedBox(height: 12),
+                              Text(
+                                raw.isEmpty ? 'No tenants yet.' : 'No results.',
+                                style: GoogleFonts.spaceGrotesk(
+                                    fontWeight: FontWeight.w700,
+                                    color: cs.kasaTextSub)),
+                              const SizedBox(height: 4),
+                              Text(
+                                raw.isEmpty ? 'Tap ADD to register a tenant.' : 'Try a different filter.',
+                                style: GoogleFonts.inter(
+                                    fontSize: 12, color: cs.kasaTextSub)),
+                            ],
+                          ),
+                        )
+                      : RefreshIndicator(
+                          onRefresh: () => ref.refresh(tenanciesProvider.future),
+                          child: ListView.builder(
+                            padding: const EdgeInsets.fromLTRB(20, 4, 20, 100),
+                            itemCount: list.length,
+                            itemBuilder: (_, i) {
+                              final tenancy = list[i];
+                              final name =
+                                  tenancy['tenant_name'] as String? ?? 'Unknown';
+                              final apiStatus = tenancy['status'] as String? ?? 'unknown';
+                              final displayStatus = _tenancyDisplayStatus(tenancy);
+                              final property = tenancy['property_name'] as String? ?? '';
+                              final unit = tenancy['unit_number'] as String? ?? '';
+                              final phone = tenancy['tenant_phone'] as String?;
+                              final rent = tenancy['rent_amount'];
+                              final endDate = tenancy['end_date'] as String?;
 
-                            // Design: overdue→primary, ending→tertiary, active→secondary
-                            final chipVariant = displayStatus == 'ending'
-                                ? KasaChipVariant.tertiary
-                                : displayStatus == 'past'
-                                    ? KasaChipVariant.neutral
-                                    : KasaChipVariant.secondary;
-                            final chipLabel = displayStatus == 'ending'
-                                ? 'ENDING'
-                                : displayStatus == 'past'
-                                    ? apiStatus.toUpperCase()
-                                    : 'ACTIVE';
+                              // Design: overdue→primary, ending→tertiary, active→secondary
+                              final chipVariant = displayStatus == 'ending'
+                                  ? KasaChipVariant.tertiary
+                                  : displayStatus == 'past'
+                                      ? KasaChipVariant.neutral
+                                      : KasaChipVariant.secondary;
+                              final chipLabel = displayStatus == 'ending'
+                                  ? 'ENDING'
+                                  : displayStatus == 'past'
+                                      ? apiStatus.toUpperCase()
+                                      : 'ACTIVE';
 
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 10),
-                              child: KasaCard(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 14, vertical: 12),
-                                onTap: null,
-                                child: Row(
-                                  children: [
-                                    KasaAvatar(
-                                      name: name,
-                                      size: 48,
-                                      accent: KasaCardAccent.secondary,
-                                    ),
-                                    const SizedBox(width: 14),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Row(
-                                            children: [
-                                              Expanded(
-                                                child: Text(
-                                                  name.toUpperCase(),
-                                                  style: GoogleFonts.spaceGrotesk(
-                                                    fontSize: 14,
-                                                    fontWeight: FontWeight.w700,
-                                                    color: cs.onSurface,
-                                                    letterSpacing: -0.14,
-                                                  ),
-                                                  maxLines: 1,
-                                                  overflow: TextOverflow.ellipsis,
-                                                ),
-                                              ),
-                                              const SizedBox(width: 6),
-                                              KasaChip(
-                                                label: chipLabel,
-                                                variant: chipVariant,
-                                                small: true,
-                                              ),
-                                            ],
-                                          ),
-                                          if (property.isNotEmpty || unit.isNotEmpty) ...[
-                                            const SizedBox(height: 2),
-                                            Text(
-                                              'UNIT $unit · $property'.toUpperCase(),
-                                              style: GoogleFonts.inter(
-                                                fontSize: 11,
-                                                color: cs.kasaTextSub,
-                                                fontWeight: FontWeight.w500,
-                                              ),
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ],
-                                          if (rent != null || endDate != null) ...[
-                                            const SizedBox(height: 6),
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: KasaCard(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 14, vertical: 12),
+                                  onTap: null,
+                                  child: Row(
+                                    children: [
+                                      KasaAvatar(
+                                        name: name,
+                                        size: 48,
+                                        accent: KasaCardAccent.secondary,
+                                      ),
+                                      const SizedBox(width: 14),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
                                             Row(
                                               children: [
-                                                if (endDate != null) ...[
-                                                  Text(
-                                                    'TENANCY: $endDate',
+                                                Expanded(
+                                                  child: Text(
+                                                    name.toUpperCase(),
                                                     style: GoogleFonts.spaceGrotesk(
-                                                      fontSize: 10,
+                                                      fontSize: 14,
                                                       fontWeight: FontWeight.w700,
-                                                      color: cs.kasaTextSub,
+                                                      color: cs.onSurface,
+                                                      letterSpacing: -0.14,
                                                     ),
+                                                    maxLines: 1,
+                                                    overflow: TextOverflow.ellipsis,
                                                   ),
-                                                  Text(
-                                                    '  |  ',
-                                                    style: TextStyle(color: cs.kasaTextSub, fontSize: 10),
-                                                  ),
-                                                ],
-                                                if (rent != null)
-                                                  Text(
-                                                    'KES ${rent.toString().replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')}',
-                                                    style: GoogleFonts.spaceGrotesk(
-                                                      fontSize: 10,
-                                                      fontWeight: FontWeight.w700,
-                                                      color: cs.kasaTextSub,
-                                                    ),
-                                                  ),
+                                                ),
+                                                const SizedBox(width: 6),
+                                                KasaChip(
+                                                  label: chipLabel,
+                                                  variant: chipVariant,
+                                                  small: true,
+                                                ),
                                               ],
                                             ),
-                                          ],
-                                          if (phone != null) ...[
-                                            const SizedBox(height: 2),
-                                            Text(
-                                              phone,
-                                              style: GoogleFonts.jetBrainsMono(
-                                                fontSize: 11,
-                                                color: cs.kasaTextSub,
+                                            if (property.isNotEmpty || unit.isNotEmpty) ...[
+                                              const SizedBox(height: 2),
+                                              Text(
+                                                'UNIT $unit · $property'.toUpperCase(),
+                                                style: GoogleFonts.inter(
+                                                  fontSize: 11,
+                                                  color: cs.kasaTextSub,
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
                                               ),
-                                            ),
-                                          ],
-                                        ],
-                                      ),
-                                    ),
-                                    if (apiStatus == 'active')
-                                      PopupMenuButton<String>(
-                                        icon: Icon(Icons.more_vert,
-                                            size: 20, color: cs.kasaTextSub),
-                                        onSelected: (action) async {
-                                          if (action == 'send_tenancy') {
-                                            try {
-                                              ScaffoldMessenger.of(context)
-                                                  .showSnackBar(const SnackBar(
-                                                      content: Text(
-                                                          'Generating tenancy PDF…')));
-                                              final resp = await ref
-                                                  .read(dioProvider)
-                                                  .post(
-                                                    '/api/v1/tenants/tenancies/${tenancy['id']}/send-tenancy/',
-                                                  );
-                                              if (context.mounted) {
-                                                ScaffoldMessenger.of(context)
-                                                    .showSnackBar(SnackBar(
-                                                  content: Text(
-                                                      resp.data['message'] ??
-                                                          'Done'),
-                                                  backgroundColor: Colors.green,
-                                                ));
-                                              }
-                                            } catch (e) {
-                                              if (context.mounted) {
-                                                ScaffoldMessenger.of(context)
-                                                    .showSnackBar(SnackBar(
-                                                  content: Text(apiError(e)),
-                                                  backgroundColor: cs.error,
-                                                ));
-                                              }
-                                            }
-                                          } else if (action == 'terminate') {
-                                            final confirmed =
-                                                await showDialog<bool>(
-                                              context: context,
-                                              useRootNavigator: true,
-                                              builder: (ctx) => AlertDialog(
-                                                title: const Text(
-                                                    'Terminate Tenancy'),
-                                                content: Text(
-                                                    'Terminate the tenancy for $name? '
-                                                    'The unit will be marked vacant.'),
-                                                actions: [
-                                                  TextButton(
-                                                    onPressed: () =>
-                                                        Navigator.pop(
-                                                            ctx, false),
-                                                    child:
-                                                        const Text('Cancel'),
-                                                  ),
-                                                  ElevatedButton(
-                                                    style: ElevatedButton
-                                                        .styleFrom(
-                                                      backgroundColor:
-                                                          Theme.of(ctx)
-                                                              .colorScheme
-                                                              .error,
-                                                      foregroundColor:
-                                                          Colors.white,
+                                            ],
+                                            if (rent != null || endDate != null) ...[
+                                              const SizedBox(height: 6),
+                                              Row(
+                                                children: [
+                                                  if (endDate != null) ...[
+                                                    Text(
+                                                      'TENANCY: $endDate',
+                                                      style: GoogleFonts.spaceGrotesk(
+                                                        fontSize: 10,
+                                                        fontWeight: FontWeight.w700,
+                                                        color: cs.kasaTextSub,
+                                                      ),
                                                     ),
-                                                    onPressed: () =>
-                                                        Navigator.pop(
-                                                            ctx, true),
-                                                    child: const Text(
-                                                        'Terminate'),
-                                                  ),
+                                                    Text(
+                                                      '  |  ',
+                                                      style: TextStyle(color: cs.kasaTextSub, fontSize: 10),
+                                                    ),
+                                                  ],
+                                                  if (rent != null)
+                                                    Text(
+                                                      'KES ${rent.toString().replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')}',
+                                                      style: GoogleFonts.spaceGrotesk(
+                                                        fontSize: 10,
+                                                        fontWeight: FontWeight.w700,
+                                                        color: cs.kasaTextSub,
+                                                      ),
+                                                    ),
                                                 ],
                                               ),
-                                            );
-                                            if (confirmed == true &&
-                                                context.mounted) {
+                                            ],
+                                            if (phone != null) ...[
+                                              const SizedBox(height: 2),
+                                              Text(
+                                                phone,
+                                                style: GoogleFonts.jetBrainsMono(
+                                                  fontSize: 11,
+                                                  color: cs.kasaTextSub,
+                                                ),
+                                              ),
+                                            ],
+                                          ],
+                                        ),
+                                      ),
+                                      if (apiStatus == 'active')
+                                        PopupMenuButton<String>(
+                                          icon: Icon(Icons.more_vert,
+                                              size: 20, color: cs.kasaTextSub),
+                                          onSelected: (action) async {
+                                            if (action == 'send_tenancy') {
                                               try {
-                                                await ref
+                                                ScaffoldMessenger.of(context)
+                                                    .showSnackBar(const SnackBar(
+                                                        content: Text(
+                                                            'Generating tenancy PDF…')));
+                                                final resp = await ref
                                                     .read(dioProvider)
-                                                    .patch(
-                                                      '/api/v1/tenants/tenancies/${tenancy['id']}/',
-                                                      data: {
-                                                        'status': 'terminated'
-                                                      },
+                                                    .post(
+                                                      '/api/v1/tenants/tenancies/${tenancy['id']}/send-tenancy/',
                                                     );
-                                                ref.invalidate(tenanciesProvider);
+                                                if (context.mounted) {
+                                                  ScaffoldMessenger.of(context)
+                                                      .showSnackBar(SnackBar(
+                                                    content: Text(
+                                                        resp.data['message'] ??
+                                                            'Done'),
+                                                    backgroundColor: Colors.green,
+                                                  ));
+                                                }
                                               } catch (e) {
                                                 if (context.mounted) {
                                                   ScaffoldMessenger.of(context)
@@ -418,41 +360,101 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                                                   ));
                                                 }
                                               }
+                                            } else if (action == 'terminate') {
+                                              final confirmed =
+                                                  await showDialog<bool>(
+                                                context: context,
+                                                useRootNavigator: true,
+                                                builder: (ctx) => AlertDialog(
+                                                  title: const Text(
+                                                      'Terminate Tenancy'),
+                                                  content: Text(
+                                                      'Terminate the tenancy for $name? '
+                                                      'The unit will be marked vacant.'),
+                                                  actions: [
+                                                    TextButton(
+                                                      onPressed: () =>
+                                                          Navigator.pop(
+                                                              ctx, false),
+                                                      child:
+                                                          const Text('Cancel'),
+                                                    ),
+                                                    ElevatedButton(
+                                                      style: ElevatedButton
+                                                          .styleFrom(
+                                                        backgroundColor:
+                                                            Theme.of(ctx)
+                                                                .colorScheme
+                                                                .error,
+                                                        foregroundColor:
+                                                            Colors.white,
+                                                      ),
+                                                      onPressed: () =>
+                                                          Navigator.pop(
+                                                              ctx, true),
+                                                      child: const Text(
+                                                          'Terminate'),
+                                                    ),
+                                                  ],
+                                                ),
+                                              );
+                                              if (confirmed == true &&
+                                                  context.mounted) {
+                                                try {
+                                                  await ref
+                                                      .read(dioProvider)
+                                                      .patch(
+                                                        '/api/v1/tenants/tenancies/${tenancy['id']}/',
+                                                        data: {
+                                                          'status': 'terminated'
+                                                        },
+                                                      );
+                                                  ref.invalidate(tenanciesProvider);
+                                                } catch (e) {
+                                                  if (context.mounted) {
+                                                    ScaffoldMessenger.of(context)
+                                                        .showSnackBar(SnackBar(
+                                                      content: Text(apiError(e)),
+                                                      backgroundColor: cs.error,
+                                                    ));
+                                                  }
+                                                }
+                                              }
                                             }
-                                          }
-                                        },
-                                        itemBuilder: (_) => [
-                                          PopupMenuItem(
-                                            value: 'send_tenancy',
-                                            child: ListTile(
-                                              leading: Icon(
-                                                  Icons.picture_as_pdf_outlined,
-                                                  color: cs.secondary),
-                                              title: const Text(
-                                                  'Send Tenancy Agreement'),
+                                          },
+                                          itemBuilder: (_) => [
+                                            PopupMenuItem(
+                                              value: 'send_tenancy',
+                                              child: ListTile(
+                                                leading: Icon(
+                                                    Icons.picture_as_pdf_outlined,
+                                                    color: cs.secondary),
+                                                title: const Text(
+                                                    'Send Tenancy Agreement'),
+                                              ),
                                             ),
-                                          ),
-                                          PopupMenuItem(
-                                            value: 'terminate',
-                                            child: ListTile(
-                                              leading: Icon(
-                                                  Icons.cancel_outlined,
-                                                  color: cs.error),
-                                              title: Text('Terminate',
-                                                  style: TextStyle(
-                                                      color: cs.error)),
+                                            PopupMenuItem(
+                                              value: 'terminate',
+                                              child: ListTile(
+                                                leading: Icon(
+                                                    Icons.cancel_outlined,
+                                                    color: cs.error),
+                                                title: Text('Terminate',
+                                                    style: TextStyle(
+                                                        color: cs.error)),
+                                              ),
                                             ),
-                                          ),
-                                        ],
-                                      ),
-                                  ],
+                                          ],
+                                        ),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                            );
-                          },
-                        ),
-                      );
-              },
+                              );
+                            },
+                          ),
+                        );
+                },
+              ),
             ),
           ),
         ],

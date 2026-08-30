@@ -221,54 +221,56 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen> {
             ),
           ),
           Expanded(
-            child: listAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => _ErrorView(
-                message: 'Could not load requests',
-                onRetry: () => ref.invalidate(maintenanceListProvider),
-              ),
-              data: (all) {
-                final items = _filtered(all);
-                if (items.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.construction_outlined,
-                            size: 64, color: cs.onSurface.withValues(alpha: 0.3)),
-                        const SizedBox(height: 12),
-                        Text(
-                          _selectedStatus == null
-                              ? 'No maintenance requests'
-                              : 'No ${_statusLabels[_selectedStatus]} requests',
-                          style: TextStyle(
-                              color: cs.onSurface.withValues(alpha: 0.5),
-                              fontSize: 16),
-                        ),
-                        if (_isTenant) ...[
-                          const SizedBox(height: 8),
-                          Text('Tap + to submit a new request',
-                              style: TextStyle(
-                                  color: cs.onSurface.withValues(alpha: 0.4),
-                                  fontSize: 13)),
+            child: KasaContentSwitcher(
+              child: listAsync.when(
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (e, _) => _ErrorView(
+                  message: 'Could not load requests',
+                  onRetry: () => ref.invalidate(maintenanceListProvider),
+                ),
+                data: (all) {
+                  final items = _filtered(all);
+                  if (items.isEmpty) {
+                    return Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.construction_outlined,
+                              size: 64, color: cs.onSurface.withValues(alpha: 0.3)),
+                          const SizedBox(height: 12),
+                          Text(
+                            _selectedStatus == null
+                                ? 'No maintenance requests'
+                                : 'No ${_statusLabels[_selectedStatus]} requests',
+                            style: TextStyle(
+                                color: cs.onSurface.withValues(alpha: 0.5),
+                                fontSize: 16),
+                          ),
+                          if (_isTenant) ...[
+                            const SizedBox(height: 8),
+                            Text('Tap + to submit a new request',
+                                style: TextStyle(
+                                    color: cs.onSurface.withValues(alpha: 0.4),
+                                    fontSize: 13)),
+                          ],
                         ],
-                      ],
+                      ),
+                    );
+                  }
+                  return RefreshIndicator(
+                    onRefresh: () => ref.refresh(maintenanceListProvider.future),
+                    child: ListView.builder(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      itemCount: items.length,
+                      itemBuilder: (_, i) => _RequestTile(
+                        request: items[i],
+                        isLandlord: !_isTenant,
+                        onChanged: () => ref.invalidate(maintenanceListProvider),
+                      ),
                     ),
                   );
-                }
-                return RefreshIndicator(
-                  onRefresh: () => ref.refresh(maintenanceListProvider.future),
-                  child: ListView.builder(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    itemCount: items.length,
-                    itemBuilder: (_, i) => _RequestTile(
-                      request: items[i],
-                      isLandlord: !_isTenant,
-                      onChanged: () => ref.invalidate(maintenanceListProvider),
-                    ),
-                  ),
-                );
-              },
+                },
+              ),
             ),
           ),
         ],

@@ -80,8 +80,7 @@ class PropertiesScreen extends ConsumerWidget {
 
           // ── List ────────────────────────────────────────────────────────
           Expanded(
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 300),
+            child: KasaContentSwitcher(
               child: props.when(
                 loading: () => const SkeletonList(),
                 error: (e, _) => Center(

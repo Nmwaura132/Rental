@@ -180,75 +180,77 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
 
             // ── Invoice list ───────────────────────────────────────────────
             Expanded(
-              child: invoices.when(
-                loading: () => const SkeletonList(),
-                error: (e, _) => Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.cloud_off_outlined,
-                          size: 56, color: Colors.grey),
-                      const SizedBox(height: 12),
-                      Text(apiError(e),
-                          style: const TextStyle(color: Colors.grey)),
-                      const SizedBox(height: 16),
-                      ElevatedButton.icon(
-                        onPressed: () => ref.invalidate(invoicesProvider),
-                        icon: const Icon(Icons.refresh),
-                        label: const Text('Retry'),
-                      ),
-                    ],
+              child: KasaContentSwitcher(
+                child: invoices.when(
+                  loading: () => const SkeletonList(),
+                  error: (e, _) => Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.cloud_off_outlined,
+                            size: 56, color: Colors.grey),
+                        const SizedBox(height: 12),
+                        Text(apiError(e),
+                            style: const TextStyle(color: Colors.grey)),
+                        const SizedBox(height: 16),
+                        ElevatedButton.icon(
+                          onPressed: () => ref.invalidate(invoicesProvider),
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Retry'),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                data: (rawList) {
-                  List<dynamic> list = rawList;
-                  if (_filter != 'all') {
-                    list = list
-                        .where((i) =>
-                            (i as Map)['status'] == _filter)
-                        .toList();
-                  }
-                  if (list.isEmpty) {
-                    return Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.receipt_long_outlined,
-                              size: 64, color: Colors.grey),
-                          const SizedBox(height: 12),
-                          Text(
-                            _filter == 'all'
-                                ? 'No invoices yet.'
-                                : 'No ${_filter.toUpperCase()} invoices.',
-                            style: const TextStyle(color: Colors.grey),
-                          ),
-                          if (_filter == 'all') ...[
-                            const SizedBox(height: 4),
-                            const Text(
-                              'Tap "ADD" to generate the first one.',
-                              style: TextStyle(
-                                  color: Colors.grey, fontSize: 12),
+                  data: (rawList) {
+                    List<dynamic> list = rawList;
+                    if (_filter != 'all') {
+                      list = list
+                          .where((i) =>
+                              (i as Map)['status'] == _filter)
+                          .toList();
+                    }
+                    if (list.isEmpty) {
+                      return Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.receipt_long_outlined,
+                                size: 64, color: Colors.grey),
+                            const SizedBox(height: 12),
+                            Text(
+                              _filter == 'all'
+                                  ? 'No invoices yet.'
+                                  : 'No ${_filter.toUpperCase()} invoices.',
+                              style: const TextStyle(color: Colors.grey),
                             ),
+                            if (_filter == 'all') ...[
+                              const SizedBox(height: 4),
+                              const Text(
+                                'Tap "ADD" to generate the first one.',
+                                style: TextStyle(
+                                    color: Colors.grey, fontSize: 12),
+                              ),
+                            ],
                           ],
-                        ],
+                        ),
+                      );
+                    }
+                    return RefreshIndicator(
+                      onRefresh: () => ref.refresh(invoicesProvider.future),
+                      child: ListView.builder(
+                        padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
+                        itemCount: list.length,
+                        itemBuilder: (_, i) {
+                          final inv = list[i] as Map<String, dynamic>;
+                          return _InvoiceCard(
+                            invoice: inv,
+                            onChanged: () => ref.invalidate(invoicesProvider),
+                          );
+                        },
                       ),
                     );
-                  }
-                  return RefreshIndicator(
-                    onRefresh: () => ref.refresh(invoicesProvider.future),
-                    child: ListView.builder(
-                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
-                      itemCount: list.length,
-                      itemBuilder: (_, i) {
-                        final inv = list[i] as Map<String, dynamic>;
-                        return _InvoiceCard(
-                          invoice: inv,
-                          onChanged: () => ref.invalidate(invoicesProvider),
-                        );
-                      },
-                    ),
-                  );
-                },
+                  },
+                ),
               ),
             ),
           ],
