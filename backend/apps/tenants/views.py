@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from apps.core.permissions import IsLandlordOrCaretaker
 from apps.notifications.tasks import send_sms
+from apps.payments.services import create_move_in_invoice
 from .models import Tenancy, MaintenanceRequest, MaintenanceNote
 from .serializers import TenancySerializer, MaintenanceRequestSerializer, MaintenanceNoteSerializer
 
@@ -79,7 +80,21 @@ class TenancyViewSet(viewsets.ModelViewSet):
         if user.is_caretaker and unit.property.caretaker_id != user.id:
             raise PermissionDenied("You cannot create tenancies for this unit.")
         _validate_managed_tenant(user, tenant)
-        serializer.save()
+        tenancy = serializer.save()
+
+        # WHY the first invoice is raised here and not in the signal beside
+        # sync_unit_status: the signal fires on every Tenancy.save() anywhere,
+        # fixtures and shell writes included, and would collide with any invoice
+        # already made for the same (tenancy, period_start). Billing is also a
+        # deliberate act by the landlord, not an occupancy invariant.
+        if tenancy.status == Tenancy.Status.ACTIVE:
+            try:
+                create_move_in_invoice(tenancy)
+            except Exception:
+                # The tenancy is saved and sound; failing the request would
+                # throw it away over a billing problem the landlord can fix by
+                # raising the invoice by hand.
+                logger.exception("Move-in invoice failed for tenancy %s", tenancy.pk)
 
     def perform_update(self, serializer):
         unit = serializer.validated_data.get("unit", serializer.instance.unit)
