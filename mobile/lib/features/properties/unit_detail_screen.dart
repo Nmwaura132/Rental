@@ -451,6 +451,7 @@ class _PaymentRow extends StatelessWidget {
                       fontSize: 14,
                       fontWeight: FontWeight.w700,
                       color: cs.onSurface,
+                      fontFeatures: kTabularFigures,
                     ),
                   ),
                   const SizedBox(height: 2),

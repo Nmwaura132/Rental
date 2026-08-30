@@ -11,7 +11,10 @@ class KasaColors {
   static const darkText         = Color(0xFFF0EDF4);
   static const darkTextSub      = Color(0xFFACAAB1);
   static const darkStroke       = Color(0xFF48474D);
-  static const darkShadow       = Color(0xFF000000);
+  // Carries the same blue-violet cast as darkBg (#0E0E13) rather than pure
+  // black. A neutral shadow over a tinted ground reads as a hole punched in the
+  // screen; tinting it keeps the offset reading as depth in one light.
+  static const darkShadow       = Color(0xFF05050A);
 
   static const darkPrimary      = Color(0xFFFF8E7F);
   static const darkPrimaryInk   = Color(0xFF2C0000);

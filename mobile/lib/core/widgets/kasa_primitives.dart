@@ -3,6 +3,57 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../theme/kasa_tokens.dart';
 
+/// Presses a hard-shadowed surface into its own offset while held.
+///
+/// WHY this and not a scale or ripple: the Kasa surfaces sit on a 4px hard-edge
+/// shadow with no blur, so the affordance that matches the language is the
+/// physical one — the surface travels the length of its shadow and the shadow
+/// disappears underneath it. Nothing responded to touch at all before this.
+class _PressableSurface extends StatefulWidget {
+  const _PressableSurface({required this.onTap, required this.builder});
+
+  final VoidCallback onTap;
+  final Widget Function(BuildContext context, bool isPressed) builder;
+
+  @override
+  State<_PressableSurface> createState() => _PressableSurfaceState();
+}
+
+class _PressableSurfaceState extends State<_PressableSurface> {
+  bool _pressed = false;
+
+  void _set(bool value) {
+    if (_pressed != value) setState(() => _pressed = value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Respect the accessibility setting: the offset is feedback, not decoration,
+    // so it stays, but it stops being animated.
+    final duration = MediaQuery.of(context).disableAnimations
+        ? Duration.zero
+        : const Duration(milliseconds: 90);
+
+    return GestureDetector(
+      onTap: widget.onTap,
+      onTapDown: (_) => _set(true),
+      onTapUp: (_) => _set(false),
+      onTapCancel: () => _set(false),
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: duration,
+        curve: Curves.easeOut,
+        transform: Matrix4.translationValues(
+          _pressed ? KasaBorders.shadow : 0,
+          _pressed ? KasaBorders.shadow : 0,
+          0,
+        ),
+        child: widget.builder(context, _pressed),
+      ),
+    );
+  }
+}
+
 // ─── KasaCard ─────────────────────────────────────────────────────────────────
 // 2px border + 4px hard-edge shadow (blurRadius 0). No soft shadow.
 
@@ -44,30 +95,32 @@ class KasaCard extends StatelessWidget {
       _                        => cs.onSurface,
     };
 
-    Widget box = Container(
-      padding: padding,
-      decoration: BoxDecoration(
-        color: fill,
-        borderRadius: BorderRadius.circular(radius),
-        border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
-        boxShadow: showShadow
-            ? [BoxShadow(
-                color: cs.kasaShadow,
-                offset: const Offset(KasaBorders.shadow, KasaBorders.shadow),
-                blurRadius: 0,
-              )]
-            : null,
-      ),
-      child: DefaultTextStyle.merge(style: TextStyle(color: ink), child: child),
-    );
+    // The shadow is dropped while pressed so the surface reads as having moved
+    // down onto it, rather than dragging the shadow along.
+    Widget surface(bool isPressed) => Container(
+          padding: padding,
+          decoration: BoxDecoration(
+            color: fill,
+            borderRadius: BorderRadius.circular(radius),
+            border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
+            boxShadow: showShadow && !isPressed
+                ? [BoxShadow(
+                    color: cs.kasaShadow,
+                    offset: const Offset(KasaBorders.shadow, KasaBorders.shadow),
+                    blurRadius: 0,
+                  )]
+                : null,
+          ),
+          child:
+              DefaultTextStyle.merge(style: TextStyle(color: ink), child: child),
+        );
 
-    if (onTap != null) {
-      box = GestureDetector(
-        onTap: onTap,
-        child: box,
-      );
-    }
-    return box;
+    if (onTap == null) return surface(false);
+
+    return _PressableSurface(
+      onTap: onTap!,
+      builder: (context, isPressed) => surface(isPressed),
+    );
   }
 }
 
@@ -177,9 +230,7 @@ class KasaButton extends StatelessWidget {
 
     final disabled = onTap == null || isLoading;
 
-    return GestureDetector(
-      onTap: disabled ? null : onTap,
-      child: Opacity(
+    Widget face(bool isPressed) => Opacity(
         opacity: disabled ? 0.5 : 1.0,
         child: Container(
           width: fullWidth ? double.infinity : null,
@@ -188,7 +239,7 @@ class KasaButton extends StatelessWidget {
             color: bg,
             borderRadius: BorderRadius.circular(KasaRadius.xl),
             border: Border.all(color: cs.kasaStroke, width: KasaBorders.button),
-            boxShadow: variant != KasaButtonVariant.ghost && !disabled
+            boxShadow: variant != KasaButtonVariant.ghost && !disabled && !isPressed
                 ? [BoxShadow(
                     color: cs.kasaShadow,
                     offset: const Offset(KasaBorders.shadow, KasaBorders.shadow),
@@ -221,7 +272,15 @@ class KasaButton extends StatelessWidget {
             ],
           ),
         ),
-      ),
+      );
+
+    // A disabled button already reads as inert through its opacity; giving it
+    // travel would suggest it did something.
+    if (disabled) return face(false);
+
+    return _PressableSurface(
+      onTap: onTap!,
+      builder: (context, isPressed) => face(isPressed),
     );
   }
 }
