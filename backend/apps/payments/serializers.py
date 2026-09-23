@@ -14,6 +14,7 @@ class PaymentSerializer(serializers.ModelSerializer):
             "mpesa_receipt_number", "mpesa_phone",
             # Bank transfer
             "bank_name", "bank_account", "bank_reference", "bank_branch",
+            "etims_receipt_number",
             "paid_at", "created_at",
         ]
         read_only_fields = fields

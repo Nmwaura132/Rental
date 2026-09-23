@@ -193,6 +193,41 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
 
         return Response(PaymentSerializer(payment).data, status=status.HTTP_201_CREATED)
 
+    @action(detail=True, methods=["post"], url_path="etims-receipt",
+            permission_classes=[IsLandlord])
+    def set_etims_receipt(self, request, pk=None):
+        """
+        Record the eTIMS receipt number issued for a payment — landlords only.
+
+        WHY a dedicated action rather than making the field writable: a confirmed
+        payment is immutable on purpose, and that guarantee protects the money
+        fields. The receipt cannot be captured at payment time either — the
+        landlord generates it on eTIMS after the rent lands, so it always
+        arrives late. This lets that one annotation through and nothing else.
+        """
+        number = (request.data.get("etims_receipt_number") or "").strip()
+        if not number:
+            return Response(
+                {"error": "An eTIMS receipt number is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if len(number) > 50:
+            return Response(
+                {"error": "That receipt number is too long."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            payment = Payment.objects.get(
+                pk=pk, invoice__tenancy__unit__property__owner=request.user
+            )
+        except Payment.DoesNotExist:
+            return Response({"error": "Payment not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        payment.etims_receipt_number = number
+        payment.save(update_fields=["etims_receipt_number"])
+        return Response(PaymentSerializer(payment).data)
+
 
 @extend_schema(exclude=True)  # WHY: returns ad-hoc dict shaped by user role; document in handoff.md instead
 class DashboardStatsView(APIView):

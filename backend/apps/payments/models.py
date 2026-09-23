@@ -77,6 +77,16 @@ class Payment(models.Model):
     bank_reference = models.CharField(max_length=100, blank=True, null=True) # bank transaction ref / slip no.
     bank_branch = models.CharField(max_length=80, blank=True, null=True)    # branch name (optional)
 
+    # WHY not unique: one eTIMS receipt can cover a month settled in two or
+    # three part-payments, so the same number legitimately appears on each of
+    # them. Deliberately free text — KRA's format is theirs to change, and a
+    # landlord copying a number off eTIMS Lite should never be blocked by our
+    # guess at it.
+    etims_receipt_number = models.CharField(
+        max_length=50, blank=True, null=True,
+        help_text="Receipt number from eTIMS for this rent, if one has been issued.",
+    )
+
     # Idempotency — prevents double-recording webhook retries
     idempotency_key = models.CharField(max_length=60, unique=True, db_index=True)
 
@@ -114,10 +124,19 @@ class Payment(models.Model):
         return f"{self.method} — KES {self.amount} ({self.status})"
 
 
+    # The one thing that may still be written to a confirmed payment. The eTIMS
+    # receipt is issued after the rent lands, so it can never be captured when
+    # the payment is created — and KRA checks declared rent against it. Nothing
+    # about the money itself is in here, which is the point: an update touching
+    # any other field still fails.
+    AMENDABLE_AFTER_CONFIRMATION = {"etims_receipt_number"}
+
     def save(self, *args, **kwargs):
         if self.pk:
             persisted_status = type(self).objects.only("status").get(pk=self.pk).status
-            if persisted_status == self.Status.CONFIRMED:
+            updating = set(kwargs.get("update_fields") or ())
+            is_annotation = bool(updating) and updating <= self.AMENDABLE_AFTER_CONFIRMATION
+            if persisted_status == self.Status.CONFIRMED and not is_annotation:
                 raise ValidationError("Confirmed payment records are immutable.")
         return super().save(*args, **kwargs)
 

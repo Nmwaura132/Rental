@@ -972,6 +972,36 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
                                       ),
                                     ),
                                 ],
+                                // KRA checks declared rent against their eTIMS
+                                // records, so the receipt sits on the payment
+                                // it belongs to rather than somewhere separate.
+                                if (isLandlord) ...[
+                                  const SizedBox(height: 2),
+                                  if (pm['etims_receipt_number'] != null)
+                                    Text(
+                                      'eTIMS: ${pm['etims_receipt_number']}',
+                                      style: GoogleFonts.jetBrainsMono(
+                                        fontSize: 10, color: cs.kasaTextSub,
+                                      ),
+                                    )
+                                  else
+                                    InkWell(
+                                      onTap: () => _captureEtimsReceipt(
+                                          context, ref, pm['id'] as int),
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 2),
+                                        child: Text(
+                                          '+ Add eTIMS receipt',
+                                          style: GoogleFonts.inter(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                            color: cs.secondary,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               ],
                             ),
                           ),
@@ -2420,5 +2450,77 @@ class _DateField extends StatelessWidget {
             style: const TextStyle(fontSize: 14)),
       ),
     );
+  }
+}
+
+/// Records the eTIMS receipt number KRA issued for a payment.
+///
+/// It cannot be captured when the money arrives — the landlord generates the
+/// receipt on eTIMS afterwards — so it is added to the payment later, and it is
+/// the only thing about a confirmed payment that may still be written.
+Future<void> _captureEtimsReceipt(
+  BuildContext context,
+  WidgetRef ref,
+  int paymentId,
+) async {
+  final controller = TextEditingController();
+  final number = await showDialog<String>(
+    context: context,
+    useRootNavigator: true,
+    builder: (ctx) => AlertDialog(
+      title: const Text('eTIMS receipt'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: controller,
+            autofocus: true,
+            textInputAction: TextInputAction.done,
+            decoration: const InputDecoration(
+              labelText: 'Receipt number',
+              hintText: 'As issued on eTIMS',
+            ),
+            onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'KRA checks the rent you declare against their eTIMS records. '
+            'Adding it here ties this payment to the receipt behind it.',
+            style: TextStyle(fontSize: 11, color: Colors.grey),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+          child: const Text('Save'),
+        ),
+      ],
+    ),
+  );
+  if (number == null || number.isEmpty || !context.mounted) return;
+
+  final messenger = ScaffoldMessenger.of(context);
+  final errorColor = Theme.of(context).colorScheme.error;
+  try {
+    await ref.read(dioProvider).post(
+      '/api/v1/payments/$paymentId/etims-receipt/',
+      data: {'etims_receipt_number': number},
+    );
+    ref.invalidate(invoicesProvider);
+    messenger.showSnackBar(const SnackBar(
+      content: Text('eTIMS receipt recorded.'),
+      backgroundColor: Colors.green,
+    ));
+  } catch (e) {
+    messenger.showSnackBar(SnackBar(
+      content: Text(apiError(e)),
+      backgroundColor: errorColor,
+    ));
   }
 }

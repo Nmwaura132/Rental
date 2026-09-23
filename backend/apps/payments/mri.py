@@ -12,7 +12,7 @@ liability that month.
 from decimal import Decimal
 
 from django.conf import settings
-from django.db.models import Sum
+from django.db.models import Q, Sum
 
 from apps.payments.models import Payment
 
@@ -62,9 +62,17 @@ def rent_roll(*, owner, period_start, period_end):
                 "tenant_kra_pin": tenancy.tenant.kra_pin or "",
                 "agreed_rent": tenancy.rent_amount,
                 "rent_received": Decimal("0"),
+                "etims_receipts": [],
             },
         )
         row["rent_received"] += payment.amount
+        # KRA cross-checks what is declared here against their eTIMS records, so
+        # the row carries the receipts backing it. A month settled in parts can
+        # sit under one receipt, hence the de-duplication.
+        if payment.etims_receipt_number and (
+            payment.etims_receipt_number not in row["etims_receipts"]
+        ):
+            row["etims_receipts"].append(payment.etims_receipt_number)
 
     return list(rows.values())
 
@@ -85,6 +93,13 @@ def mri_summary(*, owner, period_start, period_end):
     rows = rent_roll(owner=owner, period_start=period_start, period_end=period_end)
     missing_pins = [r["tenant"] for r in rows if not r["tenant_kra_pin"]]
 
+    unreceipted = Payment.objects.filter(
+        invoice__tenancy__unit__property__owner=owner,
+        status=Payment.Status.CONFIRMED,
+        paid_at__date__gte=period_start,
+        paid_at__date__lte=period_end,
+    ).filter(Q(etims_receipt_number__isnull=True) | Q(etims_receipt_number="")).count()
+
     return {
         "period_start": period_start,
         "period_end": period_end,
@@ -95,4 +110,8 @@ def mri_summary(*, owner, period_start, period_end):
         # Surfaced rather than silently omitted: a filing missing tenant PINs is
         # the specific thing eRITS rejects, and the landlord can still chase them.
         "tenants_missing_kra_pin": missing_pins,
+        # Rent declared with no eTIMS receipt behind it is precisely the
+        # mismatch KRA looks for, so it is counted where the landlord will see
+        # it before filing rather than after.
+        "payments_missing_etims_receipt": unreceipted,
     }

@@ -164,6 +164,7 @@ class _Statement extends StatelessWidget {
     final rows = (data['rent_roll'] as List? ?? []).cast<Map<String, dynamic>>();
     final missing =
         (data['tenants_missing_kra_pin'] as List? ?? []).cast<String>();
+    final unreceipted = (data['payments_missing_etims_receipt'] as num? ?? 0).toInt();
     final due = data['filing_due_date']?.toString();
 
     return ListView(
@@ -235,6 +236,22 @@ class _Statement extends StatelessWidget {
                     'accept this filing.'
                 : '${missing.length} tenants have no KRA PIN on file. eRITS '
                     'needs them to accept this filing.',
+          ),
+        ],
+
+        // KRA cross-checks declared rent against eTIMS records, so rent with no
+        // receipt behind it is worth seeing before filing, not after.
+        if (unreceipted > 0) ...[
+          if (gross == 0 && missing.isEmpty) const SizedBox(height: 10),
+          _Note(
+            icon: Icons.receipt_long_outlined,
+            tone: cs.tertiary,
+            text: unreceipted == 1
+                ? 'One payment this period has no eTIMS receipt recorded. KRA '
+                    'checks declared rent against their eTIMS records.'
+                : '$unreceipted payments this period have no eTIMS receipt '
+                    'recorded. KRA checks declared rent against their eTIMS '
+                    'records.',
           ),
         ],
 
