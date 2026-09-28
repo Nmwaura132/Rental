@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Property, Unit, PropertyCharge
+from .models import MeterReading, Property, PropertyCharge, Unit
 
 
 class UnitSerializer(serializers.ModelSerializer):
@@ -59,3 +59,58 @@ class PropertySerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data["owner"] = self.context["request"].user
         return super().create(validated_data)
+
+
+class MeterReadingSerializer(serializers.ModelSerializer):
+    previous_reading = serializers.SerializerMethodField()
+    recorded_by_name = serializers.CharField(source="recorded_by.get_full_name", read_only=True)
+
+    class Meta:
+        model = MeterReading
+        fields = [
+            "id", "unit", "charge", "period", "reading",
+            "previous_reading", "recorded_by_name", "recorded_at",
+        ]
+        read_only_fields = ["id", "recorded_by_name", "recorded_at"]
+
+    def get_previous_reading(self, obj):
+        previous = obj.previous()
+        return previous.reading if previous else None
+
+    def validate_period(self, value):
+        # Any day in the month names that month's reading.
+        return value.replace(day=1)
+
+    def validate(self, attrs):
+        unit = attrs.get("unit", getattr(self.instance, "unit", None))
+        charge = attrs.get("charge", getattr(self.instance, "charge", None))
+        period = attrs.get("period", getattr(self.instance, "period", None))
+        reading = attrs.get("reading", getattr(self.instance, "reading", None))
+
+        if charge.property_id != unit.property_id:
+            raise serializers.ValidationError("That charge belongs to a different property.")
+        if charge.billing_method != PropertyCharge.BillingMethod.METERED:
+            raise serializers.ValidationError(f"{charge.name} is a flat charge and has no meter.")
+
+        # A meter only counts up. A lower figure is almost always a slip, and
+        # billing it would produce negative usage — a credit nobody intended.
+        earlier = (
+            MeterReading.objects.filter(unit=unit, charge=charge, period__lt=period)
+            .exclude(pk=getattr(self.instance, "pk", None))
+            .order_by("-period").first()
+        )
+        if earlier and reading < earlier.reading:
+            raise serializers.ValidationError(
+                f"{reading} is lower than the {earlier.period:%B} reading of "
+                f"{earlier.reading}. Check the figure on the meter."
+            )
+        later = (
+            MeterReading.objects.filter(unit=unit, charge=charge, period__gt=period)
+            .exclude(pk=getattr(self.instance, "pk", None))
+            .order_by("period").first()
+        )
+        if later and reading > later.reading:
+            raise serializers.ValidationError(
+                f"{reading} is higher than the {later.period:%B} reading of {later.reading}."
+            )
+        return attrs

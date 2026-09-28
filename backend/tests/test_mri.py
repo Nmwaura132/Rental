@@ -188,3 +188,41 @@ class TestMissingPins:
         # They contribute nothing to this month's filing, so a missing PIN is
         # not yet a problem for it.
         assert summary()["tenants_missing_kra_pin"] == []
+
+
+class TestOnlyRentIsTaxed:
+    """A bill carries water, garbage and, on move-in, the deposit — none of it
+    rent. MRI is tax on rent alone."""
+
+    def _itemise(self, invoice, *extra):
+        from apps.payments.models import InvoiceLineItem
+
+        InvoiceLineItem.objects.create(
+            invoice=invoice, description="Rent", charge_type="rent", amount=Decimal("15000.00"),
+        )
+        for charge_type, amount in extra:
+            InvoiceLineItem.objects.create(
+                invoice=invoice, description=charge_type, charge_type=charge_type, amount=Decimal(amount),
+            )
+        invoice.amount_due = Decimal("15000.00") + sum(Decimal(a) for _, a in extra)
+        invoice.save(update_fields=["amount_due"])
+
+    def test_water_paid_with_rent_is_not_taxed(self, invoice, summary):
+        self._itemise(invoice, ("water", "640.00"))
+        _confirm(invoice, "15640.00", key="rent-only:water")
+        assert summary()["gross_rent_received"] == Decimal("15000.00")
+
+    def test_a_deposit_is_not_income(self, invoice, summary):
+        self._itemise(invoice, ("deposit", "15000.00"))
+        _confirm(invoice, "30000.00", key="rent-only:deposit")
+        assert summary()["gross_rent_received"] == Decimal("15000.00")
+
+    def test_a_part_payment_settles_rent_first(self, invoice, summary):
+        self._itemise(invoice, ("water", "640.00"))
+        _confirm(invoice, "10000.00", key="rent-only:part")
+        assert summary()["gross_rent_received"] == Decimal("10000.00")
+
+    def test_paying_beyond_the_bill_is_advance_rent(self, invoice, summary):
+        self._itemise(invoice, ("water", "640.00"))
+        _confirm(invoice, "20640.00", key="rent-only:advance")
+        assert summary()["gross_rent_received"] == Decimal("20000.00")

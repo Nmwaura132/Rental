@@ -58,6 +58,27 @@ def apply_confirmed_payment(
     return payment, True
 
 
+def pay_to(unit) -> tuple[str, str]:
+    """The paybill and account number a tenant pays this unit's rent to.
+
+    Behind a bank's shared paybill the account number already identifies the
+    landlord ("623943#G1"), so the house number only has to be unique within
+    their own buildings and is quoted exactly as the landlord set it. On a
+    paybill shared by every landlord, the system-wide payment code is needed
+    to tell two landlords' G1s apart.
+    """
+    from django.conf import settings
+
+    if settings.RENT_ACCOUNT_PREFIX:
+        return settings.RENT_PAYBILL, f"{settings.RENT_ACCOUNT_PREFIX}{unit.unit_number}"
+    return settings.RENT_PAYBILL, unit.payment_code
+
+
+def how_to_pay(unit) -> str:
+    paybill, account = pay_to(unit)
+    return f"Pay via M-Pesa Paybill {paybill}, Acc: {account}."
+
+
 def create_move_in_invoice(tenancy, *, notify=True):
     """Raise the tenant's first invoice: the first month's rent, plus the
     deposit if it has not already been handed over.
@@ -125,8 +146,6 @@ def create_move_in_invoice(tenancy, *, notify=True):
 
 def _notify_move_in(tenancy, invoice, rent, deposit):
     """Tell the tenant what they owe to move in, and how to pay it."""
-    from django.conf import settings
-
     from apps.notifications.tasks import send_sms
 
     unit = tenancy.unit
@@ -139,5 +158,5 @@ def _notify_move_in(tenancy, invoice, rent, deposit):
         f"Welcome to {unit.property.name} Unit {unit.unit_number}. "
         f"Your first invoice is {' + '.join(parts)} = "
         f"KES {invoice.amount_due:,.0f}, due {invoice.due_date.strftime('%d %b %Y')}. "
-        f"Pay via M-Pesa Paybill {settings.MPESA_SHORTCODE}, Acc: {unit.payment_code}.",
+        f"{how_to_pay(unit)}",
     )

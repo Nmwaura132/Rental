@@ -202,6 +202,12 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.notifications.tasks.send_rent_reminders",
         "schedule": crontab(hour=8, minute=0),
     },
+    # Chase meter readings on the 28th, while there is still time before the
+    # bill goes out on the 1st
+    "remind-missing-meter-readings": {
+        "task": "apps.notifications.tasks.remind_missing_meter_readings",
+        "schedule": crontab(hour=9, minute=0, day_of_month=28),
+    },
     "mark-overdue-invoices": {
         "task": "apps.payments.tasks.mark_overdue_invoices",
         "schedule": crontab(hour=0, minute=5),
@@ -312,6 +318,17 @@ MPESA_PASSKEY = env("MPESA_PASSKEY", default="")
 MPESA_ENVIRONMENT = env("MPESA_ENVIRONMENT", default="sandbox")
 MPESA_CALLBACK_URL = env("MPESA_CALLBACK_URL", default="")
 MPESA_STK_CALLBACK_URL = env("MPESA_STK_CALLBACK_URL", default="")
+
+# ── Rent collection ───────────────────────────────────────────────────────────
+# Day of the month rent falls due. The landlord's tenancy agreement makes rent
+# payable "on or before the 5th", and reminders and chasing count from this.
+RENT_DUE_DAY = env.int("RENT_DUE_DAY", default=5)
+# What tenants are told to pay to. These are separate from MPESA_SHORTCODE
+# because rent may be collected through a paybill Kasa has no API access to —
+# a bank's shared paybill such as Caritas 899790, where the account is the
+# landlord's bank account followed by the unit code ("623943#G1").
+RENT_PAYBILL = env("RENT_PAYBILL", default=MPESA_SHORTCODE)
+RENT_ACCOUNT_PREFIX = env("RENT_ACCOUNT_PREFIX", default="")
 
 # ── Africa's Talking ──────────────────────────────────────────────────────────
 AT_USERNAME = env("AT_USERNAME", default="sandbox")

@@ -63,19 +63,32 @@ def reconcile_bank_notification(notification, *, invoice_id=None) -> bool:
         if notification.status == BankPaymentNotification.Status.MATCHED:
             return True
 
+        # WHY M-Pesa keeps its own fields: mpesa_receipt_number is unique, so a
+        # late Safaricom retry of a payment the landlord already placed by hand
+        # cannot be recorded a second time.
+        if notification.bank == BankPaymentNotification.Bank.MPESA:
+            method = Payment.Method.MPESA
+            fields = {
+                "mpesa_receipt_number": notification.transaction_ref,
+                "mpesa_phone": notification.payer_account or None,
+                "mpesa_account_ref": notification.payment_ref[:20] or None,
+            }
+        else:
+            method = Payment.Method.BANK
+            fields = {
+                "bank_name": notification.get_bank_display(),
+                "bank_account": notification.payer_account or None,
+                "bank_reference": notification.transaction_ref,
+            }
         payment, _ = apply_confirmed_payment(
             invoice_id=invoice.pk,
-            method=Payment.Method.BANK,
+            method=method,
             amount=notification.amount,
             idempotency_key=(
                 f"bank:{notification.bank}:{notification.transaction_ref}"
             ),
             paid_at=notification.credited_at,
-            payment_fields={
-                "bank_name": notification.get_bank_display(),
-                "bank_account": notification.payer_account or None,
-                "bank_reference": notification.transaction_ref,
-            },
+            payment_fields=fields,
         )
         notification.status = BankPaymentNotification.Status.MATCHED
         notification.payment = payment

@@ -1,4 +1,6 @@
 import logging
+
+from django.conf import settings
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from celery import shared_task
@@ -18,6 +20,46 @@ def mark_overdue_invoices():
         due_date__lt=timezone.localdate(),
         status__in=[Invoice.Status.PENDING, Invoice.Status.PARTIALLY_PAID],
     ).update(status=Invoice.Status.OVERDUE)
+
+
+def _hold_unplaced(receipt_number, amount, account_ref, phone, *, owner):
+    """Keep an M-Pesa payment Kasa could not place, and tell the landlord.
+
+    WHY: these used to end in a log line. The money was in the landlord's
+    account but nowhere in Kasa, and the tenant who paid was later chased for it.
+    """
+    from .models import BankPaymentNotification
+
+    _, created = BankPaymentNotification.objects.get_or_create(
+        bank=BankPaymentNotification.Bank.MPESA,
+        transaction_ref=receipt_number,
+        defaults={
+            "amount": amount,
+            "payer_account": phone or "",
+            "payment_ref": (account_ref or "")[:100],
+            "credited_at": timezone.now(),
+            "raw_payload": {
+                "receipt": receipt_number,
+                "amount": str(amount),
+                "account_ref": account_ref,
+                "phone": phone,
+            },
+            "owner": owner,
+        },
+    )
+    logger.warning(
+        "M-Pesa receipt %s (ref=%r, KES %s) held for manual matching.",
+        receipt_number, account_ref, amount,
+    )
+    if created and owner is not None:
+        from apps.notifications.tasks import send_sms
+
+        send_sms.delay(
+            owner.id,
+            f"KES {amount:,.0f} was received from {phone or 'an unknown number'} "
+            f"with account '{account_ref}', which Kasa could not match to a tenant. "
+            f"Open Kasa to assign it.",
+        )
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
@@ -44,6 +86,13 @@ def process_mpesa_payment(self, receipt_number, amount, account_ref, phone, idem
         # Normalize incoming phone
         normalized_phone = normalize_phone(phone)
 
+        from .models import BankPaymentNotification
+        if BankPaymentNotification.objects.filter(
+            bank=BankPaymentNotification.Bank.MPESA, transaction_ref=receipt_number
+        ).exists():
+            logger.info("Receipt %s is already held for matching.", receipt_number)
+            return
+
         # Resolve account_ref (payment_code, falling back to unit_number) to a
         # unit, then find that unit's active tenancy.
         from apps.properties.models import Unit
@@ -57,7 +106,10 @@ def process_mpesa_payment(self, receipt_number, amount, account_ref, phone, idem
         )
 
         if not tenancy:
-            logger.warning("No active tenancy found for account_ref=%s receipt=%s", account_ref, receipt_number)
+            _hold_unplaced(
+                receipt_number, amount_dec, account_ref, normalized_phone,
+                owner=unit.property.owner if unit else None,
+            )
             return
 
         # WHY: wrap the Payment.create + Invoice update in a single transaction and
@@ -76,7 +128,12 @@ def process_mpesa_payment(self, receipt_number, amount, account_ref, phone, idem
             )
 
             if not invoice:
-                logger.warning("No open invoice for tenancy=%s receipt=%s", tenancy.id, receipt_number)
+                # Typically rent paid ahead of the month's invoice. Held rather
+                # than applied anywhere, so it can be placed once the bill exists.
+                _hold_unplaced(
+                    receipt_number, amount_dec, account_ref, normalized_phone,
+                    owner=tenancy.unit.property.owner,
+                )
                 return
 
             payment, created = apply_confirmed_payment(
@@ -416,17 +473,16 @@ def poll_equity_statement(date_from: str | None = None, date_to: str | None = No
 def generate_monthly_invoices():
     """
     Celery Beat task — runs on the 1st of each month.
-    Creates invoices for all active tenancies.
+    Creates invoices for all active tenancies and sends each tenant their bill.
 
-    WHY due_date = period_start + 7 days: invoices are generated on the 1st,
-    and `send_rent_reminders` fires reminders at -7d, -3d, 0d before due_date.
-    With due_date == period_start, the -7d and -3d reminders looked for invoices
-    that didn't exist yet. Pushing due to the 8th gives tenants a real grace
-    window AND aligns the reminder cadence with reality (reminder #1 lands the
-    same day the invoice arrives).
+    Due on settings.RENT_DUE_DAY — the 5th, as the tenancy agreement says. It
+    was the 8th, a workaround from when reminders started seven days out and
+    found no invoice yet; the bill SMS on the 1st now does that job, so the
+    date can match the contract that chasing a late tenant rests on.
     """
     from apps.tenants.models import Tenancy
-    from .models import Invoice
+    from .billing import charge_lines
+    from .models import Invoice, InvoiceLineItem
     from django.utils import timezone
     import uuid
 
@@ -434,24 +490,59 @@ def generate_monthly_invoices():
     period_start = today.replace(day=1)
     next_month = (today.replace(day=28) + timedelta(days=4)).replace(day=1)
     period_end = next_month - timedelta(days=1)
-    due_date = period_start + timedelta(days=7)  # 8th of the month — gives reminder window room
+    due_date = period_start.replace(day=settings.RENT_DUE_DAY)
 
     active_tenancies = Tenancy.objects.filter(status=Tenancy.Status.ACTIVE).select_related("unit", "tenant")
     created = 0
 
     for tenancy in active_tenancies:
-        _, was_created = Invoice.objects.get_or_create(
-            tenancy=tenancy,
-            period_start=period_start,
-            defaults={
-                "invoice_number": f"INV-{period_start.strftime('%Y%m')}-{uuid.uuid4().hex[:6].upper()}",
-                "amount_due": tenancy.rent_amount,
-                "due_date": due_date,
-                "period_end": period_end,
-            },
-        )
+        # Rent plus the property's charges — flat ones for this month, metered
+        # usage for last — on one bill, so the tenant is told one total.
+        lines = [{
+            "description": f"Rent — {period_start:%B %Y}",
+            "charge_type": "rent",
+            "amount": tenancy.rent_amount,
+        }] + charge_lines(tenancy.unit, period_start)
+
+        with db_transaction.atomic():
+            invoice, was_created = Invoice.objects.get_or_create(
+                tenancy=tenancy,
+                period_start=period_start,
+                defaults={
+                    "invoice_number": f"INV-{period_start.strftime('%Y%m')}-{uuid.uuid4().hex[:6].upper()}",
+                    "amount_due": sum(line["amount"] for line in lines),
+                    "due_date": due_date,
+                    "period_end": period_end,
+                },
+            )
+            if was_created:
+                InvoiceLineItem.objects.bulk_create(
+                    InvoiceLineItem(invoice=invoice, **line) for line in lines
+                )
         if was_created:
             created += 1
+            _send_bill(tenancy, invoice)
 
     logger.info("Generated %d invoices for period %s", created, period_start)
     return created
+
+
+def _send_bill(tenancy, invoice):
+    from apps.notifications.tasks import send_sms
+    from .services import how_to_pay
+
+    unit = tenancy.unit
+    lines = list(invoice.line_items.all())
+    # "Rent 25,000 + Water 640 = KES 25,640": the parts only when there is more
+    # than one, so a rent-only bill still reads simply.
+    parts = (
+        " + ".join(f"{line.charge_type.capitalize()} {line.amount:,.0f}" for line in lines) + " = "
+        if len(lines) > 1 else ""
+    )
+    send_sms.delay(
+        tenancy.tenant_id,
+        f"Dear {tenancy.tenant.first_name}, your {invoice.period_start.strftime('%B')} "
+        f"bill for {unit.property.name} Unit {unit.unit_number}: "
+        f"{parts}KES {invoice.amount_due:,.0f}, due {invoice.due_date.strftime('%d %b')}. "
+        f"{how_to_pay(unit)}",
+    )

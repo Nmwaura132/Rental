@@ -246,3 +246,36 @@ def test_apply_confirmed_payment_updates_invoice_once(invoice):
     assert duplicate_created is False
     assert duplicate.pk == payment.pk
     assert invoice.amount_paid == Decimal("1000.00")
+
+
+class TestMonthlyBill:
+    """The bill raised on the 1st."""
+
+    @pytest.fixture
+    def sent(self, monkeypatch):
+        captured = []
+        from apps.notifications import tasks as ntasks
+        monkeypatch.setattr(ntasks.send_sms, "delay", lambda uid, msg: captured.append((uid, msg)))
+        return captured
+
+    def test_rent_falls_due_on_the_agreed_day(self, tenancy, sent, settings):
+        from apps.payments.tasks import generate_monthly_invoices
+        settings.RENT_DUE_DAY = 5
+        generate_monthly_invoices()
+        assert Invoice.objects.get(tenancy=tenancy, period_start=date.today().replace(day=1)).due_date.day == 5
+
+    def test_the_tenant_is_sent_the_bill(self, tenancy, sent, tenant):
+        from apps.payments.tasks import generate_monthly_invoices
+        generate_monthly_invoices()
+        assert sent[0][0] == tenant.id
+
+    def test_the_bill_quotes_the_amount(self, tenancy, sent):
+        from apps.payments.tasks import generate_monthly_invoices
+        generate_monthly_invoices()
+        assert f"KES {tenancy.rent_amount:,.0f}" in sent[0][1]
+
+    def test_a_second_run_sends_nothing_more(self, tenancy, sent):
+        from apps.payments.tasks import generate_monthly_invoices
+        generate_monthly_invoices()
+        generate_monthly_invoices()
+        assert len(sent) == 1

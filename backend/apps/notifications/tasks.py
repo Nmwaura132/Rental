@@ -1,5 +1,7 @@
 import logging
 import requests as _requests
+from decimal import Decimal
+
 from celery import shared_task
 from django.conf import settings
 from django.utils import timezone
@@ -134,8 +136,9 @@ def send_whatsapp(self, recipient_id, message, media_url=None):
 
 # Days before the due date to remind on, and days after it to chase on.
 # Fixed offsets rather than "every day while unpaid" so a late tenant gets
-# chased without being texted daily.
-REMINDER_DAYS_BEFORE = [7, 3, 0]
+# chased without being texted daily. The bill itself goes out when the invoice
+# is raised on the 1st, so reminders only need the eve and the day.
+REMINDER_DAYS_BEFORE = [1, 0]
 CHASE_DAYS_AFTER = [3, 7, 14]
 
 # WHY OVERDUE is included: mark_overdue_invoices runs at 00:05 and flips a late
@@ -154,44 +157,96 @@ def send_rent_reminders():
     """Celery Beat task — runs daily.
 
     Reminds before rent is due, and keeps chasing after it falls late.
+
+    WHY one message per tenancy rather than per invoice: a tenant three months
+    behind used to get three texts on the same morning, each quoting one
+    month's balance, none of them what they actually owed. The trigger is still
+    an invoice reaching a reminder day; the message quotes everything unpaid.
     """
-    from apps.payments.models import Invoice
     from datetime import timedelta
+
+    from apps.payments.models import Invoice
+    from apps.payments.services import how_to_pay
 
     today = timezone.localdate()
 
-    for days in REMINDER_DAYS_BEFORE + [-d for d in CHASE_DAYS_AFTER]:
-        target_date = today + timedelta(days=days)
-        invoices = Invoice.objects.filter(
-            due_date=target_date,
-            status__in=_UNPAID,
-        ).select_related("tenancy__tenant", "tenancy__unit__property")
+    # Days relative to the due date, most overdue first, so a tenancy that hits
+    # two triggers on one day is told about the more serious one.
+    offsets = sorted(REMINDER_DAYS_BEFORE + [-d for d in CHASE_DAYS_AFTER])
+    triggered = {}
+    for days in offsets:
+        for invoice in Invoice.objects.filter(
+            due_date=today + timedelta(days=days), status__in=_UNPAID
+        ).select_related("tenancy__tenant", "tenancy__unit__property"):
+            triggered.setdefault(invoice.tenancy_id, (invoice.tenancy, days))
 
-        for invoice in invoices:
-            tenant = invoice.tenancy.tenant
-            unit = invoice.tenancy.unit
-            balance = invoice.balance
-            where = f"{unit.property.name} Unit {unit.unit_number}"
-            how = (
-                f"Pay via M-Pesa Paybill {settings.MPESA_SHORTCODE}, "
-                f"Acc: {unit.payment_code}."
+    for tenancy, days in triggered.values():
+        unpaid = list(Invoice.objects.filter(tenancy=tenancy, status__in=_UNPAID))
+        owed = sum((i.balance for i in unpaid), Decimal("0"))
+        tenant, unit = tenancy.tenant, tenancy.unit
+        where = f"{unit.property.name} Unit {unit.unit_number}"
+
+        if days > 1:
+            when = f"is due in {days} days"
+        elif days == 1:
+            when = "is due tomorrow"
+        elif days == 0:
+            when = "is due TODAY"
+        else:
+            when = f"is {-days} days overdue"
+
+        others = (
+            f" This includes {len(unpaid) - 1} other unpaid "
+            f"{'bill' if len(unpaid) == 2 else 'bills'}."
+            if len(unpaid) > 1 else ""
+        )
+        send_sms.delay(
+            tenant.id,
+            f"Dear {tenant.first_name}, your rent of KES {owed:,.0f} for {where} "
+            f"{when}.{others} {how_to_pay(unit)}",
+        )
+
+
+@shared_task
+def remind_missing_meter_readings():
+    """Celery Beat task — runs on the 28th.
+
+    Tells whoever reads the meters which occupied units have no reading yet
+    for this month. A unit left unread is billed without its water on the 1st.
+    Both the landlord and the caretaker are told, since either may read them.
+    """
+    from apps.properties.models import MeterReading, Property, PropertyCharge
+    from apps.tenants.models import Tenancy
+
+    period = timezone.localdate().replace(day=1)
+
+    for property_ in Property.objects.filter(
+        charges__is_active=True,
+        charges__billing_method=PropertyCharge.BillingMethod.METERED,
+    ).distinct():
+        charges = property_.charges.filter(
+            is_active=True, billing_method=PropertyCharge.BillingMethod.METERED
+        )
+        occupied = property_.units.filter(
+            tenancies__status=Tenancy.Status.ACTIVE
+        ).distinct().order_by("unit_number")
+
+        missing = [
+            unit.unit_number
+            for unit in occupied
+            if any(
+                not MeterReading.objects.filter(unit=unit, charge=charge, period=period).exists()
+                for charge in charges
             )
+        ]
+        if not missing:
+            continue
 
-            if days > 0:
-                msg = (
-                    f"Dear {tenant.first_name}, your rent of KES {balance:,.0f} "
-                    f"for {where} is due in {days} days. {how}"
-                )
-            elif days == 0:
-                msg = (
-                    f"Dear {tenant.first_name}, your rent of KES {balance:,.0f} "
-                    f"for {where} is due TODAY. {how}"
-                )
-            else:
-                late = -days
-                msg = (
-                    f"Dear {tenant.first_name}, your rent of KES {balance:,.0f} "
-                    f"for {where} is {late} days overdue. {how}"
-                )
-
-            send_sms.delay(tenant.id, msg)
+        shown = ", ".join(missing[:8]) + (f" and {len(missing) - 8} more" if len(missing) > 8 else "")
+        message = (
+            f"{property_.name}: {len(missing)} unit{'s' if len(missing) != 1 else ''} "
+            f"still {'have' if len(missing) != 1 else 'has'} no meter reading for "
+            f"{period:%B} ({shown}). Enter them before the 1st so water is on the first bill."
+        )
+        for person_id in {property_.owner_id, property_.caretaker_id} - {None}:
+            send_sms.delay(person_id, message)

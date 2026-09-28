@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from django.db import transaction
 from .models import Invoice, Payment, InvoiceLineItem
+from .services import pay_to
 
 
 class PaymentSerializer(serializers.ModelSerializer):
@@ -47,6 +48,11 @@ class InvoiceSerializer(serializers.ModelSerializer):
     line_items = InvoiceLineItemSerializer(many=True, required=False)
     tenant_name = serializers.CharField(source="tenancy.tenant.get_full_name", read_only=True)
     unit_number = serializers.CharField(source="tenancy.unit.unit_number", read_only=True)
+    # The app's "how to pay" panel read mpesa_paybill from the invoice, which
+    # was never sent — so every tenant saw "Ask your landlord" — and showed the
+    # unit number where the payment code belongs.
+    mpesa_paybill = serializers.SerializerMethodField()
+    pay_account = serializers.SerializerMethodField()
 
     class Meta:
         model = Invoice
@@ -55,9 +61,16 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "amount_due", "amount_paid", "balance", "due_date",
             "status", "period_start", "period_end", "notes",
             "payments", "line_items",
+            "mpesa_paybill", "pay_account",
             "created_at",
         ]
         read_only_fields = ["id", "invoice_number", "amount_paid", "status", "created_at"]
+
+    def get_mpesa_paybill(self, invoice):
+        return pay_to(invoice.tenancy.unit)[0]
+
+    def get_pay_account(self, invoice):
+        return pay_to(invoice.tenancy.unit)[1]
 
     def validate(self, attrs):
         if (

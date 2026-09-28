@@ -188,11 +188,16 @@ class MpesaSTKRequest(models.Model):
 
 
 class BankPaymentNotification(models.Model):
-    """Raw IPN / statement-poll record from KCB or Equity. Reconciled to a Payment when matched."""
+    """Money that arrived but has not been placed against an invoice yet.
+
+    Raw IPN / statement-poll records from KCB or Equity, and M-Pesa payments
+    Kasa could not match. Reconciled to a Payment when matched.
+    """
 
     class Bank(models.TextChoices):
         KCB = "kcb", "KCB"
         EQUITY = "equity", "Equity"
+        MPESA = "mpesa", "M-Pesa"
 
     class Status(models.TextChoices):
         UNMATCHED = "unmatched", "Unmatched"
@@ -210,6 +215,17 @@ class BankPaymentNotification(models.Model):
     status = models.CharField(max_length=12, choices=Status.choices, default=Status.UNMATCHED, db_index=True)
     payment = models.OneToOneField(
         Payment, on_delete=models.SET_NULL, null=True, blank=True, related_name="bank_notification"
+    )
+    # WHY: ownership used to be inferred only by matching the typed reference
+    # to one of a landlord's units — so a payment with a mistyped reference, the
+    # very one that needs a human, belonged to nobody and was shown to nobody.
+    # Set whenever the landlord is known; null only when nothing identifies them.
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="unplaced_payments",
     )
     received_at = models.DateTimeField(auto_now_add=True)
 

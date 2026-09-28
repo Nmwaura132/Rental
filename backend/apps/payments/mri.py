@@ -12,7 +12,6 @@ liability that month.
 from decimal import Decimal
 
 from django.conf import settings
-from django.db.models import Q, Sum
 
 from apps.payments.models import Payment
 
@@ -28,13 +27,8 @@ def _rate() -> Decimal:
     return Decimal(str(settings.MRI_TAX_RATE))
 
 
-def rent_roll(*, owner, period_start, period_end):
-    """Per-tenancy rent actually received in the period, for eRITS.
-
-    Includes the tenant KRA PIN because eRITS ties each registered property to
-    the PIN of whoever occupies it.
-    """
-    payments = (
+def _payments_in(owner, period_start, period_end):
+    return (
         Payment.objects.filter(
             invoice__tenancy__unit__property__owner=owner,
             status=Payment.Status.CONFIRMED,
@@ -48,8 +42,59 @@ def rent_roll(*, owner, period_start, period_end):
         .order_by("invoice__tenancy__unit__property__name", "invoice__tenancy__unit__unit_number")
     )
 
+
+def _rent_share(payment, cache: dict) -> Decimal:
+    """How much of a payment was rent.
+
+    WHY: a bill now carries water, garbage and — on move-in — the deposit
+    alongside rent, and MRI is tax on rent alone. The deposit is refundable
+    security, not income. Counting whole payments overstated the tax.
+
+    Payments on a bill are taken as settling rent first, then the other
+    charges; anything paid beyond the whole bill is rent paid in advance, which
+    MRI taxes when it is received. That is the reading that declares the most
+    rent, so if it is wrong, it is wrong in KRA's favour, not the landlord's.
+    """
+    invoice = payment.invoice
+    if invoice.pk not in cache:
+        lines = list(invoice.line_items.all())
+        # A bill with no lines predates itemised billing and was rent only.
+        rent_due = (
+            sum((line.amount for line in lines if line.charge_type == "rent"), Decimal("0"))
+            if lines else invoice.amount_due
+        )
+        other_due = invoice.amount_due - rent_due
+        shares = {}
+        for earlier in invoice.payments.filter(status=Payment.Status.CONFIRMED).order_by("paid_at", "id"):
+            left = earlier.amount
+            to_rent = min(left, max(rent_due, Decimal("0")))
+            left -= to_rent
+            rent_due -= to_rent
+            to_other = min(left, max(other_due, Decimal("0")))
+            left -= to_other
+            other_due -= to_other
+            shares[earlier.pk] = to_rent + left
+        cache[invoice.pk] = shares
+    return cache[invoice.pk].get(payment.pk, Decimal("0"))
+
+
+def _rent_payments(owner, period_start, period_end):
+    """(payment, rent share) for every payment in the period that included rent."""
+    cache = {}
+    for payment in _payments_in(owner, period_start, period_end):
+        share = _rent_share(payment, cache)
+        if share > 0:
+            yield payment, share
+
+
+def rent_roll(*, owner, period_start, period_end):
+    """Per-tenancy rent actually received in the period, for eRITS.
+
+    Includes the tenant KRA PIN because eRITS ties each registered property to
+    the PIN of whoever occupies it.
+    """
     rows: dict[int, dict] = {}
-    for payment in payments:
+    for payment, share in _rent_payments(owner, period_start, period_end):
         tenancy = payment.invoice.tenancy
         row = rows.setdefault(
             tenancy.id,
@@ -65,7 +110,7 @@ def rent_roll(*, owner, period_start, period_end):
                 "etims_receipts": [],
             },
         )
-        row["rent_received"] += payment.amount
+        row["rent_received"] += share
         # KRA cross-checks what is declared here against their eTIMS records, so
         # the row carries the receipts backing it. A month settled in parts can
         # sit under one receipt, hence the de-duplication.
@@ -79,26 +124,13 @@ def rent_roll(*, owner, period_start, period_end):
 
 def mri_summary(*, owner, period_start, period_end):
     """Gross rent received and the MRI due on it for one period."""
-    gross = (
-        Payment.objects.filter(
-            invoice__tenancy__unit__property__owner=owner,
-            status=Payment.Status.CONFIRMED,
-            paid_at__date__gte=period_start,
-            paid_at__date__lte=period_end,
-        ).aggregate(total=Sum("amount"))["total"]
-        or Decimal("0")
-    )
+    rent_payments = list(_rent_payments(owner, period_start, period_end))
+    gross = sum((share for _, share in rent_payments), Decimal("0"))
 
     rate = _rate()
     rows = rent_roll(owner=owner, period_start=period_start, period_end=period_end)
     missing_pins = [r["tenant"] for r in rows if not r["tenant_kra_pin"]]
-
-    unreceipted = Payment.objects.filter(
-        invoice__tenancy__unit__property__owner=owner,
-        status=Payment.Status.CONFIRMED,
-        paid_at__date__gte=period_start,
-        paid_at__date__lte=period_end,
-    ).filter(Q(etims_receipt_number__isnull=True) | Q(etims_receipt_number="")).count()
+    unreceipted = sum(1 for payment, _ in rent_payments if not payment.etims_receipt_number)
 
     return {
         "period_start": period_start,

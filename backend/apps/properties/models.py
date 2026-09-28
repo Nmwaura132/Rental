@@ -101,12 +101,12 @@ class Unit(models.Model):
         collision that, for most units, never happens.
         """
         base = _slugify_unit_number(self.unit_number)[:12] or "UNIT"
-        if not Unit.objects.filter(payment_code__iexact=base).exists():
+        if not Unit.objects.filter(payment_code__iexact=base).exclude(pk=self.pk).exists():
             return base
         for _ in range(20):
             suffix = "".join(random.choices(_PAYMENT_CODE_ALPHABET, k=4))
             candidate = f"{base[:7]}{suffix}"[:12]
-            if not Unit.objects.filter(payment_code__iexact=candidate).exists():
+            if not Unit.objects.filter(payment_code__iexact=candidate).exclude(pk=self.pk).exists():
                 return candidate
         # Astronomically unlikely with a 32-char alphabet and 4-char suffix,
         # but fail loudly rather than save a colliding payment_code.
@@ -115,6 +115,16 @@ class Unit(models.Model):
     def save(self, *args, **kwargs):
         if not self.pk and not self.payment_code:
             self.payment_code = self._next_payment_code()
+        elif self.pk:
+            # WHY: the code used to be fixed at creation, so a landlord renaming
+            # "101" to their real house number "G1" kept telling tenants to pay
+            # to "101". Payments keep the reference as typed, so re-deriving
+            # the code rewrites no history.
+            before = type(self).objects.filter(pk=self.pk).values_list("unit_number", flat=True).first()
+            if before is not None and before != self.unit_number:
+                self.payment_code = self._next_payment_code()
+                if kwargs.get("update_fields") is not None:
+                    kwargs["update_fields"] = {*kwargs["update_fields"], "payment_code"}
         super().save(*args, **kwargs)
 
     @classmethod
@@ -190,3 +200,44 @@ class PropertyCharge(models.Model):
 
     def __str__(self):
         return f"{self.property.name} — {self.name}"
+
+
+class MeterReading(models.Model):
+    """A unit's meter as read at the end of a month.
+
+    WHY a record of its own: readings used to exist only as figures typed onto
+    an invoice, so each month the landlord re-entered last month's reading by
+    hand and nothing could bill water automatically. Consumption for a month is
+    this reading minus the one before it; the first reading on a meter is the
+    baseline and bills nothing.
+
+    `period` is the first day of the month the reading closes. Water is billed
+    in arrears, so September's reading is charged on October's bill.
+    """
+
+    unit = models.ForeignKey(Unit, on_delete=models.PROTECT, related_name="meter_readings")
+    charge = models.ForeignKey(PropertyCharge, on_delete=models.PROTECT, related_name="readings")
+    period = models.DateField()
+    reading = models.DecimalField(max_digits=10, decimal_places=2)
+    recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="meter_readings"
+    )
+    recorded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "meter_readings"
+        ordering = ["-period"]
+        constraints = [
+            models.UniqueConstraint(fields=["unit", "charge", "period"], name="meter_reading_once_per_period"),
+            models.CheckConstraint(condition=models.Q(reading__gte=0), name="meter_reading_nonnegative"),
+        ]
+
+    def __str__(self):
+        return f"{self.unit} {self.charge.name} {self.period:%b %Y}: {self.reading}"
+
+    def previous(self):
+        return (
+            MeterReading.objects.filter(unit=self.unit, charge=self.charge, period__lt=self.period)
+            .order_by("-period")
+            .first()
+        )

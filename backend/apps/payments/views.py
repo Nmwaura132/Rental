@@ -15,7 +15,7 @@ from apps.core.permissions import IsLandlord
 from .models import Invoice, Payment, MpesaSTKRequest
 from .serializers import InvoiceSerializer, PaymentSerializer
 from .mpesa import make_idempotency_key
-from .services import apply_confirmed_payment
+from .services import apply_confirmed_payment, how_to_pay
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,6 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             "tenancy__tenant", "tenancy__unit__property"
         ).get(pk=serializer.instance.pk)
         from apps.notifications.tasks import send_sms
-        from django.conf import settings
         tenant = invoice.tenancy.tenant
         unit = invoice.tenancy.unit
         msg = (
@@ -72,8 +71,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             f"for {unit.property.name} Unit {unit.unit_number} "
             f"has been issued. Amount: KES {invoice.amount_due:,.0f}. "
             f"Due: {invoice.due_date.strftime('%d %b %Y')}. "
-            f"Pay via M-Pesa Paybill {settings.MPESA_SHORTCODE}, "
-            f"Acc: {unit.payment_code}."
+            f"{how_to_pay(unit)}"
         )
         send_sms.delay(tenant.id, msg)
 
@@ -277,7 +275,7 @@ class DashboardStatsView(APIView):
                 "tenancy_id": tenancy.id if tenancy else None,
                 "notice_given_at": tenancy.notice_given_at.isoformat() if (tenancy and tenancy.notice_given_at) else None,
                 "notice_effective_date": tenancy.notice_effective_date.isoformat() if (tenancy and tenancy.notice_effective_date) else None,
-                "mpesa_paybill": getattr(django_settings, "MPESA_SHORTCODE", None),
+                "mpesa_paybill": django_settings.RENT_PAYBILL,
             })
 
         # Landlord / caretaker dashboard

@@ -306,7 +306,8 @@ class BankNotificationListView(APIView):
         owned_unit_refs = owned_units.values("unit_number")
         owned_payment_codes = owned_units.values("payment_code")
         qs = BankPaymentNotification.objects.filter(
-            Q(payment__invoice__tenancy__unit__property__owner=request.user)
+            Q(owner=request.user)
+            | Q(payment__invoice__tenancy__unit__property__owner=request.user)
             | Q(payment_ref__in=owned_invoice_refs)
             | Q(payment_ref__in=owned_unit_refs)
             | Q(payment_ref__in=owned_payment_codes)
@@ -347,7 +348,8 @@ class BankNotificationMatchView(APIView):
         owned_payment_codes = owned_units.values("payment_code")
         try:
             notification = BankPaymentNotification.objects.filter(
-                Q(payment__invoice__tenancy__unit__property__owner=request.user)
+                Q(owner=request.user)
+                | Q(payment__invoice__tenancy__unit__property__owner=request.user)
                 | Q(payment_ref__in=owned_invoice_refs)
                 | Q(payment_ref__in=owned_unit_refs)
                 | Q(payment_ref__in=owned_payment_codes)

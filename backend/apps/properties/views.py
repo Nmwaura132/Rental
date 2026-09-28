@@ -13,8 +13,13 @@ from apps.core.permissions import IsLandlord
 from apps.payments.models import Payment
 from apps.tenants.models import MaintenanceRequest, Tenancy
 
-from .models import Property, PropertyCharge, Unit
-from .serializers import PropertyChargeSerializer, PropertySerializer, UnitSerializer
+from .models import MeterReading, Property, PropertyCharge, Unit
+from .serializers import (
+    MeterReadingSerializer,
+    PropertyChargeSerializer,
+    PropertySerializer,
+    UnitSerializer,
+)
 
 
 def _validate_managed_property(user, property_):
@@ -35,9 +40,67 @@ class PropertyViewSet(viewsets.ModelViewSet):
     queryset = Property.objects.none()
 
     def get_permissions(self):
-        if self.action in {"create", "update", "partial_update", "destroy"}:
+        if self.action in {"create", "update", "partial_update", "destroy", "renumber"}:
             return [IsLandlord()]
         return super().get_permissions()
+
+    @action(detail=True, methods=["post"])
+    def renumber(self, request, pk=None):
+        """Give a property's units new house numbers in one step.
+
+        Body: {"units": [{"id": 1, "unit_number": "G1", "floor": 0}, ...]}
+
+        WHY all at once, on the server: renaming units one by one fails as soon
+        as two of them trade numbers ("1A" <-> "1B"), because each rename
+        briefly collides with the other. Everything is cleared to a placeholder
+        first, then written, inside one transaction — all or nothing.
+        """
+        from django.db import transaction
+
+        property_ = self.get_object()
+        entries = request.data.get("units") or []
+        units = {u.id: u for u in property_.units.all()}
+
+        seen = {}
+        for entry in entries:
+            number = str(entry.get("unit_number") or "").strip()
+            unit_id = entry.get("id")
+            if unit_id not in units:
+                return Response({"error": f"Unit {unit_id} is not in this property."}, status=400)
+            if not number:
+                return Response({"error": f"Unit {units[unit_id].unit_number} needs a number."}, status=400)
+            if len(number) > 20:
+                return Response({"error": f"{number} is longer than 20 characters."}, status=400)
+            if number.upper() in seen:
+                return Response({"error": f"{number} is used twice."}, status=400)
+            floor = entry.get("floor")
+            if floor is not None and (not isinstance(floor, int) or floor < 0):
+                return Response({"error": f"Floor for {number} must be 0 or more."}, status=400)
+            seen[number.upper()] = unit_id
+
+        # Units left out keep their numbers, so the new ones must not clash with them.
+        untouched = {u.unit_number.upper() for uid, u in units.items() if uid not in {e["id"] for e in entries}}
+        clash = untouched & set(seen)
+        if clash:
+            return Response({"error": f"{sorted(clash)[0]} already belongs to another unit."}, status=400)
+
+        with transaction.atomic():
+            ids = [e["id"] for e in entries]
+            # Placeholders are unique per unit, so no step can collide. The
+            # payment code is cleared too, so a unit taking "G1" is not pushed
+            # onto "G1XXXX" by a neighbour still holding the old "G1" code.
+            for unit_id in ids:
+                Unit.objects.filter(pk=unit_id).update(
+                    unit_number=f"~{unit_id}", payment_code=f"~{unit_id}"[:12]
+                )
+            for entry in entries:
+                unit = Unit.objects.get(pk=entry["id"])
+                unit.unit_number = str(entry["unit_number"]).strip()
+                if entry.get("floor") is not None:
+                    unit.floor = int(entry["floor"])
+                unit.save()
+
+        return Response(UnitSerializer(property_.units.order_by("floor", "unit_number"), many=True).data)
 
     def get_queryset(self):
         user = self.request.user
@@ -236,3 +299,109 @@ class UnitViewSet(viewsets.ModelViewSet):
                 {"error": "Units with tenancy history cannot be deleted."},
                 status=409,
             )
+
+
+class MeterReadingViewSet(viewsets.ModelViewSet):
+    """Meter readings, entered by the landlord or the caretaker."""
+
+    serializer_class = MeterReadingSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["unit", "charge", "period"]
+    queryset = MeterReading.objects.none()
+    # Deleting a reading would silently change the usage billed from the one
+    # after it; a wrong figure is corrected by editing it instead.
+    http_method_names = ["get", "post", "patch", "head", "options"]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = MeterReading.objects.select_related("unit", "charge", "recorded_by")
+        if user.is_landlord:
+            return qs.filter(unit__property__owner=user)
+        if user.is_caretaker:
+            return qs.filter(unit__property__caretaker=user)
+        return MeterReading.objects.none()
+
+    def perform_create(self, serializer):
+        _validate_managed_property(self.request.user, serializer.validated_data["unit"].property)
+        reading = serializer.save(recorded_by=self.request.user)
+        _bill_late(reading)
+
+    def perform_update(self, serializer):
+        from apps.payments.billing import next_month
+        from apps.payments.models import Invoice
+
+        reading = serializer.instance
+        _validate_managed_property(self.request.user, reading.unit.property)
+        # Once usage has been billed, changing the reading would leave the bill
+        # quoting figures the record no longer holds.
+        if Invoice.objects.filter(
+            tenancy__unit=reading.unit,
+            period_start=next_month(reading.period),
+            line_items__charge_type=reading.charge.charge_type,
+            line_items__current_reading__isnull=False,
+        ).exists():
+            raise PermissionDenied(
+                "This reading has already been billed. Adjust the tenant's bill instead."
+            )
+        serializer.save()
+
+    @action(detail=False, methods=["get"])
+    def sheet(self, request):
+        """Every metered unit in a property for one month, with last month's
+        reading filled in, so readings can be entered round the building.
+
+        GET ?property=<id>&period=YYYY-MM-DD
+        """
+        from datetime import date
+
+        try:
+            property_ = Property.objects.get(pk=request.query_params.get("property"))
+            period = date.fromisoformat(request.query_params.get("period", "")).replace(day=1)
+        except (Property.DoesNotExist, ValueError, TypeError):
+            return Response({"error": "property and period (YYYY-MM-DD) are required."}, status=400)
+        _validate_managed_property(request.user, property_)
+
+        charges = PropertyCharge.objects.filter(
+            property=property_, is_active=True,
+            billing_method=PropertyCharge.BillingMethod.METERED,
+        )
+        occupied = set(
+            Tenancy.objects.filter(
+                unit__property=property_, status=Tenancy.Status.ACTIVE
+            ).values_list("unit_id", flat=True)
+        )
+        rows = []
+        for unit in property_.units.order_by("unit_number"):
+            for charge in charges:
+                readings = MeterReading.objects.filter(unit=unit, charge=charge)
+                current = readings.filter(period=period).first()
+                previous = readings.filter(period__lt=period).order_by("-period").first()
+                rows.append({
+                    "unit": unit.id,
+                    "unit_number": unit.unit_number,
+                    "occupied": unit.id in occupied,
+                    "charge": charge.id,
+                    "charge_name": charge.name,
+                    "unit_price": charge.unit_price,
+                    "previous_reading": previous.reading if previous else None,
+                    "reading_id": current.id if current else None,
+                    "reading": current.reading if current else None,
+                })
+        return Response({"period": period, "rows": rows})
+
+
+def _bill_late(reading):
+    """Charge a reading entered after its bill went out, and tell the tenant."""
+    from apps.notifications.tasks import send_sms
+    from apps.payments.billing import bill_late_reading
+    from apps.payments.services import how_to_pay
+
+    for bill, line in bill_late_reading(reading):
+        tenancy = bill.tenancy
+        send_sms.delay(
+            tenancy.tenant_id,
+            f"Dear {tenancy.tenant.first_name}, your {bill.period_start:%B} bill has "
+            f"been updated: {line['description']} KES {line['amount']:,.0f} added. "
+            f"You now owe KES {bill.balance:,.0f}. {how_to_pay(tenancy.unit)}",
+        )

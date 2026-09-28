@@ -33,13 +33,13 @@ def sent(monkeypatch):
     return captured
 
 
-def _invoice(tenancy, *, due_in_days, status=Invoice.Status.PENDING, number="INV-R"):
+def _invoice(tenancy, *, due_in_days, status=Invoice.Status.PENDING, number="INV-R", months_ago=0):
     return Invoice.objects.create(
         tenancy=tenancy,
         invoice_number=number,
         amount_due=Decimal("15000.00"),
         due_date=timezone.localdate() + timedelta(days=due_in_days),
-        period_start=timezone.localdate(),
+        period_start=timezone.localdate() - timedelta(days=31 * months_ago),
         period_end=timezone.localdate() + timedelta(days=30),
         status=status,
     )
@@ -52,10 +52,10 @@ class TestBeforeItIsDue:
         send_rent_reminders()
         assert len(sent) == 1
 
-    def test_a_lead_reminder_says_how_long_is_left(self, tenancy, sent):
-        _invoice(tenancy, due_in_days=7)
+    def test_the_eve_reminder_says_tomorrow(self, tenancy, sent):
+        _invoice(tenancy, due_in_days=1)
         send_rent_reminders()
-        assert "due in 7 days" in sent[0][1]
+        assert "due tomorrow" in sent[0][1]
 
     def test_the_due_day_reminder_says_today(self, tenancy, sent):
         _invoice(tenancy, due_in_days=0)
@@ -117,3 +117,41 @@ class TestTheMessage:
         _invoice(tenancy, due_in_days=0)
         send_rent_reminders()
         assert f"Acc: {unit.payment_code}" in sent[0][1]
+
+
+class TestOneMessagePerTenant:
+    """A tenant months behind used to get a text per unpaid invoice on the same
+    morning, each quoting only that month."""
+
+    def _arrears(self, tenancy):
+        _invoice(tenancy, due_in_days=0, number="INV-NOW")
+        _invoice(tenancy, due_in_days=-30, status=Invoice.Status.OVERDUE,
+                 number="INV-OLD", months_ago=1)
+
+    def test_two_unpaid_bills_send_one_message(self, tenancy, sent):
+        self._arrears(tenancy)
+        send_rent_reminders()
+        assert len(sent) == 1
+
+    def test_the_message_quotes_the_total_owed(self, tenancy, sent):
+        self._arrears(tenancy)
+        send_rent_reminders()
+        assert "KES 30,000" in sent[0][1]
+
+    def test_the_message_says_other_bills_are_included(self, tenancy, sent):
+        self._arrears(tenancy)
+        send_rent_reminders()
+        assert "1 other unpaid bill" in sent[0][1]
+
+
+class TestWhereToPay:
+    def test_a_bank_paybill_account_prefix_is_quoted(self, tenancy, sent, unit, settings):
+        # Caritas's shared paybill: the account is the landlord's bank account
+        # followed by the unit code.
+        settings.RENT_PAYBILL = "899790"
+        settings.RENT_ACCOUNT_PREFIX = "623943#"
+        _invoice(tenancy, due_in_days=0)
+        send_rent_reminders()
+        # Behind the bank's paybill the account already names the landlord, so
+        # the house number is quoted exactly as the landlord set it.
+        assert f"Paybill 899790, Acc: 623943#{unit.unit_number}" in sent[0][1]
