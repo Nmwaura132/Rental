@@ -11,6 +11,7 @@ import '../../core/utils/api_error.dart';
 import '../../core/utils/currency.dart';
 import '../../core/widgets/kasa_primitives.dart';
 import '../../shared/widgets/shimmer_loading.dart';
+import 'unplaced_payments.dart';
 
 final _apiDate = DateFormat('yyyy-MM-dd');
 final _displayDate = DateFormat('dd MMM yyyy');
@@ -151,6 +152,8 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
               ),
             ),
 
+            if (isLandlord) const UnplacedPaymentsBanner(),
+
             // ── Filter chips ───────────────────────────────────────────────
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
@@ -209,11 +212,22 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
                               (i as Map)['status'] == _filter)
                           .toList();
                     }
+                    // WHY the empty state is refreshable too: it had no pull
+                    // to refresh, so a landlord who opened Bills before the
+                    // month's bills were raised was stuck on "No invoices"
+                    // until the app restarted.
+                    Future<void> refresh() {
+                      ref.invalidate(unplacedPaymentsProvider);
+                      return ref.refresh(invoicesProvider.future);
+                    }
+
                     if (list.isEmpty) {
-                      return Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
+                      return RefreshIndicator(
+                        onRefresh: refresh,
+                        child: ListView(
+                          physics: const AlwaysScrollableScrollPhysics(),
                           children: [
+                            SizedBox(height: MediaQuery.of(context).size.height * 0.2),
                             const Icon(Icons.receipt_long_outlined,
                                 size: 64, color: Colors.grey),
                             const SizedBox(height: 12),
@@ -221,12 +235,15 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
                               _filter == 'all'
                                   ? 'No invoices yet.'
                                   : 'No ${_filter.toUpperCase()} invoices.',
+                              textAlign: TextAlign.center,
                               style: const TextStyle(color: Colors.grey),
                             ),
                             if (_filter == 'all') ...[
                               const SizedBox(height: 4),
                               const Text(
-                                'Tap "ADD" to generate the first one.',
+                                'Bills are raised automatically on the 1st of '
+                                'each month.',
+                                textAlign: TextAlign.center,
                                 style: TextStyle(
                                     color: Colors.grey, fontSize: 12),
                               ),
@@ -236,7 +253,7 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
                       );
                     }
                     return RefreshIndicator(
-                      onRefresh: () => ref.refresh(invoicesProvider.future),
+                      onRefresh: refresh,
                       child: ListView.builder(
                         padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
                         itemCount: list.length,
@@ -1473,7 +1490,9 @@ class _PaymentMethodSheet extends StatelessWidget {
                 label: 'Business No.',
                 value: invoice['mpesa_paybill']?.toString() ?? 'Ask your landlord'),
             _InstructionStep(
-                n: 4, label: 'Account No.', value: unitNo),
+                n: 4,
+                label: 'Account No.',
+                value: invoice['pay_account']?.toString() ?? unitNo),
             _InstructionStep(
                 n: 5,
                 label: 'Amount',
