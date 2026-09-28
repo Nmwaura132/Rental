@@ -17,14 +17,14 @@ class TenancySerializer(serializers.ModelSerializer):
             "deposit_amount", "deposit_paid", "status", "notes", "created_at",
             "tenant_name", "tenant_phone", "unit_number", "property_name", "property_id",
             "tenancy_pdf_url",
-            "notice_given_at", "notice_effective_date", "notice_reason",
+            "notice_given_at", "notice_effective_date", "notice_reason", "notice_given_by",
         ]
         # WHY read-only: notice is given through the give-notice action, which
         # fixes the effective date at the full notice period. Writable fields
         # here would let a client set any date it liked.
         read_only_fields = [
             "id", "document_key", "tenancy_pdf_url", "created_at",
-            "notice_given_at", "notice_effective_date", "notice_reason",
+            "notice_given_at", "notice_effective_date", "notice_reason", "notice_given_by",
         ]
 
     def get_tenancy_pdf_url(self, obj) -> str | None:

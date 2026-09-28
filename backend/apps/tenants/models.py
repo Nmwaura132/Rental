@@ -37,11 +37,20 @@ class Tenancy(models.Model):
     notice_given_at = models.DateTimeField(null=True, blank=True)
     notice_effective_date = models.DateField(
         null=True, blank=True,
-        help_text="The day the tenant intends to vacate.",
+        help_text="The last day the tenant may occupy the unit.",
     )
     notice_reason = models.TextField(
         blank=True,
-        help_text="The tenant's own words, kept as the written record.",
+        help_text="The written reason for the notice, kept verbatim as the record.",
+    )
+    # Either party may end the tenancy under the agreement, and a notice means
+    # something different depending on who gave it, so the record says.
+    notice_given_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="notices_given",
     )
 
     created_at = models.DateTimeField(auto_now_add=True)

@@ -5,6 +5,7 @@ from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from celery import shared_task
 from django.db import transaction as db_transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from .models import Invoice, Payment, BankPaymentNotification
@@ -492,7 +493,15 @@ def generate_monthly_invoices():
     period_end = next_month - timedelta(days=1)
     due_date = period_start.replace(day=settings.RENT_DUE_DAY)
 
-    active_tenancies = Tenancy.objects.filter(status=Tenancy.Status.ACTIVE).select_related("unit", "tenant")
+    # WHY the notice check is here as well as in end_expired_tenancies: this
+    # is the guarantee that someone who has left is not billed, and it should
+    # not rest on another task having run first. A tenancy whose notice ended
+    # before this month began is not billed for it.
+    active_tenancies = (
+        Tenancy.objects.filter(status=Tenancy.Status.ACTIVE)
+        .filter(Q(notice_effective_date__isnull=True) | Q(notice_effective_date__gte=period_start))
+        .select_related("unit", "tenant")
+    )
     created = 0
 
     for tenancy in active_tenancies:

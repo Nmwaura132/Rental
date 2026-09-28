@@ -1,5 +1,4 @@
 import logging
-from datetime import timedelta
 
 from django.utils import timezone
 from rest_framework import viewsets, permissions, status
@@ -11,14 +10,10 @@ from apps.core.permissions import IsLandlordOrCaretaker
 from apps.notifications.tasks import send_sms
 from apps.payments.services import create_move_in_invoice
 from .models import Tenancy, MaintenanceRequest, MaintenanceNote
+from .notice import vacate_by
 from .serializers import TenancySerializer, MaintenanceRequestSerializer, MaintenanceNoteSerializer
 
 logger = logging.getLogger(__name__)
-
-# Kenyan monthly tenancies run on a month's notice either way. Fixed here
-# rather than taken from the request so it cannot be shortened by the client.
-NOTICE_PERIOD_DAYS = 30
-
 
 def _validate_managed_tenant(user, tenant):
     if tenant.created_by_id == user.id:
@@ -115,20 +110,24 @@ class TenancyViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="give-notice")
     def give_notice(self, request, pk=None):
-        """The tenant's written notice to vacate.
+        """Written notice to end the tenancy, from the tenant or the landlord.
 
-        POST body: {"reason": "..."} — optional free text, kept verbatim as the
-        written record. The effective date is fixed at NOTICE_PERIOD_DAYS from
-        today rather than accepted from the client, so the notice period cannot
-        be shortened by editing the request.
+        POST body: {"reason": "..."} — kept verbatim as the written record. The
+        landlord must give one; a tenant may leave it out. The date the tenant
+        must be out by is worked out from the agreement (see notice.vacate_by)
+        and never accepted from the client, so the notice period cannot be
+        shortened by editing the request.
         """
         tenancy = self.get_object()
+        user = request.user
+        by_tenant = tenancy.tenant_id == user.id
+        by_landlord = tenancy.unit.property.owner_id == user.id
 
-        # Only the tenant may give notice — a landlord ending a tenancy is an
-        # eviction, which is a different process with different protections.
-        if tenancy.tenant_id != request.user.id:
+        # The agreement lets either party end the tenancy. A caretaker manages
+        # the building but is not a party to it, so cannot.
+        if not (by_tenant or by_landlord):
             return Response(
-                {"error": "Only the tenant can give notice on this tenancy."},
+                {"error": "Only the tenant or the landlord can give notice on this tenancy."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
@@ -148,35 +147,52 @@ class TenancyViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_409_CONFLICT,
             )
 
-        now = timezone.now()
-        tenancy.notice_given_at = now
+        reason = (request.data.get("reason") or "").strip()[:2000]
+        if by_landlord and not reason:
+            return Response(
+                {"error": "Give the tenant a reason for ending the tenancy."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         # WHY localdate() and not now.date(): now.date() is the UTC calendar
         # date. Kenya is UTC+3, so for the first three hours of every local day
-        # the UTC date is still yesterday, and the tenant would be handed 29
-        # days of notice instead of 30. Both parties count in local days.
-        tenancy.notice_effective_date = timezone.localdate() + timedelta(
-            days=NOTICE_PERIOD_DAYS
-        )
-        tenancy.notice_reason = (request.data.get("reason") or "").strip()[:2000]
+        # the UTC date is still yesterday, which could put a notice given after
+        # midnight on the wrong side of a month end.
+        tenancy.notice_given_at = timezone.now()
+        tenancy.notice_effective_date = vacate_by(timezone.localdate())
+        tenancy.notice_reason = reason
+        tenancy.notice_given_by = user
         tenancy.save(
-            update_fields=["notice_given_at", "notice_effective_date", "notice_reason"]
+            update_fields=[
+                "notice_given_at", "notice_effective_date", "notice_reason", "notice_given_by",
+            ]
         )
 
-        owner = tenancy.unit.property.owner
+        tenant = tenancy.tenant
+        unit = tenancy.unit
         vacate_on = tenancy.notice_effective_date.strftime("%d %b %Y")
-        send_sms.delay(
-            owner.id,
-            f"{tenancy.tenant.first_name} {tenancy.tenant.last_name} has given "
-            f"{NOTICE_PERIOD_DAYS} days notice on {tenancy.unit.property.name} "
-            f"unit {tenancy.unit.unit_number}. Vacating on {vacate_on}.",
-        )
+        if by_tenant:
+            send_sms.delay(
+                unit.property.owner_id,
+                f"{tenant.first_name} {tenant.last_name} has given notice on "
+                f"{unit.property.name} unit {unit.unit_number}. Vacating by {vacate_on}.",
+            )
+            message = f"Notice given. You are expected to vacate by {vacate_on}."
+        else:
+            send_sms.delay(
+                tenant.id,
+                f"Dear {tenant.first_name}, your landlord has given notice ending your "
+                f"tenancy of {unit.property.name} Unit {unit.unit_number}. Please vacate "
+                f"by {vacate_on}. Reason: {reason}",
+            )
+            message = f"Notice given. {tenant.first_name} must vacate by {vacate_on}."
 
         return Response(
             {
-                "message": f"Notice given. You are expected to vacate on {vacate_on}.",
+                "message": message,
                 "notice_given_at": tenancy.notice_given_at,
                 "notice_effective_date": tenancy.notice_effective_date,
-                "notice_period_days": NOTICE_PERIOD_DAYS,
+                "notice_given_by": user.id,
             },
             status=status.HTTP_200_OK,
         )

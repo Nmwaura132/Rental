@@ -35,6 +35,79 @@ String _tenancyDisplayStatus(Map<String, dynamic> tenancy) {
   return 'active';
 }
 
+/// The landlord's written notice ending a tenancy. The agreement lets either
+/// party give one month's notice, and the tenant is told the reason, so it is
+/// required. The server works out when the tenant must be out; it is never
+/// chosen here.
+Future<void> giveNoticeAsLandlord(
+  BuildContext context,
+  WidgetRef ref,
+  Map<String, dynamic> tenancy,
+) async {
+  final reason = TextEditingController();
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Give notice to the tenant?'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'The tenant is sent this in writing and must vacate by the end '
+            'of next month, as your agreement says. This cannot be undone in '
+            'the app.',
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: reason,
+            maxLines: 3,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: const InputDecoration(
+              labelText: 'Reason (the tenant will see this)',
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, false),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () {
+            if (reason.text.trim().isNotEmpty) Navigator.pop(ctx, true);
+          },
+          child: const Text('Give notice'),
+        ),
+      ],
+    ),
+  );
+  final text = reason.text.trim();
+  reason.dispose();
+  if (confirmed != true || !context.mounted) return;
+
+  final messenger = ScaffoldMessenger.of(context);
+  final errorColor = Theme.of(context).colorScheme.error;
+  try {
+    final res = await ref.read(dioProvider).post(
+      '/api/v1/tenants/tenancies/${tenancy['id']}/give-notice/',
+      data: {'reason': text},
+    );
+    ref.invalidate(tenanciesProvider);
+    messenger.showSnackBar(SnackBar(
+      content: Text(res.data['message']?.toString() ?? 'Notice given.'),
+      backgroundColor: Colors.green,
+    ));
+  } catch (e) {
+    messenger.showSnackBar(SnackBar(
+      content: Text(apiError(e)),
+      backgroundColor: errorColor,
+    ));
+  }
+}
+
+
 /// Runs add-tenant, then add-tenancy, for one specific unit.
 ///
 /// WHY this is a function rather than a route: /tenants is a branch of the
@@ -227,6 +300,8 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                               final phone = tenancy['tenant_phone'] as String?;
                               final rent = tenancy['rent_amount'];
                               final endDate = tenancy['end_date'] as String?;
+                              final noticeDate = DateTime.tryParse(
+                                  tenancy['notice_effective_date']?.toString() ?? '');
 
                               // Design: overdue→primary, ending→tertiary, active→secondary
                               final chipVariant = displayStatus == 'ending'
@@ -335,6 +410,15 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                                                 ),
                                               ),
                                             ],
+                                            if (noticeDate != null && apiStatus == 'active') ...[
+                                              const SizedBox(height: 6),
+                                              KasaChip(
+                                                label:
+                                                    'NOTICE · OUT BY ${DateFormat('d MMM').format(noticeDate).toUpperCase()}',
+                                                variant: KasaChipVariant.tertiary,
+                                                small: true,
+                                              ),
+                                            ],
                                           ],
                                         ),
                                       ),
@@ -343,6 +427,10 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                                           icon: Icon(Icons.more_vert,
                                               size: 20, color: cs.kasaTextSub),
                                           onSelected: (action) async {
+                                            if (action == 'give_notice') {
+                                              await giveNoticeAsLandlord(context, ref, tenancy);
+                                              return;
+                                            }
                                             if (action == 'send_tenancy') {
                                               try {
                                                 ScaffoldMessenger.of(context)
@@ -445,6 +533,16 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                                                     'Send Tenancy Agreement'),
                                               ),
                                             ),
+                                            if (noticeDate == null)
+                                              PopupMenuItem(
+                                                value: 'give_notice',
+                                                child: ListTile(
+                                                  leading: Icon(
+                                                      Icons.event_busy_outlined,
+                                                      color: cs.tertiary),
+                                                  title: const Text('Give notice'),
+                                                ),
+                                              ),
                                             PopupMenuItem(
                                               value: 'terminate',
                                               child: ListTile(

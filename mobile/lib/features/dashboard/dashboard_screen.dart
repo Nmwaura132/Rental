@@ -1195,14 +1195,16 @@ class _NoticeActionState extends ConsumerState<_NoticeAction> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Give 30 days notice?'),
+        title: const Text('Give notice to your landlord?'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const Text(
-              'Your landlord will be told straight away, and you are expected '
-              'to move out 30 days from today. This cannot be undone in the app.',
+              'Your landlord will be told straight away. Under your tenancy '
+              'agreement you give a month of notice and move out by the end '
+              'of next month, so your rent is paid up to the day you leave. '
+              'This cannot be undone in the app.',
             ),
             const SizedBox(height: 16),
             TextField(

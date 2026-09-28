@@ -185,6 +185,10 @@ CELERY_TIMEZONE = TIME_ZONE
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 CELERY_TASK_ROUTES = {
     "apps.payments.tasks.*": {"queue": "payments"},
+    # Ending a tenancy decides who is billed, so it runs with the money tasks.
+    # Only these two queues have a worker: a task on the default queue would
+    # be accepted and then never run.
+    "apps.tenants.tasks.*": {"queue": "payments"},
     "apps.notifications.tasks.*": {"queue": "notifications"},
 }
 
@@ -207,6 +211,11 @@ CELERY_BEAT_SCHEDULE = {
     "remind-missing-meter-readings": {
         "task": "apps.notifications.tasks.remind_missing_meter_readings",
         "schedule": crontab(hour=9, minute=0, day_of_month=28),
+    },
+    # End tenancies whose notice has run out, before the 06:00 bill is raised
+    "end-expired-tenancies": {
+        "task": "apps.tenants.tasks.end_expired_tenancies",
+        "schedule": crontab(hour=0, minute=10),
     },
     "mark-overdue-invoices": {
         "task": "apps.payments.tasks.mark_overdue_invoices",
