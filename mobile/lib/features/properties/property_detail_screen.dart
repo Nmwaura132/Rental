@@ -9,6 +9,8 @@ import '../../core/theme/kasa_tokens.dart';
 import '../../core/utils/api_error.dart';
 import '../../core/utils/currency.dart';
 import '../../core/widgets/kasa_primitives.dart';
+import 'meter_readings_screen.dart';
+import 'renumber_units_screen.dart';
 
 final propertyDetailProvider =
     FutureProvider.family.autoDispose<Map<String, dynamic>, int>((ref, id) async {
@@ -87,7 +89,10 @@ class _PropertyDetailView extends ConsumerWidget {
     final unitCount = data['unit_count'] as int? ?? units.length;
     final vacantCount = data['vacant_count'] as int? ?? 0;
     final occupiedCount = unitCount - vacantCount;
-    final canManage = ref.watch(userRoleProvider).valueOrNull == 'landlord';
+    final role = ref.watch(userRoleProvider).valueOrNull;
+    final canManage = role == 'landlord';
+    // Either of them may walk round and read the meters.
+    final canReadMeters = role == 'landlord' || role == 'caretaker';
 
     return Scaffold(
       backgroundColor: cs.kasaBg,
@@ -198,6 +203,49 @@ class _PropertyDetailView extends ConsumerWidget {
                 ),
               ),
             ),
+
+            if (canReadMeters)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+                  child: KasaButton(
+                    label: 'METER READINGS',
+                    variant: KasaButtonVariant.ghost,
+                    leading: Icon(Icons.speed, size: 16, color: cs.onSurface),
+                    onTap: () => Navigator.of(context, rootNavigator: true).push(
+                      MaterialPageRoute(
+                        builder: (_) => MeterReadingsScreen(
+                          propertyId: propertyId,
+                          propertyName: data['name']?.toString() ?? '',
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+            if (canManage && units.isNotEmpty)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
+                  child: KasaButton(
+                    label: 'RENUMBER UNITS',
+                    variant: KasaButtonVariant.ghost,
+                    leading: Icon(Icons.format_list_numbered, size: 16, color: cs.onSurface),
+                    onTap: () async {
+                      final changed = await Navigator.of(context, rootNavigator: true).push<bool>(
+                        MaterialPageRoute(
+                          builder: (_) => RenumberUnitsScreen(
+                            propertyId: propertyId,
+                            units: units.cast<Map<String, dynamic>>(),
+                          ),
+                        ),
+                      );
+                      if (changed == true) onRefresh();
+                    },
+                  ),
+                ),
+              ),
 
             // ── Units heading ─────────────────────────────────────────────
             SliverToBoxAdapter(

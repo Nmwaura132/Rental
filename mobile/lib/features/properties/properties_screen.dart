@@ -11,6 +11,7 @@ import '../../core/theme/kasa_tokens.dart';
 import '../../core/utils/api_error.dart';
 import '../../core/utils/phone.dart';
 import '../../core/widgets/kasa_primitives.dart';
+import 'unit_numbering.dart';
 import '../../shared/widgets/shimmer_loading.dart';
 
 final propertiesProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
@@ -292,9 +293,14 @@ class _AddPropertyPageState extends ConsumerState<_AddPropertyPage> {
   final _nameCtrl = TextEditingController();
   final _rentCtrl = TextEditingController();
   final _depositCtrl = TextEditingController();
+  final _houseNumbersCtrl = TextEditingController();
+  // Once the landlord types their own numbers, the counters stop overwriting them.
+  bool _numbersEdited = false;
 
   int _numFloors = 1;
   int _unitsPerFloor = 1;
+  NumberingStyle _style = NumberingStyle.floorLetter;
+  bool _hasGround = true;
   String _unitType = 'bedsitter';
   bool _loading = false;
   int _createdUnits = 0;
@@ -305,6 +311,7 @@ class _AddPropertyPageState extends ConsumerState<_AddPropertyPage> {
   @override
   void initState() {
     super.initState();
+    _houseNumbersCtrl.text = _suggestNumbers();
     _charges = [
       _ChargeItem(type: 'water', label: 'Water', billingMethod: 'metered'),
       _ChargeItem(type: 'electricity', label: 'Electricity', billingMethod: 'metered'),
@@ -320,36 +327,60 @@ class _AddPropertyPageState extends ConsumerState<_AddPropertyPage> {
     _nameCtrl.dispose();
     _rentCtrl.dispose();
     _depositCtrl.dispose();
+    _houseNumbersCtrl.dispose();
     for (final c in _charges) {
       c.dispose();
     }
     super.dispose();
   }
 
+  String _suggestNumbers() => layoutNumbers(
+        _style,
+        floors: _numFloors,
+        perFloor: _unitsPerFloor,
+        hasGround: _hasGround,
+      ).join(', ');
+
+  void _setLayout({int? floors, int? perFloor, NumberingStyle? style, bool? hasGround}) {
+    setState(() {
+      _numFloors = floors ?? _numFloors;
+      _unitsPerFloor = perFloor ?? _unitsPerFloor;
+      // Picking a style is an explicit request for its numbers, so it
+      // overrides hand edits; changing the counts does not.
+      if (style != null || hasGround != null) _numbersEdited = false;
+      _style = style ?? _style;
+      _hasGround = hasGround ?? _hasGround;
+      if (!_numbersEdited) _houseNumbersCtrl.text = _suggestNumbers();
+    });
+  }
+
+  List<String> get _houseNumbers => _houseNumbersCtrl.text
+      .split(RegExp(r'[,\n]'))
+      .map((n) => n.trim())
+      .where((n) => n.isNotEmpty)
+      .toList();
+
   List<Map<String, dynamic>> _buildUnits(int propertyId) {
-    final units = <Map<String, dynamic>>[];
     final rent = double.tryParse(_rentCtrl.text.replaceAll(',', '')) ?? 0;
     final deposit = double.tryParse(_depositCtrl.text.replaceAll(',', '')) ?? 0;
-    for (int floor = 1; floor <= _numFloors; floor++) {
-      for (int unit = 1; unit <= _unitsPerFloor; unit++) {
-        units.add({
+    return [
+      for (final number in _houseNumbers)
+        {
           'property': propertyId,
-          'unit_number': '${floor}0$unit'.padLeft(3, '0').replaceAll(' ', ''),
+          'unit_number': number,
           'unit_type': _unitType,
           'rent_amount': rent,
           'deposit_amount': deposit,
-          'floor': floor - 1,
-        });
-      }
-    }
-    return units;
+          'floor': floorOf(number, hasGround: _hasGround),
+        },
+    ];
   }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() {
       _loading = true;
-      _totalUnits = _numFloors * _unitsPerFloor;
+      _totalUnits = _houseNumbers.length;
       _createdUnits = 0;
     });
 
@@ -458,7 +489,7 @@ class _AddPropertyPageState extends ConsumerState<_AddPropertyPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final totalUnits = _numFloors * _unitsPerFloor;
+    final totalUnits = _houseNumbers.length;
 
     return Column(
       children: [
@@ -494,7 +525,7 @@ class _AddPropertyPageState extends ConsumerState<_AddPropertyPage> {
                           value: _numFloors,
                           min: 1,
                           max: 50,
-                          onChanged: (v) => setState(() => _numFloors = v),
+                          onChanged: (v) => _setLayout(floors: v),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -504,10 +535,42 @@ class _AddPropertyPageState extends ConsumerState<_AddPropertyPage> {
                           value: _unitsPerFloor,
                           min: 1,
                           max: 50,
-                          onChanged: (v) => setState(() => _unitsPerFloor = v),
+                          onChanged: (v) => _setLayout(perFloor: v),
                         ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 12),
+                  NumberingStylePicker(
+                    style: _style,
+                    hasGround: _hasGround,
+                    onChanged: (style, hasGround) =>
+                        _setLayout(style: style, hasGround: hasGround),
+                  ),
+                  const SizedBox(height: 4),
+                  TextFormField(
+                    controller: _houseNumbersCtrl,
+                    minLines: 2,
+                    maxLines: 5,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: const InputDecoration(
+                      labelText: 'House numbers *',
+                      helperText: 'Separate with commas. Tenants type these when '
+                          'paying, e.g. 623943#G1',
+                      helperMaxLines: 2,
+                    ),
+                    onChanged: (_) => setState(() => _numbersEdited = true),
+                    validator: (_) {
+                      final numbers = _houseNumbers;
+                      if (numbers.isEmpty) return 'Enter at least one house number';
+                      final tooLong = numbers.where((n) => n.length > 20);
+                      if (tooLong.isNotEmpty) return '${tooLong.first} is longer than 20 characters';
+                      final seen = <String>{};
+                      for (final n in numbers) {
+                        if (!seen.add(n.toUpperCase())) return '$n appears twice';
+                      }
+                      return null;
+                    },
                   ),
                   const SizedBox(height: 4),
                   Text(
