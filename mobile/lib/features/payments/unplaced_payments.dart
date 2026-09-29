@@ -122,7 +122,7 @@ class _UnplacedRow extends ConsumerWidget {
 
     return KasaCard(
       padding: const EdgeInsets.all(16),
-      onTap: () => _assign(context, ref),
+      onTap: () => assignUnplacedPayment(context, ref, row),
       child: Row(
         children: [
           Expanded(
@@ -175,73 +175,76 @@ class _UnplacedRow extends ConsumerWidget {
       ),
     );
   }
+}
 
-  Future<void> _assign(BuildContext context, WidgetRef ref) async {
-    const open = {'pending', 'overdue', 'partially_paid'};
-    final invoices = (await ref.read(invoicesProvider.future))
-        .cast<Map<String, dynamic>>()
-        .where((i) => open.contains(i['status']))
-        .toList();
-    if (!context.mounted) return;
 
-    final invoiceId = await showModalBottomSheet<int>(
-      context: context,
-      useRootNavigator: true,
-      isScrollControlled: true,
-      builder: (ctx) => SafeArea(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(ctx).size.height * 0.7),
-          child: invoices.isEmpty
-              ? const Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Text(
-                    'There are no open bills to assign this to. Raise the '
-                    "tenant's bill first, then come back.",
+/// Asks which open bill something is for. Returns the bill's id, or null if
+/// the landlord backed out or there is nothing open.
+Future<int?> pickOpenBill(BuildContext context, WidgetRef ref, {required String title}) async {
+  const open = {'pending', 'overdue', 'partially_paid'};
+  final invoices = (await ref.read(invoicesProvider.future))
+      .cast<Map<String, dynamic>>()
+      .where((i) => open.contains(i['status']))
+      .toList();
+  if (!context.mounted) return null;
+
+  return showModalBottomSheet<int>(
+    context: context,
+    useRootNavigator: true,
+    isScrollControlled: true,
+    builder: (ctx) => SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.7),
+        child: invoices.isEmpty
+            ? const Padding(
+                padding: EdgeInsets.all(24),
+                child: Text('There are no open bills. Every tenant is paid up.'),
+              )
+            : ListView(
+                shrinkWrap: true,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+                    child: Text(title,
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                   ),
-                )
-              : ListView(
-                  shrinkWrap: true,
-                  children: [
-                    const Padding(
-                      padding: EdgeInsets.fromLTRB(20, 20, 20, 8),
-                      child: Text('Which bill does this pay?',
-                          style: TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.w700)),
+                  for (final inv in invoices)
+                    ListTile(
+                      title: Text('${inv['tenant_name']} \u00b7 Unit ${inv['unit_number']}'),
+                      subtitle: Text(
+                          '${inv['invoice_number']} \u00b7 owes ${formatCurrency(toDouble(inv['balance']))}'),
+                      onTap: () => Navigator.pop(ctx, inv['id'] as int),
                     ),
-                    for (final inv in invoices)
-                      ListTile(
-                        title: Text(
-                            '${inv['tenant_name']} · Unit ${inv['unit_number']}'),
-                        subtitle: Text(
-                            '${inv['invoice_number']} · owes ${formatCurrency(toDouble(inv['balance']))}'),
-                        onTap: () => Navigator.pop(ctx, inv['id'] as int),
-                      ),
-                  ],
-                ),
-        ),
+                ],
+              ),
       ),
-    );
-    if (invoiceId == null || !context.mounted) return;
+    ),
+  );
+}
 
-    final messenger = ScaffoldMessenger.of(context);
-    final errorColor = Theme.of(context).colorScheme.error;
-    try {
-      await ref.read(dioProvider).post(
-        '/api/v1/payments/bank/notifications/${row['id']}/match/',
-        data: {'invoice_id': invoiceId},
-      );
-      ref.invalidate(unplacedPaymentsProvider);
-      ref.invalidate(invoicesProvider);
-      messenger.showSnackBar(const SnackBar(
-        content: Text('Payment assigned.'),
-        backgroundColor: Colors.green,
-      ));
-    } catch (e) {
-      messenger.showSnackBar(SnackBar(
-        content: Text(apiError(e)),
-        backgroundColor: errorColor,
-      ));
-    }
+/// Places a held payment against the bill the landlord picks.
+Future<void> assignUnplacedPayment(
+  BuildContext context,
+  WidgetRef ref,
+  Map<String, dynamic> row,
+) async {
+  final invoiceId = await pickOpenBill(context, ref, title: 'Which bill does this pay?');
+  if (invoiceId == null || !context.mounted) return;
+
+  final messenger = ScaffoldMessenger.of(context);
+  final errorColor = Theme.of(context).colorScheme.error;
+  try {
+    await ref.read(dioProvider).post(
+      '/api/v1/payments/bank/notifications/${row['id']}/match/',
+      data: {'invoice_id': invoiceId},
+    );
+    ref.invalidate(unplacedPaymentsProvider);
+    ref.invalidate(invoicesProvider);
+    messenger.showSnackBar(const SnackBar(
+      content: Text('Payment assigned.'),
+      backgroundColor: Colors.green,
+    ));
+  } catch (e) {
+    messenger.showSnackBar(SnackBar(content: Text(apiError(e)), backgroundColor: errorColor));
   }
 }

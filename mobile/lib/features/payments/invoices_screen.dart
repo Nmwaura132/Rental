@@ -9,6 +9,8 @@ import '../../core/providers/user_role_provider.dart';
 import '../../core/theme/kasa_tokens.dart';
 import '../../core/utils/api_error.dart';
 import '../../core/utils/currency.dart';
+import 'package:go_router/go_router.dart';
+import '../../core/widgets/kasa_layout.dart';
 import '../../core/widgets/kasa_primitives.dart';
 import '../../shared/widgets/shimmer_loading.dart';
 import 'unplaced_payments.dart';
@@ -97,366 +99,390 @@ class InvoicesScreen extends ConsumerStatefulWidget {
 class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
   String _filter = 'all';
 
+  static const _due = {'pending', 'partially_paid'};
+
+  bool _matches(Map<String, dynamic> bill) => switch (_filter) {
+        'overdue' => bill['status'] == 'overdue',
+        'due' => _due.contains(bill['status']),
+        'paid' => bill['status'] == 'paid',
+        _ => true,
+      };
+
+  Future<void> _refresh() {
+    ref.invalidate(unplacedPaymentsProvider);
+    return ref.refresh(invoicesProvider.future);
+  }
+
+  void _newBill() => Navigator.of(context, rootNavigator: true).push(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (ctx) => Scaffold(
+            appBar: AppBar(
+              title: const Text('New bill'),
+              leading: IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => Navigator.of(ctx).pop(),
+              ),
+            ),
+            body: _CreateInvoiceDialog(onDone: () => ref.invalidate(invoicesProvider)),
+          ),
+        ),
+      );
+
+  Future<void> _recordPayment() async {
+    final id = await pickOpenBill(context, ref, title: 'Which bill is this payment for?');
+    if (id == null || !mounted) return;
+    final bill = (await ref.read(invoicesProvider.future))
+        .cast<Map<String, dynamic>>()
+        .firstWhere((b) => b['id'] == id);
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      useRootNavigator: true,
+      barrierDismissible: false,
+      builder: (_) => _RecordPaymentDialog(
+        invoiceId: id,
+        balance: toDouble(bill['balance']),
+        onDone: () => ref.invalidate(invoicesProvider),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final invoices = ref.watch(invoicesProvider);
-    final role = ref.watch(userRoleProvider).valueOrNull;
-    final isLandlord = role == 'landlord';
+    final isLandlord = ref.watch(userRoleProvider).valueOrNull == 'landlord';
     final cs = Theme.of(context).colorScheme;
 
     return Scaffold(
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── Sticky header ──────────────────────────────────────────────
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-              child: Row(
-                children: [
-                  Text(
-                    'Invoices',
-                    style: KasaFont.sans(
-                      fontSize: 32,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: -0.96,
-                      color: cs.onSurface,
-                      height: 1,
-                    ),
-                  ),
-                  const Spacer(),
-                  if (isLandlord)
-                    KasaButton(
-                      variant: KasaButtonVariant.primary,
-                      fullWidth: false,
-                      label: 'ADD',
-                      leading: const Icon(Icons.add, size: 14),
-                      onTap: () => Navigator.of(context, rootNavigator: true).push(
-                        MaterialPageRoute(
-                          fullscreenDialog: true,
-                          builder: (ctx) => Scaffold(
-                            appBar: AppBar(
-                              title: const Text('Create Invoice'),
-                              leading: IconButton(
-                                icon: const Icon(Icons.close),
-                                onPressed: () => Navigator.of(ctx).pop(),
-                              ),
-                            ),
-                            body: _CreateInvoiceDialog(
-                              onDone: () => ref.invalidate(invoicesProvider),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
+      backgroundColor: cs.kasaBg,
+      appBar: AppBar(
+        toolbarHeight: 60,
+        backgroundColor: cs.kasaBg,
+        surfaceTintColor: Colors.transparent,
+        automaticallyImplyLeading: false,
+        titleSpacing: 16,
+        title: Text(isLandlord ? 'Money' : 'Pay',
+            style: KasaFont.sans(fontSize: 20, fontWeight: FontWeight.w600, color: cs.onSurface)),
+        actions: [
+          if (isLandlord)
+            IconButton(
+              tooltip: 'New bill',
+              icon: const Icon(Icons.add_rounded),
+              onPressed: _newBill,
             ),
-
-            if (isLandlord) const UnplacedPaymentsBanner(),
-
-            // ── Filter chips ───────────────────────────────────────────────
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
-              child: Row(
-                children: [
-                  for (final (value, label) in const [
-                    ('all', 'ALL'),
-                    ('pending', 'Pending'),
-                    ('paid', 'Paid'),
-                    ('overdue', 'Overdue'),
-                  ]) ...[
-                    GestureDetector(
-                      onTap: () => setState(() => _filter = value),
-                      child: KasaChip(
-                        label: label,
-                        variant: _filter == value
-                            ? KasaChipVariant.secondary
-                            : KasaChipVariant.neutral,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                  ],
-                ],
+          const SizedBox(width: 4),
+        ],
+      ),
+      bottomNavigationBar: isLandlord
+          ? KasaActionBar(children: [
+              KasaButton(
+                label: 'Record payment',
+                variant: KasaButtonVariant.primary,
+                onTap: _recordPayment,
               ),
-            ),
-
-            // ── Invoice list ───────────────────────────────────────────────
-            Expanded(
-              child: KasaContentSwitcher(
-                child: invoices.when(
-                  loading: () => const SkeletonList(),
-                  error: (e, _) => Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.cloud_off_outlined,
-                            size: 56, color: Colors.grey),
-                        const SizedBox(height: 12),
-                        Text(apiError(e),
-                            style: const TextStyle(color: Colors.grey)),
-                        const SizedBox(height: 16),
-                        ElevatedButton.icon(
-                          onPressed: () => ref.invalidate(invoicesProvider),
-                          icon: const Icon(Icons.refresh),
-                          label: const Text('Retry'),
-                        ),
-                      ],
-                    ),
-                  ),
-                  data: (rawList) {
-                    List<dynamic> list = rawList;
-                    if (_filter != 'all') {
-                      list = list
-                          .where((i) =>
-                              (i as Map)['status'] == _filter)
-                          .toList();
-                    }
-                    // WHY the empty state is refreshable too: it had no pull
-                    // to refresh, so a landlord who opened Bills before the
-                    // month's bills were raised was stuck on "No invoices"
-                    // until the app restarted.
-                    Future<void> refresh() {
-                      ref.invalidate(unplacedPaymentsProvider);
-                      return ref.refresh(invoicesProvider.future);
-                    }
-
-                    if (list.isEmpty) {
-                      return RefreshIndicator(
-                        onRefresh: refresh,
-                        child: ListView(
-                          physics: const AlwaysScrollableScrollPhysics(),
-                          children: [
-                            SizedBox(height: MediaQuery.of(context).size.height * 0.2),
-                            const Icon(Icons.receipt_long_outlined,
-                                size: 64, color: Colors.grey),
-                            const SizedBox(height: 12),
-                            Text(
-                              _filter == 'all'
-                                  ? 'No invoices yet.'
-                                  : 'No $_filter invoices.',
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(color: Colors.grey),
-                            ),
-                            if (_filter == 'all') ...[
-                              const SizedBox(height: 4),
-                              const Text(
-                                'Bills are raised automatically on the 1st of '
-                                'each month.',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                    color: Colors.grey, fontSize: 12),
-                              ),
-                            ],
-                          ],
-                        ),
-                      );
-                    }
-                    return RefreshIndicator(
-                      onRefresh: refresh,
-                      child: ListView.builder(
-                        padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
-                        itemCount: list.length,
-                        itemBuilder: (_, i) {
-                          final inv = list[i] as Map<String, dynamic>;
-                          return _InvoiceCard(
-                            invoice: inv,
-                            onChanged: () => ref.invalidate(invoicesProvider),
-                          );
-                        },
-                      ),
-                    );
-                  },
+            ])
+          : null,
+      body: KasaContentSwitcher(
+        child: invoices.when(
+          loading: () => const SkeletonList(),
+          error: (e, _) => Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.cloud_off_outlined, size: 48, color: cs.kasaTextSub),
+                const SizedBox(height: 12),
+                Text(apiError(e), style: KasaFont.sans(fontSize: 14, color: cs.kasaTextSub)),
+                const SizedBox(height: 16),
+                KasaButton(
+                  label: 'Retry',
+                  variant: KasaButtonVariant.secondary,
+                  fullWidth: false,
+                  onTap: () => ref.invalidate(invoicesProvider),
                 ),
-              ),
+              ],
             ),
-          ],
+          ),
+          data: (raw) {
+            final all = raw.cast<Map<String, dynamic>>();
+            final shown = all.where(_matches).toList();
+            final outstanding = all
+                .where((b) => b['status'] != 'paid' && b['status'] != 'cancelled')
+                .fold<double>(0, (sum, b) => sum + toDouble(b['balance']));
+            int count(String f) => f == 'all'
+                ? all.length
+                : all.where((b) => switch (f) {
+                      'overdue' => b['status'] == 'overdue',
+                      'due' => _due.contains(b['status']),
+                      _ => b['status'] == 'paid',
+                    }).length;
+
+            // WHY the empty state is refreshable too: a landlord who opened
+            // this before the month's bills were raised was otherwise stuck
+            // on "No bills" until the app restarted.
+            return RefreshIndicator(
+              onRefresh: _refresh,
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                children: [
+                  if (isLandlord) ...[
+                    const _MoneyShortcuts(),
+                    const SizedBox(height: 16),
+                    const _PaymentsToAssign(),
+                  ],
+                  KasaSectionHeader(
+                    'Bills',
+                    trailing: Text('${formatCurrency(outstanding)} outstanding',
+                        style: KasaFont.sans(fontSize: 14, color: cs.kasaTextSub)
+                            .copyWith(fontFeatures: KasaType.tabular)),
+                  ),
+                  const SizedBox(height: 12),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(children: [
+                      for (final (value, label) in const [
+                        ('all', 'All'),
+                        ('overdue', 'Overdue'),
+                        ('due', 'Due'),
+                        ('paid', 'Paid'),
+                      ]) ...[
+                        _FilterPill(
+                          label: label,
+                          count: count(value),
+                          selected: _filter == value,
+                          onTap: () => setState(() => _filter = value),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                    ]),
+                  ),
+                  const SizedBox(height: 12),
+                  if (shown.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 40),
+                      child: Text(
+                        _filter == 'all'
+                            ? 'No bills yet. They are raised automatically on the 1st of each month.'
+                            : 'Nothing here.',
+                        textAlign: TextAlign.center,
+                        style: KasaFont.sans(fontSize: 14, color: cs.kasaTextSub),
+                      ),
+                    )
+                  else
+                    KasaListGroup(children: [
+                      for (final bill in shown)
+                        _BillRow(invoice: bill, onChanged: () => ref.invalidate(invoicesProvider)),
+                    ]),
+                ],
+              ),
+            );
+          },
         ),
       ),
     );
   }
 }
 
-// ─── Invoice Card ─────────────────────────────────────────────────────────────
+// Money: shortcuts, payments to assign, filter pill
 
-class _InvoiceCard extends ConsumerWidget {
-  const _InvoiceCard({required this.invoice, required this.onChanged});
-  final Map<String, dynamic> invoice;
-  final VoidCallback onChanged;
+/// Reports and the tax statement, which live with the money they describe.
+class _MoneyShortcuts extends StatelessWidget {
+  const _MoneyShortcuts();
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    Widget tile(IconData icon, String label, String route) => Expanded(
+          child: KasaCard(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+            onTap: () => context.push(route),
+            child: Row(children: [
+              Icon(icon, size: 20, color: cs.onSurface),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(label,
+                    style: KasaFont.sans(fontSize: 14, fontWeight: FontWeight.w600, color: cs.onSurface)),
+              ),
+              Icon(Icons.chevron_right_rounded, size: 18, color: cs.kasaTextSub),
+            ]),
+          ),
+        );
+    return Row(children: [
+      tile(Icons.description_outlined, 'Reports', '/reports'),
+      const SizedBox(width: 8),
+      tile(Icons.receipt_outlined, 'Tax statement', '/tax'),
+    ]);
+  }
+}
+
+/// Money that arrived but could not be placed, each with an Assign button.
+/// Shown only while something is waiting.
+class _PaymentsToAssign extends ConsumerWidget {
+  const _PaymentsToAssign();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final status = invoice['status'] as String;
-    final balance = double.tryParse((invoice['balance'] ?? '0').toString()) ?? 0;
-    final isPaid = status == 'paid';
-    final canEdit = status == 'pending' || status == 'overdue';
-    final canVoid = status == 'pending' || status == 'overdue';
-    final role = ref.watch(userRoleProvider).valueOrNull;
-    final isLandlord = role == 'landlord';
+    final rows = ref.watch(unplacedPaymentsProvider).valueOrNull ?? const [];
+    if (rows.isEmpty) return const SizedBox.shrink();
     final cs = Theme.of(context).colorScheme;
 
-    // Status chip variant mapping
-    final chipVariant = switch (status) {
-      'paid'           => KasaChipVariant.primary,
-      'overdue'        => KasaChipVariant.tertiary,
-      'pending'        => KasaChipVariant.secondary,
-      'partially_paid' => KasaChipVariant.secondary,
-      _                => KasaChipVariant.neutral,
-    };
-    final chipLabel = switch (status) {
-      'paid'           => 'Paid',
-      'overdue'        => 'Overdue',
-      'pending'        => 'Pending',
-      'partially_paid' => 'Partial',
-      'cancelled'      => 'Void',
-      _                => sentenceCase(status),
-    };
+    String detail(Map<String, dynamic> r) {
+      final when = DateTime.tryParse('${r['credited_at']}');
+      final ref0 = '${r['payment_ref'] ?? ''}'.trim();
+      return [
+        '${r['bank_display'] ?? ''}',
+        if ('${r['payer_account'] ?? ''}'.isNotEmpty) '${r['payer_account']}',
+        if (when != null) _displayDate.format(when.toLocal()),
+        if (ref0.isNotEmpty) 'acct \u201c$ref0\u201d',
+      ].join(' \u00b7 ');
+    }
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: KasaCard(
-        padding: const EdgeInsets.all(14),
-        onTap: () => _showDetail(context),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Row: invoice number + status chip + popup menu
-            Row(
-              children: [
-                Text(
-                  invoice['invoice_number'] ?? '',
-                  style: KasaFont.mono(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: cs.kasaTextSub,
-                  ),
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          KasaSectionHeader('Payments to assign',
+              trailing: Text('${rows.length}',
+                  style: KasaFont.sans(fontSize: 14, color: cs.kasaTextSub))),
+          const SizedBox(height: 8),
+          KasaListGroup(children: [
+            for (final r in rows)
+              KasaListRow(
+                leading: const KasaLeadIcon(Icons.account_balance_wallet_outlined,
+                    tone: KasaStatusKind.due),
+                title: formatCurrency(toDouble(r['amount'])),
+                subtitle: detail(r),
+                trailing: KasaButton(
+                  label: 'Assign',
+                  variant: KasaButtonVariant.secondary,
+                  fullWidth: false,
+                  onTap: () => assignUnplacedPayment(context, ref, r),
                 ),
-                const Spacer(),
-                KasaChip(label: chipLabel, variant: chipVariant, small: true),
-                if (isLandlord && (!isPaid || canEdit || canVoid))
-                  PopupMenuButton<String>(
-                    icon: Icon(Icons.more_vert,
-                        size: 20, color: cs.kasaTextSub),
-                    itemBuilder: (_) => [
-                      if (!isPaid)
-                        const PopupMenuItem(
-                          value: 'pay',
-                          child: ListTile(
-                            leading: Icon(Icons.payments_outlined),
-                            title: Text('Record Cash/Bank'),
-                            contentPadding: EdgeInsets.zero,
-                            dense: true,
-                          ),
-                        ),
-                      if (canEdit)
-                        const PopupMenuItem(
-                          value: 'edit',
-                          child: ListTile(
-                            leading: Icon(Icons.edit_outlined),
-                            title: Text('Edit Invoice'),
-                            contentPadding: EdgeInsets.zero,
-                            dense: true,
-                          ),
-                        ),
-                      if (canVoid)
-                        PopupMenuItem(
-                          value: 'void',
-                          child: ListTile(
-                            leading: Icon(Icons.cancel_outlined,
-                                color: Theme.of(context).colorScheme.tertiary),
-                            title: Text('Void Invoice',
-                                style: TextStyle(
-                                    color: Theme.of(context).colorScheme.tertiary)),
-                            contentPadding: EdgeInsets.zero,
-                            dense: true,
-                          ),
-                        ),
-                    ],
-                    onSelected: (v) {
-                      if (v == 'pay') _showRecordPayment(context);
-                      if (v == 'edit') _showEdit(context);
-                      if (v == 'void') _confirmVoid(context, ref);
-                    },
-                  ),
-              ],
-            ),
-            const SizedBox(height: 6),
+              ),
+          ]),
+        ],
+      ),
+    );
+  }
+}
 
-            // Row: tenant · unit
-            Text(
-              '${invoice['tenant_name'] ?? ''} · Unit ${invoice['unit_number'] ?? ''}',
-              style: KasaFont.sans(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: cs.onSurface,
+class _FilterPill extends StatelessWidget {
+  const _FilterPill({
+    required this.label,
+    required this.count,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final int count;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final fg = selected ? cs.kasaBg : cs.onSurface;
+    return Material(
+      color: selected ? cs.onSurface : cs.kasaCard,
+      shape: StadiumBorder(side: BorderSide(color: selected ? cs.onSurface : cs.kasaStrokeStrong)),
+      child: InkWell(
+        customBorder: const StadiumBorder(),
+        onTap: onTap,
+        child: Container(
+          height: 40,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          alignment: Alignment.center,
+          child: Text.rich(
+            TextSpan(children: [
+              TextSpan(text: '$label ', style: KasaFont.sans(fontSize: 14, fontWeight: FontWeight.w500, color: fg)),
+              TextSpan(
+                text: '$count',
+                style: KasaFont.sans(
+                  fontSize: 14,
+                  color: selected ? fg.withValues(alpha: 0.7) : cs.kasaTextSub,
+                ).copyWith(fontFeatures: KasaType.tabular),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// Bill row
+
+/// One bill: unit, tenant, when it was due, what is left, and its status.
+class _BillRow extends ConsumerWidget {
+  const _BillRow({required this.invoice, required this.onChanged});
+  final Map<String, dynamic> invoice;
+  final VoidCallback onChanged;
+
+  static (KasaStatusKind, String) statusOf(String? status) => switch (status) {
+        'paid' => (KasaStatusKind.paid, 'Paid'),
+        'overdue' => (KasaStatusKind.overdue, 'Overdue'),
+        'partially_paid' => (KasaStatusKind.due, 'Part paid'),
+        'cancelled' => (KasaStatusKind.vacant, 'Void'),
+        _ => (KasaStatusKind.due, 'Due'),
+      };
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cs = Theme.of(context).colorScheme;
+    final status = statusOf(invoice['status'] as String?);
+    final due = DateTime.tryParse('${invoice['due_date']}');
+    final isPaid = invoice['status'] == 'paid';
+    return InkWell(
+      onTap: () => _showDetail(context),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 64),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
+          child: Row(children: [
+            Container(
+              width: 40,
+              height: 40,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: cs.kasaElev,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text('${invoice['unit_number'] ?? ''}',
+                  maxLines: 1,
+                  style: KasaFont.sans(fontSize: 14, fontWeight: FontWeight.w600, color: cs.onSurface)),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('${invoice['tenant_name'] ?? ''}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: KasaFont.sans(fontSize: 15, fontWeight: FontWeight.w500, color: cs.onSurface)),
+                  const SizedBox(height: 4),
+                  Text(
+                    due == null ? '' : '${isPaid ? 'Was due' : 'Due'} ${_displayDate.format(due)}',
+                    style: KasaFont.sans(fontSize: 13, color: cs.kasaTextSub),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 8),
-
-            // Row: balance due + record payment arrow
-            Row(
+            const SizedBox(width: 8),
+            Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Balance due',
-                        style: KasaFont.sans(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: cs.kasaTextSub,
-                          letterSpacing: 0.04,
-                        ),
-                      ),
-                      Text(
-                        formatCurrency(balance),
-                        style: KasaFont.sans(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w600,
-                          color: cs.onSurface,
-                          height: 1.1,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (!isPaid && isLandlord)
-                  GestureDetector(
-                    onTap: () => _showRecordPayment(context),
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: cs.secondary,
-                        borderRadius:
-                            BorderRadius.circular(KasaRadius.md),
-                        border: Border.all(
-                            color: cs.kasaStroke,
-                            width: KasaBorders.card),
-                      ),
-                      child: Icon(Icons.arrow_forward,
-                          size: 18, color: cs.onSecondary),
-                    ),
-                  ),
+                Text(formatCurrency(toDouble(invoice['balance'])),
+                    style: KasaFont.sans(fontSize: 15, fontWeight: FontWeight.w600, color: cs.onSurface)
+                        .copyWith(fontFeatures: KasaType.tabular)),
+                const SizedBox(height: 4),
+                KasaStatusChip(kind: status.$1, label: status.$2),
               ],
             ),
-
-            // Due date
-            if (invoice['due_date'] != null) ...[
-              const SizedBox(height: 6),
-              Text(
-                'Due ${_tryFormatDate(invoice['due_date'])}',
-                style: KasaFont.sans(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                  color: cs.kasaTextSub,
-                  letterSpacing: 0.04,
-                ),
-              ),
-            ],
-          ],
+          ]),
         ),
       ),
     );
@@ -476,83 +502,6 @@ class _InvoiceCard extends ConsumerWidget {
     );
   }
 
-  void _showRecordPayment(BuildContext context) {
-    showDialog(
-      context: context,
-      useRootNavigator: true,
-      barrierDismissible: false,
-      builder: (_) => _RecordPaymentDialog(
-        invoiceId: invoice['id'] as int,
-        balance: double.tryParse((invoice['balance'] ?? '0').toString()) ?? 0,
-        onDone: onChanged,
-      ),
-    );
-  }
-
-  void _showEdit(BuildContext context) {
-    showDialog(
-      context: context,
-      useRootNavigator: true,
-      barrierDismissible: false,
-      builder: (_) => _EditInvoiceDialog(
-        invoice: invoice,
-        onDone: onChanged,
-      ),
-    );
-  }
-
-  Future<void> _confirmVoid(BuildContext context, WidgetRef ref) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      useRootNavigator: true,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Void Invoice'),
-        content: Text(
-            'Mark ${invoice['invoice_number']} as cancelled? '
-            'No payments or ledger entries will be deleted.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-                backgroundColor: Theme.of(ctx).colorScheme.tertiary,
-                foregroundColor: Theme.of(ctx).colorScheme.onTertiary),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Void'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !context.mounted) return;
-    try {
-      final dio = ref.read(dioProvider);
-      await dio.post('/api/v1/payments/invoices/${invoice['id']}/cancel/');
-      onChanged();
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: const Text('Invoice voided.'),
-          backgroundColor: Theme.of(context).colorScheme.tertiary,
-        ));
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(apiError(e)),
-          backgroundColor: Theme.of(context).colorScheme.error,
-        ));
-      }
-    }
-  }
-
-  String _tryFormatDate(String raw) {
-    try {
-      return _displayDate.format(DateTime.parse(raw));
-    } catch (_) {
-      return raw;
-    }
-  }
 }
 
 // ─── Invoice Detail Bottom Sheet ──────────────────────────────────────────────
