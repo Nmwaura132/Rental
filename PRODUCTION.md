@@ -30,6 +30,26 @@ Production secrets are supplied at runtime and must never be committed.
 The startup command applies database migrations before starting Gunicorn. The
 MinIO initialization job creates a private bucket and removes anonymous access.
 
+## Where tenants pay rent
+
+Tenants are shown a paybill and account number to pay to. Behind a bank's shared
+paybill (Caritas) set these in `.env.production`:
+
+```dotenv
+RENT_PAYBILL=899790
+RENT_ACCOUNT_PREFIX=623943#
+STK_PUSH_ENABLED=false
+```
+
+Tenants then pay to `623943#<house number>`, exactly as the landlord numbered the
+unit, and the app shows those details in place of a "Pay with M-Pesa" button: a
+shared paybill cannot send M-Pesa prompts. Leave `RENT_PAYBILL` out entirely when
+using a paybill of your own (it then follows `MPESA_SHORTCODE`); an empty value
+overrides that fallback. `RENT_DUE_DAY` (default `5`) is the day each month's rent
+falls due.
+
+## Mobile build
+
 Build the mobile app with production endpoints:
 
 ```bash

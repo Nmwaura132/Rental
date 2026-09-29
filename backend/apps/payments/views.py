@@ -15,7 +15,13 @@ from apps.core.permissions import IsLandlord
 from .models import Invoice, Payment, MpesaSTKRequest
 from .serializers import InvoiceSerializer, PaymentSerializer
 from .mpesa import make_idempotency_key
-from .services import apply_confirmed_payment, apply_credit, how_to_pay
+from .services import (
+    apply_confirmed_payment,
+    apply_credit,
+    credit_remaining,
+    how_to_pay,
+    pay_to,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -268,6 +274,16 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
         return Response(PaymentSerializer(payment).data)
 
 
+def _phone_hint(e164: str | None) -> str | None:
+    """"+254712345678" -> "0712 ••• 678": enough to recognise as theirs
+    on the "we sent a request to..." screen, not enough to read out."""
+    digits = (e164 or "").lstrip("+")
+    if not digits.startswith("254") or len(digits) != 12:
+        return None
+    local = "0" + digits[3:]
+    return f"{local[:4]} ••• {local[-3:]}"
+
+
 @extend_schema(exclude=True)  # WHY: returns ad-hoc dict shaped by user role; document in handoff.md instead
 class DashboardStatsView(APIView):
     """Summary stats for the landlord / caretaker dashboard. Cached 60s per user."""
@@ -290,22 +306,64 @@ class DashboardStatsView(APIView):
 
         if user.is_tenant:
             from django.conf import settings as django_settings
-            # Tenant dashboard: balance, next due date, active tenancy/unit info
+            # Tenant dashboard: what they owe, what to pay it to, and the unit.
+            open_bills = Invoice.objects.filter(
+                tenancy__tenant=user,
+                status__in=[Invoice.Status.PENDING, Invoice.Status.OVERDUE, Invoice.Status.PARTIALLY_PAID],
+            )
             invoices = Invoice.objects.filter(tenancy__tenant=user)
-            _bal = invoices.filter(
-                status__in=[Invoice.Status.PENDING, Invoice.Status.OVERDUE, Invoice.Status.PARTIALLY_PAID]
-            ).aggregate(due=Sum("amount_due"), paid=Sum("amount_paid"))
+            _bal = open_bills.aggregate(due=Sum("amount_due"), paid=Sum("amount_paid"))
             total_balance = (_bal["due"] or 0) - (_bal["paid"] or 0)
-            next_invoice = invoices.filter(
-                status__in=[Invoice.Status.PENDING, Invoice.Status.OVERDUE]
-            ).order_by("due_date").first()
+            # WHY part-paid bills count: this used to look only at pending and
+            # overdue ones, so a tenant who had paid half a bill was shown
+            # nothing to pay while still owing the other half.
+            next_invoice = (
+                open_bills.order_by("due_date", "id").prefetch_related("line_items").first()
+            )
             tenancy = Tenancy.objects.filter(
                 tenant=user, status=Tenancy.Status.ACTIVE
             ).select_related("unit__property").first()
+
+            last_paid = None
+            settled = invoices.filter(status=Invoice.Status.PAID).order_by("-period_start").first()
+            if settled:
+                paid_at = (
+                    settled.payments.filter(status=Payment.Status.CONFIRMED)
+                    .order_by("-paid_at").values_list("paid_at", flat=True).first()
+                )
+                last_paid = {
+                    "period_start": settled.period_start,
+                    "amount": settled.amount_due,
+                    "paid_at": paid_at,
+                }
+
             return Response({
                 "outstanding_balance": total_balance,
                 "next_due_date": next_invoice.due_date if next_invoice else None,
                 "next_due_amount": next_invoice.balance if next_invoice else None,
+                # The bill to pay first — the oldest that is still open — with
+                # its breakdown, and its id, which paying by M-Pesa needs.
+                "current_bill": None if next_invoice is None else {
+                    "id": next_invoice.id,
+                    "invoice_number": next_invoice.invoice_number,
+                    "period_start": next_invoice.period_start,
+                    "due_date": next_invoice.due_date,
+                    "amount_due": next_invoice.amount_due,
+                    "amount_paid": next_invoice.amount_paid,
+                    "balance": next_invoice.balance,
+                    "status": next_invoice.status,
+                    "lines": [
+                        {"description": li.description, "charge_type": li.charge_type, "amount": li.amount}
+                        for li in next_invoice.line_items.all()
+                    ],
+                },
+                "open_bills": open_bills.count(),
+                "pay_account": pay_to(tenancy.unit)[1] if tenancy else None,
+                "stk_enabled": django_settings.STK_PUSH_ENABLED,
+                "credit": credit_remaining(tenancy) if tenancy else 0,
+                "deposit_held": tenancy.deposit_amount if (tenancy and tenancy.deposit_paid) else 0,
+                "last_paid": last_paid,
+                "phone_hint": _phone_hint(user.phone_number),
                 "unit_number": tenancy.unit.unit_number if tenancy else None,
                 "property_name": tenancy.unit.property.name if tenancy else None,
                 "monthly_rent": float(tenancy.rent_amount) if tenancy else None,
@@ -458,8 +516,18 @@ class MpesaSTKPushView(APIView):
     throttle_classes = [__import__('apps.core.throttles', fromlist=['STKPushThrottle']).STKPushThrottle]
 
     def post(self, request):
+        from django.conf import settings as django_settings
+
         from .mpesa import stk_push
         from apps.core.utils.phone import normalize_phone
+
+        # A shared bank paybill cannot send prompts. Refuse plainly rather than
+        # let Safaricom's error surface as "STK Push failed".
+        if not django_settings.STK_PUSH_ENABLED:
+            return Response(
+                {"error": "This account does not send M-Pesa prompts. Pay to the paybill and account shown instead."},
+                status=400,
+            )
 
         invoice_id = request.data.get("invoice_id")
         if not invoice_id:

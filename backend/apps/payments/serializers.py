@@ -12,11 +12,13 @@ class PaymentSerializer(serializers.ModelSerializer):
     unit_number = serializers.CharField(source="invoice.tenancy.unit.unit_number", read_only=True)
     property_name = serializers.CharField(source="invoice.tenancy.unit.property.name", read_only=True)
     invoice_number = serializers.CharField(source="invoice.invoice_number", read_only=True)
+    period_start = serializers.DateField(source="invoice.period_start", read_only=True)
 
     class Meta:
         model = Payment
         fields = [
-            "id", "invoice", "invoice_number", "tenant_name", "unit_number", "property_name",
+            "id", "invoice", "invoice_number", "period_start",
+            "tenant_name", "unit_number", "property_name",
             "method", "method_display", "status", "amount",
             # M-Pesa
             "mpesa_receipt_number", "mpesa_phone",

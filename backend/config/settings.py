@@ -338,6 +338,12 @@ RENT_DUE_DAY = env.int("RENT_DUE_DAY", default=5)
 # landlord's bank account followed by the unit code ("623943#G1").
 RENT_PAYBILL = env("RENT_PAYBILL", default=MPESA_SHORTCODE)
 RENT_ACCOUNT_PREFIX = env("RENT_ACCOUNT_PREFIX", default="")
+# Whether tenants can be sent an M-Pesa prompt on their phone (STK Push). It
+# needs a paybill of the landlord's own with Daraja access. Behind a bank's
+# shared paybill it cannot work, so the app must not offer a button that would
+# only fail: set this false there and tenants are shown the paybill and
+# account to pay to instead.
+STK_PUSH_ENABLED = env.bool("STK_PUSH_ENABLED", default=True)
 
 # ── Africa's Talking ──────────────────────────────────────────────────────────
 AT_USERNAME = env("AT_USERNAME", default="sandbox")
