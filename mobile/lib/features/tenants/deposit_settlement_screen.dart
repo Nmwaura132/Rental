@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../../core/theme/kasa_fonts.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api/api_client.dart';
@@ -101,7 +101,8 @@ class _DraftState extends ConsumerState<_Draft> {
         content: Text(
           _forfeited
               ? 'The deposit is kept as forfeited. The tenant is sent the '
-                  'statement and your reason. This cannot be changed afterwards.'
+                  'statement and your reason${refund > 0 ? ', with a refund of ${formatCurrency(refund)} in unused credit' : ''}. '
+                  'This cannot be changed afterwards.'
               : 'The tenant is sent an itemised statement showing a refund of '
                   '${formatCurrency(refund)}. This cannot be changed afterwards.',
         ),
@@ -148,13 +149,24 @@ class _DraftState extends ConsumerState<_Draft> {
     final d = widget.data;
     final held = toDouble(d['deposit_held']);
     final arrears = toDouble(d['arrears']);
-    final available = toDouble(d['available_after_arrears']);
+    final credit = toDouble(d['credit']);
     final deductions = _deductions.fold<double>(0, (s, x) => s + x.value);
-    final refund = _forfeited
-        ? 0.0
-        : (available - deductions).clamp(0, double.infinity).toDouble();
-    final owes = (arrears - held).clamp(0, double.infinity).toDouble() +
-        (deductions - available).clamp(0, double.infinity).toDouble();
+
+    // The same order the server settles in: rent paid ahead clears unpaid
+    // bills first, then the deposit; deductions come off the deposit, then
+    // off any credit left; unused credit is always returned, even when the
+    // deposit is forfeited, because it is the tenant's own money.
+    double atLeastZero(double v) => v < 0 ? 0 : v;
+    final creditOnArrears = credit < arrears ? credit : arrears;
+    final arrearsAfterCredit = arrears - creditOnArrears;
+    final creditLeft = credit - creditOnArrears;
+    final depositOnArrears = held < arrearsAfterCredit ? held : arrearsAfterCredit;
+    final depositLeft = held - depositOnArrears;
+    final overDeposit = atLeastZero(deductions - depositLeft);
+    final fromCredit = overDeposit < creditLeft ? overDeposit : creditLeft;
+    final refund = (_forfeited ? 0.0 : atLeastZero(depositLeft - deductions)) +
+        (creditLeft - fromCredit);
+    final owes = (arrearsAfterCredit - depositOnArrears) + overDeposit - fromCredit;
     final canSettle = d['can_settle'] == true;
     final blankRow = _deductions
         .any((x) => x.description.text.trim().isEmpty || x.value <= 0);
@@ -173,7 +185,7 @@ class _DraftState extends ConsumerState<_Draft> {
               child: Text(
                 'The deposit can be settled once the tenant has moved out — '
                 'on the last day of their notice or after.',
-                style: GoogleFonts.inter(fontSize: 13, color: cs.tertiaryInk),
+                style: KasaFont.sans(fontSize: 13, color: cs.tertiaryInk),
               ),
             ),
           ),
@@ -183,13 +195,14 @@ class _DraftState extends ConsumerState<_Draft> {
             padding: const EdgeInsets.only(bottom: 8),
             child: Text(
               'No deposit is recorded as paid on this tenancy.',
-              style: GoogleFonts.inter(fontSize: 12, color: cs.kasaTextSub),
+              style: KasaFont.sans(fontSize: 12, color: cs.kasaTextSub),
             ),
           ),
+        if (credit > 0) _Line('Rent paid ahead (credit)', credit),
         if (arrears > 0) _Line('Unpaid bills', -arrears),
         const Divider(height: 24),
         Text('DEDUCTIONS',
-            style: GoogleFonts.spaceGrotesk(
+            style: KasaFont.sans(
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
                 color: cs.kasaTextSub)),
@@ -259,8 +272,7 @@ class _DraftState extends ConsumerState<_Draft> {
           ),
         ),
         const Divider(height: 28),
-        _Line(_forfeited ? 'Refund (forfeited)' : 'Refund to tenant', refund,
-            strong: true),
+        _Line('Refund to tenant', refund, strong: true),
         if (owes > 0)
           _Line('Tenant still owes', owes, strong: true, warn: true),
         const SizedBox(height: 16),
@@ -360,7 +372,7 @@ class _Settled extends ConsumerWidget {
             padding: const EdgeInsets.only(bottom: 12),
             child: Text(
               'Settled ${DateFormat('d MMM yyyy').format(settledAt.toLocal())}',
-              style: GoogleFonts.inter(fontSize: 12, color: cs.kasaTextSub),
+              style: KasaFont.sans(fontSize: 12, color: cs.kasaTextSub),
             ),
           ),
         _Line('Deposit held', toDouble(data['deposit_held'])),
@@ -368,13 +380,15 @@ class _Settled extends ConsumerWidget {
           _Line('Unpaid bills', -toDouble(data['applied_to_arrears'])),
         for (final x in deductions)
           _Line('${x['description']}', -toDouble(x['amount'])),
+        if (toDouble(data['credit_returned']) > 0)
+          _Line('Unused credit returned', toDouble(data['credit_returned'])),
         const Divider(height: 28),
-        if (data['forfeited'] == true) ...[
-          const _Line('Refund (forfeited)', 0, strong: true),
-          Text('Reason: ${data['notes'] ?? ''}',
-              style: GoogleFonts.inter(fontSize: 12, color: cs.kasaTextSub)),
-        ] else
-          _Line('Refund to tenant', refund, strong: true),
+        // Forfeiting keeps the deposit, not rent paid ahead, so a forfeited
+        // settlement can still carry a refund.
+        _Line('Refund to tenant', refund, strong: true),
+        if (data['forfeited'] == true)
+          Text('Deposit forfeited. Reason: ${data['notes'] ?? ''}',
+              style: KasaFont.sans(fontSize: 12, color: cs.kasaTextSub)),
         if (owes > 0)
           _Line('Tenant still owes', owes, strong: true, warn: true),
         const SizedBox(height: 16),
@@ -389,7 +403,7 @@ class _Settled extends ConsumerWidget {
             'Refund paid ${DateFormat('d MMM yyyy').format(refundedAt.toLocal())} by '
             '${data['refund_method']}'
             '${(data['refund_reference'] ?? '').toString().isNotEmpty ? ' · ${data['refund_reference']}' : ''}',
-            style: GoogleFonts.inter(fontSize: 13, color: cs.onSurface),
+            style: KasaFont.sans(fontSize: 13, color: cs.onSurface),
           ),
       ],
     );
@@ -416,14 +430,14 @@ class _Line extends StatelessWidget {
         children: [
           Expanded(
             child: Text(label,
-                style: GoogleFonts.inter(
+                style: KasaFont.sans(
                   fontSize: strong ? 15 : 14,
                   fontWeight: strong ? FontWeight.w700 : FontWeight.w400,
                   color: strong ? colour : cs.kasaTextSub,
                 )),
           ),
           Text(text,
-              style: GoogleFonts.spaceGrotesk(
+              style: KasaFont.sans(
                 fontSize: strong ? 18 : 14,
                 fontWeight: FontWeight.w700,
                 color: colour,
