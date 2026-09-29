@@ -103,6 +103,44 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         invoice.save(update_fields=["status", "updated_at"])
         return Response(self.get_serializer(invoice).data)
 
+    @action(detail=True, methods=["post"], permission_classes=[IsLandlord])
+    def remind(self, request, pk=None):
+        """Text the tenant a reminder about this bill — at most once a day.
+
+        WHY limited: reminders already go out by themselves around the due
+        date, so this is a nudge for one bill, not a way to text someone
+        repeatedly. The limit is per bill, so a tenant with two open bills can
+        still be reminded about each.
+        """
+        from django.core.cache import cache
+
+        from apps.notifications.tasks import send_sms
+
+        invoice = self.get_object()
+        if invoice.status not in (
+            Invoice.Status.PENDING, Invoice.Status.PARTIALLY_PAID, Invoice.Status.OVERDUE
+        ):
+            return Response(
+                {"error": "There is nothing left to remind them about on this bill."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # add() is atomic: only the first of two quick taps gets through.
+        if not cache.add(f"invoice-reminder:{invoice.pk}", 1, timeout=24 * 3600):
+            return Response(
+                {"error": "A reminder about this bill was already sent in the last 24 hours."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
+        tenancy = invoice.tenancy
+        unit = tenancy.unit
+        send_sms.delay(
+            tenancy.tenant_id,
+            f"Dear {tenancy.tenant.first_name}, a reminder that KES {invoice.balance:,.0f} "
+            f"is still due on your {invoice.period_start:%B} bill for "
+            f"{unit.property.name} Unit {unit.unit_number}. {how_to_pay(unit)}",
+        )
+        return Response({"sent": True})
+
 
 class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = PaymentSerializer
