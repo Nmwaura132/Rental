@@ -8,13 +8,11 @@ import '../../core/theme/kasa_fonts.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api/api_client.dart';
-import '../../core/providers/theme_provider.dart';
 import '../../core/providers/user_role_provider.dart';
 import '../../core/theme/kasa_tokens.dart';
 import '../../core/utils/api_error.dart';
 import '../../core/utils/currency.dart';
-import '../../core/utils/pluralize.dart';
-import '../../core/widgets/kasa_logo.dart';
+import '../../core/widgets/kasa_layout.dart';
 import '../../core/widgets/kasa_primitives.dart';
 import 'needs_attention.dart';
 
@@ -61,344 +59,250 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   Widget build(BuildContext context) {
     final stats = ref.watch(dashboardProvider);
     final cs = Theme.of(context).colorScheme;
-    final themeMode = ref.watch(themeModeProvider);
-    final isDark = themeMode == ThemeMode.dark ||
-        (themeMode == ThemeMode.system &&
-            MediaQuery.platformBrightnessOf(context) == Brightness.dark);
 
     return Scaffold(
-      body: SafeArea(
-        child: stats.when(
-          loading: () => const KasaSkeletonSummary(),
-          error: (e, _) => _ErrorState(onRetry: () => ref.invalidate(dashboardProvider)),
-          data: (data) {
-            // WHY the role and not the payload shape: the dashboard endpoint
-            // returns the same shape to landlords and caretakers, so keying off
-            // it showed caretakers a landlord's screen — "your portfolio", plus
-            // an ADD PROPERTY tile they have no permission to use.
-            final role = ref.watch(userRoleProvider).valueOrNull;
-            final isCaretaker = role == 'caretaker';
-            final isLandlord = role == 'landlord' || (role == null && data.containsKey('properties'));
-            return RefreshIndicator(
-              onRefresh: () => ref.refresh(dashboardProvider.future),
-              child: CustomScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                slivers: [
-                  SliverToBoxAdapter(
-                    child: _DashHeader(
-                      userName: _userName,
-                      subtitle: isCaretaker
-                          ? 'The properties you look after.'
-                          : isLandlord
-                              ? 'Here\'s how your portfolio is running.'
-                              : '${data['property_name'] ?? ''} · Unit ${data['unit_number'] ?? ''}',
-                      isDark: isDark,
-                      onThemeToggle: () {
-                        ref.read(themeModeProvider.notifier).setMode(
-                              isDark ? ThemeMode.light : ThemeMode.dark,
-                            );
-                      },
-                    ),
-                  ),
-                  SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
-                    sliver: SliverList(
-                      delegate: SliverChildListDelegate([
-                        if (isLandlord || isCaretaker)
-                          _LandlordBento(
-                            data: data,
-                            cs: cs,
-                            canManageProperties: isLandlord,
-                          )
-                        else
-                          _TenantBento(data: data, cs: cs),
-                      ]),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        ),
+      backgroundColor: cs.kasaBg,
+      appBar: KasaHomeAppBar(
+        name: _userName ?? '',
+        onProfile: () => context.push('/profile'),
+      ),
+      body: stats.when(
+        loading: () => const KasaSkeletonSummary(),
+        error: (e, _) => _ErrorState(onRetry: () => ref.invalidate(dashboardProvider)),
+        data: (data) {
+          // WHY the role and not the payload shape: landlords and caretakers
+          // used to get the same payload, so keying off it showed caretakers
+          // a landlord's screen.
+          final role = ref.watch(userRoleProvider).valueOrNull;
+          final Widget body = switch (role) {
+            'caretaker' => _CaretakerHome(data: data),
+            'tenant' => _TenantBento(data: data, cs: cs),
+            _ => _LandlordHome(data: data),
+          };
+          return RefreshIndicator(
+            onRefresh: () => ref.refresh(dashboardProvider.future),
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+              children: [body],
+            ),
+          );
+        },
       ),
     );
   }
 }
 
-// ─── Header ───────────────────────────────────────────────────────────────────
+// Landlord
 
-class _DashHeader extends ConsumerWidget {
-  const _DashHeader({
-    required this.userName,
-    required this.subtitle,
-    required this.isDark,
-    required this.onThemeToggle,
-  });
-
-  final String? userName;
-  final String subtitle;
-  final bool isDark;
-  final VoidCallback onThemeToggle;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final cs = Theme.of(context).colorScheme;
-    final firstName = (userName ?? 'there').split(' ').first;
-    final unread = ref.watch(unreadCountProvider).valueOrNull ?? 0;
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 12, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const KasaLockupHorizontal(markSize: 26),
-              const Spacer(),
-              IconButton(
-                icon: Icon(
-                  isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
-                  size: 22,
-                  color: cs.onSurface,
-                ),
-                onPressed: onThemeToggle,
-                tooltip: 'Toggle theme',
-              ),
-              IconButton(
-                icon: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    Icon(Icons.notifications_outlined, size: 22, color: cs.onSurface),
-                    if (unread > 0)
-                      Positioned(
-                        top: -2,
-                        right: -2,
-                        child: Container(
-                          width: 8,
-                          height: 8,
-                          decoration: BoxDecoration(
-                            color: cs.primary,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: cs.surface, width: 1.5),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-                onPressed: () async {
-                  await context.push('/notifications');
-                  ref.invalidate(unreadCountProvider);
-                },
-                tooltip: unread > 0
-                    ? 'Notifications, $unread unread'
-                    : 'Notifications',
-              ),
-              IconButton(
-                icon: Icon(Icons.account_circle_outlined, size: 22, color: cs.onSurface),
-                onPressed: () => context.push('/profile'),
-                tooltip: 'Profile',
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Habari, $firstName',
-            style: KasaFont.sans(
-              fontSize: 28,
-              fontWeight: FontWeight.w600,
-              letterSpacing: -0.56,
-              color: cs.onSurface,
-              height: 1,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            subtitle,
-            style: KasaFont.sans(
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-              color: cs.kasaTextSub,
-            ),
-          ),
-          const SizedBox(height: 20),
-        ],
-      ),
-    );
-  }
-}
-
-// ─── Landlord Bento ───────────────────────────────────────────────────────────
-
-class _LandlordBento extends StatelessWidget {
-  const _LandlordBento({
-    required this.data,
-    required this.cs,
-    this.canManageProperties = true,
-  });
+/// This month's money at a glance, then everything waiting on the landlord.
+class _LandlordHome extends StatelessWidget {
+  const _LandlordHome({required this.data});
   final Map<String, dynamic> data;
-  final ColorScheme cs;
-
-  /// False for caretakers, who manage occupancy on someone else's properties
-  /// and cannot create one.
-  final bool canManageProperties;
 
   @override
   Widget build(BuildContext context) {
-    final revenue = toDouble(data['monthly_collected_kes']);
-    final overdueAmt = toDouble(data['overdue_amount_kes']);
-    final overdueCount = (data['overdue_invoices'] ?? 0) as int;
-    final totalUnits = (data['total_units'] ?? 0) as int;
-    final occupiedUnits = (data['occupied_units'] ?? 0) as int;
-    final occupancyPct = totalUnits > 0 ? (occupiedUnits / totalUnits * 100).round() : 0;
-    final month = DateFormat('MMM yyyy').format(DateTime.now());
+    final cs = Theme.of(context).colorScheme;
+    final expected = toDouble(data['expected_this_month_kes']);
+    final collected = toDouble(data['collected_against_expected_kes']);
+    final arrears = toDouble(data['overdue_amount_kes']);
+    final overdueCount = (data['overdue_invoices'] as num?)?.toInt() ?? 0;
+    final total = (data['total_units'] as num?)?.toInt() ?? 0;
+    final occupied = (data['occupied_units'] as num?)?.toInt() ?? 0;
+    // Nothing billed yet this month is not the same as nothing collected.
+    final share = expected > 0 ? (collected / expected).clamp(0.0, 1.0) : null;
+    final month = DateFormat('MMMM').format(DateTime.now());
+    final muted = KasaFont.sans(fontSize: 14, color: cs.kasaTextSub);
 
     return Column(
-      // Stretch so the hero card fills the width like every row below
-      // it. A Column centres by default, which sized the hero to its
-      // own text — leaving dead space that changed with the figure.
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // ── Hero: Total Revenue ──
         KasaCard(
-          accent: KasaCardAccent.primary,
-          padding: const EdgeInsets.all(22),
+          padding: const EdgeInsets.all(16),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _Label('Total revenue · $month'),
-              const SizedBox(height: 10),
+              Row(children: [
+                Expanded(child: Text('Collected \u00b7 $month', style: muted)),
+                if (share != null) Text('${(share * 100).round()}%', style: muted),
+              ]),
+              const SizedBox(height: 16),
+              Text(formatCurrency(collected), style: KasaType.moneyXl.copyWith(color: cs.onSurface)),
+              const SizedBox(height: 4),
               Text(
-                formatCurrency(revenue),
-                style: KasaFont.sans(
-                  fontSize: 60,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: -1.44,
-                  color: cs.onPrimary,
-                  height: 1,
+                expected > 0
+                    ? 'of ${formatCurrency(expected)} expected'
+                    : 'No bills raised yet this month',
+                style: muted,
+              ),
+              const SizedBox(height: 16),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(KasaRadius.pill),
+                child: LinearProgressIndicator(
+                  value: share ?? 0,
+                  minHeight: 8,
+                  backgroundColor: cs.kasaElev,
+                  color: cs.statusPaid,
+                  semanticsLabel: 'Share of this month collected',
                 ),
               ),
-              const SizedBox(height: 14),
-              _TrendChip(
-                label: '${data['properties'] ?? 0} ${pluralize(data['properties'] ?? 0, 'property', 'properties')} · '
-                    '$totalUnits ${pluralize(totalUnits, 'unit', 'units')}',
-                onPrimary: cs.onPrimary,
-                primary: cs.primary,
+              const SizedBox(height: 16),
+              Divider(height: 1, color: cs.kasaStroke),
+              const SizedBox(height: 16),
+              IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: InkWell(
+                        onTap: () => context.go('/invoices'),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Arrears', style: muted),
+                            const SizedBox(height: 4),
+                            Text(formatCurrency(arrears),
+                                style: KasaType.moneyL.copyWith(
+                                    color: arrears > 0 ? cs.statusOverdue : cs.onSurface)),
+                          ],
+                        ),
+                      ),
+                    ),
+                    VerticalDivider(width: 33, color: cs.kasaStroke),
+                    Expanded(
+                      child: InkWell(
+                        onTap: () => context.go('/properties'),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Occupancy', style: muted),
+                            const SizedBox(height: 4),
+                            Text.rich(TextSpan(children: [
+                              TextSpan(
+                                  text: '$occupied/$total',
+                                  style: KasaType.moneyL.copyWith(color: cs.onSurface)),
+                              TextSpan(text: ' occupied', style: muted),
+                            ])),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 14),
-
-        // ── Needs attention: everything waiting on the landlord ──
+        const SizedBox(height: 20),
         NeedsAttentionSection(
-          canSeeMoney: canManageProperties,
+          canSeeMoney: true,
           overdueCount: overdueCount,
-          overdueAmount: overdueAmt,
+          overdueAmount: arrears,
         ),
-        const SizedBox(height: 14),
-
-        // ── 2-col: Occupancy + Overdue ──
-        Row(
-          children: [
-            Expanded(
-              child: KasaCard(
-                accent: KasaCardAccent.secondary,
-                padding: const EdgeInsets.all(18),
-                child: Column(
-                  children: [
-                    _Label('Occupancy', ink: cs.onSecondary.withValues(alpha: 0.75)),
-                    const SizedBox(height: 8),
-                    _OccupancyRing(
-                      pct: occupancyPct.toDouble(),
-                      size: 108,
-                      color: cs.onSecondary,
-                      bg: cs.onSecondary.withValues(alpha: 0.18),
-                      label: '$occupancyPct%',
-                      labelColor: cs.onSecondary,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '$occupiedUnits / $totalUnits UNITS',
-                      style: KasaFont.sans(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: cs.onSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: KasaCard(
-                accent: KasaCardAccent.tertiary,
-                padding: const EdgeInsets.all(18),
-                onTap: () => context.go('/invoices'),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _Label('Overdue', ink: cs.tertiaryInk.withValues(alpha: 0.75)),
-                    const SizedBox(height: 8),
-                    Text(
-                      '$overdueCount',
-                      style: KasaFont.sans(
-                        fontSize: 54,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: -1.62,
-                        color: cs.tertiaryInk,
-                        height: 1,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      formatCurrency(overdueAmt),
-                      style: KasaFont.sans(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: cs.tertiaryInk,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text('View',
-                            style: KasaFont.sans(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: cs.tertiaryInk)),
-                        Icon(Icons.arrow_forward, size: 16, color: cs.tertiaryInk),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 14),
-
-        // ── Quick actions ──
-        _ResponsiveTileGrid(
-          children: [
-            // Caretakers cannot create a property, so offering it would be a
-            // button that only ever returns a permission error.
-            if (canManageProperties)
-              _QuickAction(icon: Icons.home_work_outlined, label: 'View\nproperties', accent: KasaCardAccent.primary, onTap: () => context.push('/properties')),
-            _QuickAction(icon: Icons.people_outline, label: 'View\ntenants', accent: KasaCardAccent.secondary, onTap: () => context.push('/tenants')),
-            _QuickAction(icon: Icons.receipt_long_outlined, label: 'View\ninvoices', accent: KasaCardAccent.tertiary, onTap: () => context.push('/invoices')),
-          ],
-        ),
-        const SizedBox(height: 14),
-
-        // ── Recent activity (mini-card list) ──
-        _ActivityCard(data: data),
       ],
     );
   }
 }
 
+// Caretaker
+
+/// A caretaker's day: meters, repairs, people moving. Never money: the
+/// server does not send it to them.
+class _CaretakerHome extends StatelessWidget {
+  const _CaretakerHome({required this.data});
+  final Map<String, dynamic> data;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final readingsLeft = (data['readings_left'] as num?)?.toInt() ?? 0;
+    final openRepairs = (data['open_repairs'] as num?)?.toInt() ?? 0;
+    final vacant = (data['vacant_units'] as num?)?.toInt() ?? 0;
+    final movingOut = (data['moving_out'] as List? ?? []).cast<Map<String, dynamic>>();
+    final arriving = (data['arriving'] as List? ?? []).cast<Map<String, dynamic>>();
+    final day = DateFormat('EEEE d MMM').format(DateTime.now());
+
+    String when(Object? iso) {
+      final d = DateTime.tryParse('$iso');
+      return d == null ? '' : DateFormat('d MMM').format(d);
+    }
+
+    Widget count(int n, String label, VoidCallback onTap) => Expanded(
+          child: KasaCard(
+            padding: const EdgeInsets.all(16),
+            onTap: onTap,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('$n', style: KasaType.moneyL.copyWith(color: cs.onSurface)),
+                const SizedBox(height: 4),
+                Text(label, style: KasaFont.sans(fontSize: 13, color: cs.kasaTextSub)),
+              ],
+            ),
+          ),
+        );
+
+    final todo = <Widget>[
+      if (readingsLeft > 0)
+        KasaListRow(
+          leading: const KasaLeadIcon(Icons.speed_rounded),
+          title: 'Read water meters',
+          subtitle: '$readingsLeft still to read this month',
+          onTap: () => context.go('/readings'),
+        ),
+      if (openRepairs > 0)
+        KasaListRow(
+          leading: const KasaLeadIcon(Icons.build_outlined, tone: KasaStatusKind.due),
+          title: openRepairs == 1 ? '1 repair open' : '$openRepairs repairs open',
+          subtitle: 'Update each one as it progresses',
+          onTap: () => context.go('/maintenance'),
+        ),
+      for (final m in movingOut)
+        KasaListRow(
+          leading: const KasaLeadIcon(Icons.door_front_door_outlined, tone: KasaStatusKind.notice),
+          title: 'Move-out inspection',
+          subtitle: '${m['unit']} \u00b7 ${m['tenant']} \u00b7 leaves ${when(m['date'])}',
+        ),
+      for (final a in arriving)
+        KasaListRow(
+          leading: const KasaLeadIcon(Icons.people_outline_rounded),
+          title: 'New tenant arriving',
+          subtitle: '${a['unit']} \u00b7 ${a['tenant']} \u00b7 ${when(a['date'])}',
+        ),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('Today',
+            style: KasaFont.sans(fontSize: 28, fontWeight: FontWeight.w600, color: cs.onSurface)),
+        const SizedBox(height: 4),
+        Text(day, style: KasaFont.sans(fontSize: 14, color: cs.kasaTextSub)),
+        const SizedBox(height: 20),
+        Row(children: [
+          count(readingsLeft, 'Readings left', () => context.go('/readings')),
+          const SizedBox(width: 8),
+          count(openRepairs, 'Open repairs', () => context.go('/maintenance')),
+          const SizedBox(width: 8),
+          count(vacant, vacant == 1 ? 'Vacant unit' : 'Vacant units', () => context.go('/properties')),
+        ]),
+        const SizedBox(height: 20),
+        KasaSectionHeader('To do',
+            trailing: Text('${todo.length}',
+                style: KasaFont.sans(fontSize: 14, color: cs.kasaTextSub))),
+        const SizedBox(height: 12),
+        if (todo.isEmpty)
+          Text('Nothing waiting. Meters are read and repairs are closed.',
+              style: KasaFont.sans(fontSize: 14, color: cs.kasaTextSub))
+        else
+          KasaListGroup(children: todo),
+      ],
+    );
+  }
+}
+
+// ─── Header ───────────────────────────────────────────────────────────────────
+// ─── Landlord Bento ───────────────────────────────────────────────────────────
 // ─── Tenant Bento ─────────────────────────────────────────────────────────────
 
 class _TenantBento extends StatelessWidget {
@@ -780,248 +684,7 @@ class _QuickAction extends StatelessWidget {
 }
 
 // ─── Occupancy Ring ───────────────────────────────────────────────────────────
-
-class _OccupancyRing extends StatelessWidget {
-  const _OccupancyRing({
-    required this.pct,
-    required this.size,
-    required this.color,
-    required this.bg,
-    required this.label,
-    required this.labelColor,
-  });
-
-  final double pct;
-  final double size;
-  final Color color;
-  final Color bg;
-  final String label;
-  final Color labelColor;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: size,
-      height: size,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          CustomPaint(
-            size: Size(size, size),
-            painter: _RingPainter(pct: pct, color: color, bg: bg),
-          ),
-          Text(
-            label,
-            style: KasaFont.sans(
-              fontSize: 26,
-              fontWeight: FontWeight.w600,
-              letterSpacing: -1.04,
-              color: labelColor,
-              height: 1,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _RingPainter extends CustomPainter {
-  const _RingPainter({required this.pct, required this.color, required this.bg});
-  final double pct;
-  final Color color;
-  final Color bg;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final cx = size.width / 2;
-    final cy = size.height / 2;
-    final r = (size.width - 14) / 2;
-    final rect = Rect.fromCircle(center: Offset(cx, cy), radius: r);
-
-    final bgPaint = Paint()
-      ..color = bg
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 10;
-    canvas.drawCircle(Offset(cx, cy), r, bgPaint);
-
-    final fgPaint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 10
-      ..strokeCap = StrokeCap.butt;
-    canvas.drawArc(rect, -math.pi / 2, 2 * math.pi * (pct / 100), false, fgPaint);
-  }
-
-  @override
-  bool shouldRepaint(_RingPainter old) => old.pct != pct || old.color != color;
-}
-
 // ─── Activity card (landlord) ─────────────────────────────────────────────────
-
-class _ActivityCard extends StatelessWidget {
-  const _ActivityCard({required this.data});
-  final Map<String, dynamic> data;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    // Build activity rows from summary data since the dashboard API returns aggregates.
-    final items = <_ActivityItem>[
-      _ActivityItem(
-        icon: Icons.home_work_outlined,
-        accent: KasaCardAccent.secondary,
-        text: '${data['properties'] ?? 0} ${pluralize(data['properties'] ?? 0, 'property', 'properties')} · '
-            '${data['total_units'] ?? 0} ${pluralize(data['total_units'] ?? 0, 'unit', 'units')}',
-        time: 'Portfolio',
-      ),
-      _ActivityItem(
-        icon: Icons.people_outline,
-        accent: KasaCardAccent.primary,
-        text: '${data['occupied_units'] ?? 0} occupied · ${data['vacant_units'] ?? 0} vacant',
-        time: 'Occupancy',
-      ),
-      _ActivityItem(
-        icon: Icons.payments_outlined,
-        accent: KasaCardAccent.tertiary,
-        text: 'KES ${_fmt(data['overdue_amount_kes'])} outstanding',
-        time: 'Overdue',
-      ),
-    ];
-
-    return KasaCard(
-      padding: EdgeInsets.zero,
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(18, 16, 18, 8),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const _Label('Portfolio summary'),
-                // Rental income tax sits beside reports because it is the other
-                // thing a landlord leaves this screen to go and do — and it has
-                // a deadline, unlike reports.
-                GestureDetector(
-                  onTap: () => context.push('/tax'),
-                  behavior: HitTestBehavior.opaque,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
-                      child: Text(
-                        'TAX',
-                        style: KasaFont.sans(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: cs.kasaTextSub,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                // WHY the padding and minimum size: the bare label measured
-                // 49x16dp, well under the 44dp minimum touch target, so it was
-                // a link people had to aim at.
-                GestureDetector(
-                  onTap: () => context.push('/reports'),
-                  behavior: HitTestBehavior.opaque,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
-                      child: Text(
-                        'Reports',
-                        style: KasaFont.sans(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: cs.kasaTextSub,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          ...items.asMap().entries.map((e) {
-            final i = e.key;
-            final item = e.value;
-            final ink = switch (item.accent) {
-              KasaCardAccent.primary   => cs.onPrimary,
-              KasaCardAccent.secondary => cs.onSecondary,
-              KasaCardAccent.tertiary  => cs.tertiaryInk,
-              _                        => cs.onSurface,
-            };
-            final fill = switch (item.accent) {
-              KasaCardAccent.primary   => cs.primary,
-              KasaCardAccent.secondary => cs.secondary,
-              KasaCardAccent.tertiary  => cs.tertiary,
-              _                        => cs.surface,
-            };
-            return Container(
-              decoration: BoxDecoration(
-                border: Border(
-                  top: i > 0
-                      ? BorderSide(color: cs.kasaStroke, width: KasaBorders.card)
-                      : BorderSide.none,
-                ),
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-              child: Row(
-                children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: fill,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
-                    ),
-                    child: Icon(item.icon, size: 20, color: ink),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          item.text,
-                          style: KasaFont.sans(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: cs.onSurface),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          item.time,
-                          style: KasaFont.sans(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: 0.04,
-                              color: cs.kasaTextSub),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }),
-        ],
-      ),
-    );
-  }
-}
-
-class _ActivityItem {
-  const _ActivityItem({required this.icon, required this.accent, required this.text, required this.time});
-  final IconData icon;
-  final KasaCardAccent accent;
-  final String text;
-  final String time;
-}
-
 // ─── Payment history card (tenant) ───────────────────────────────────────────
 
 class _PaymentHistoryCard extends StatelessWidget {
@@ -1171,13 +834,6 @@ class _ErrorState extends StatelessWidget {
 DateTime? _parseDate(dynamic iso) {
   if (iso == null) return null;
   return DateTime.tryParse(iso.toString());
-}
-
-String _fmt(dynamic v) {
-  final n = toDouble(v);
-  if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
-  if (n >= 1000) return '${(n / 1000).toStringAsFixed(0)}K';
-  return n.toStringAsFixed(0);
 }
 
 /// The tenant's written notice to vacate, shown on their tenancy card.
