@@ -14,7 +14,6 @@ import '../../core/widgets/kasa_layout.dart';
 import '../../core/widgets/kasa_primitives.dart';
 import '../../shared/widgets/shimmer_loading.dart';
 import 'unplaced_payments.dart';
-import '../../core/utils/text.dart';
 
 final _apiDate = DateFormat('yyyy-MM-dd');
 final _displayDate = DateFormat('dd MMM yyyy');
@@ -704,37 +703,43 @@ class _BillRow extends ConsumerWidget {
     );
   }
 
+  // WHY a route on the tab's own navigator and not a sheet: the bill has its
+  // own back button and actions, and the tab bar stays where it was.
   void _showDetail(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      useRootNavigator: true,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => _InvoiceDetailSheet(
-        invoice: invoice,
-        onChanged: onChanged,
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => _InvoiceDetailScreen(invoice: invoice, onChanged: onChanged),
       ),
     );
   }
-
 }
 
-// ─── Invoice Detail Bottom Sheet ──────────────────────────────────────────────
+// Bill detail
 
-class _InvoiceDetailSheet extends ConsumerStatefulWidget {
-  const _InvoiceDetailSheet({required this.invoice, required this.onChanged});
+class _InvoiceDetailScreen extends ConsumerStatefulWidget {
+  const _InvoiceDetailScreen({required this.invoice, required this.onChanged});
   final Map<String, dynamic> invoice;
   final VoidCallback onChanged;
 
   @override
-  ConsumerState<_InvoiceDetailSheet> createState() => _InvoiceDetailSheetState();
+  ConsumerState<_InvoiceDetailScreen> createState() => _InvoiceDetailScreenState();
 }
 
-class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
+class _InvoiceDetailScreenState extends ConsumerState<_InvoiceDetailScreen> {
   bool _stkLoading = false;
 
-  Map<String, dynamic> get invoice => widget.invoice;
+  /// The bill as the list now holds it, so recording a payment or adding an
+  /// eTIMS receipt shows here without leaving the screen. Falls back to the
+  /// copy this screen was opened with.
+  Map<String, dynamic> get invoice {
+    for (final row in ref.read(invoicesProvider).valueOrNull ?? const []) {
+      if (row is Map && row['id'] == widget.invoice['id']) {
+        return Map<String, dynamic>.from(row);
+      }
+    }
+    return widget.invoice;
+  }
+
   VoidCallback get onChanged => widget.onChanged;
 
   Future<void> _stkPush(BuildContext context, WidgetRef ref) async {
@@ -864,434 +869,360 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
     );
   }
 
+  Future<void> _sendReminder() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final errorColor = Theme.of(context).colorScheme.error;
+    try {
+      await ref
+          .read(dioProvider)
+          .post('/api/v1/payments/invoices/${invoice['id']}/remind/');
+      messenger.showSnackBar(SnackBar(
+        content: Text('Reminder sent to ${invoice['tenant_name'] ?? 'the tenant'}.'),
+        backgroundColor: Colors.green,
+      ));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(apiError(e)), backgroundColor: errorColor));
+    }
+  }
+
+  Future<void> _voidBill() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      useRootNavigator: true,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Void this bill?'),
+        content: Text('Mark ${invoice['invoice_number']} as cancelled? '
+            'No payments or ledger entries will be deleted.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Void')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+    final errorColor = Theme.of(context).colorScheme.error;
+    try {
+      await ref.read(dioProvider).post('/api/v1/payments/invoices/${invoice['id']}/cancel/');
+      onChanged();
+      navigator.pop();
+      messenger.showSnackBar(const SnackBar(content: Text('Bill voided.')));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(apiError(e)), backgroundColor: errorColor));
+    }
+  }
+
+  String _plain(num n) => NumberFormat('#,##0').format(n);
+
+  /// "was due 5 Sep, 23 days ago" / "due 5 Oct, in 12 days" / "due today".
+  String _dueLine(String status, DateTime? due) {
+    if (status == 'paid') return 'Settled';
+    if (status == 'cancelled') return 'Voided';
+    if (due == null) return '';
+    final today = DateTime.now();
+    final days = DateTime(due.year, due.month, due.day)
+        .difference(DateTime(today.year, today.month, today.day))
+        .inDays;
+    final on = DateFormat('d MMM').format(due);
+    if (days == 0) return 'Due today';
+    if (days > 0) return 'Due $on, in $days ${days == 1 ? 'day' : 'days'}';
+    return 'Was due $on, ${-days} ${days == -1 ? 'day' : 'days'} ago';
+  }
+
   @override
   Widget build(BuildContext context) {
+    ref.watch(invoicesProvider); // rebuild when the list changes
     final cs = Theme.of(context).colorScheme;
-    final status = invoice['status'] as String;
-    final isPaid = status == 'paid';
-    final canEdit = status == 'pending' || status == 'overdue';
-    final canVoid = status == 'pending' || status == 'overdue';
-    final payments = invoice['payments'] as List<dynamic>? ?? [];
-    final role = ref.watch(userRoleProvider).valueOrNull;
-    final isLandlord = role == 'landlord';
+    final bill = invoice;
+    final status = bill['status'] as String? ?? '';
+    final isLandlord = ref.watch(userRoleProvider).valueOrNull == 'landlord';
+    final isOpen = status != 'paid' && status != 'cancelled';
+    final canEdit = isLandlord && (status == 'pending' || status == 'overdue');
+    final canVoid = canEdit;
+    final lines = (bill['line_items'] as List? ?? const []).cast<Map<String, dynamic>>();
+    final payments = (bill['payments'] as List? ?? const []).cast<Map<String, dynamic>>();
+    final period = DateTime.tryParse('${bill['period_start']}');
+    final due = DateTime.tryParse('${bill['due_date']}');
+    final balance = toDouble(bill['balance']);
+    final chip = _BillRow.statusOf(status);
+    final muted = KasaFont.sans(fontSize: 14, color: cs.kasaTextSub);
+    final amount = KasaFont.sans(fontSize: 14, color: cs.onSurface)
+        .copyWith(fontFeatures: KasaType.tabular);
 
-    final chipVariant = switch (status) {
-      'paid'           => KasaChipVariant.primary,
-      'overdue'        => KasaChipVariant.tertiary,
-      'pending'        => KasaChipVariant.secondary,
-      'partially_paid' => KasaChipVariant.secondary,
-      _                => KasaChipVariant.neutral,
-    };
-    final chipLabel = switch (status) {
-      'paid'           => 'Paid',
-      'overdue'        => 'Overdue',
-      'pending'        => 'Pending',
-      'partially_paid' => 'Partial',
-      'cancelled'      => 'Void',
-      _                => sentenceCase(status),
-    };
-
-    return DraggableScrollableSheet(
-      initialChildSize: 0.6,
-      maxChildSize: 0.92,
-      minChildSize: 0.4,
-      expand: false,
-      builder: (_, controller) => Container(
-        decoration: BoxDecoration(
-          color: cs.kasaBg,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(KasaRadius.xl)),
-          border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
-        ),
-        child: ListView(
-          controller: controller,
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
-          children: [
-            // Handle
-            Center(
-              child: Container(
-                width: 36, height: 4,
-                margin: const EdgeInsets.only(bottom: 20),
-                decoration: BoxDecoration(
-                  color: cs.outlineVariant,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-
-            // Header: invoice number + chip
-            Row(
-              children: [
-                Text(
-                  invoice['invoice_number'] ?? '',
-                  style: KasaFont.mono(
-                    fontSize: 13, fontWeight: FontWeight.w700, color: cs.kasaTextSub,
-                  ),
-                ),
-                const Spacer(),
-                KasaChip(label: chipLabel, variant: chipVariant, small: true),
+    return Scaffold(
+      backgroundColor: cs.kasaBg,
+      appBar: AppBar(
+        toolbarHeight: 60,
+        backgroundColor: cs.kasaBg,
+        surfaceTintColor: Colors.transparent,
+        titleSpacing: 0,
+        title: Text(period == null ? 'Bill' : '${DateFormat('MMMM').format(period)} bill',
+            style: KasaFont.sans(fontSize: 20, fontWeight: FontWeight.w600, color: cs.onSurface)),
+        actions: [
+          if (canEdit || canVoid)
+            PopupMenuButton<String>(
+              tooltip: 'Bill options',
+              icon: const Icon(Icons.more_horiz_rounded),
+              onSelected: (v) {
+                if (v == 'edit') {
+                  showDialog(
+                    context: context,
+                    useRootNavigator: true,
+                    barrierDismissible: false,
+                    builder: (_) => _EditInvoiceDialog(invoice: bill, onDone: onChanged),
+                  );
+                } else if (v == 'void') {
+                  _voidBill();
+                }
+              },
+              itemBuilder: (_) => [
+                if (canEdit)
+                  const PopupMenuItem(value: 'edit', child: Text('Edit bill')),
+                if (canVoid)
+                  const PopupMenuItem(value: 'void', child: Text('Void bill')),
               ],
             ),
-            const SizedBox(height: 8),
-
-            // Hero amount
-            Text(
-              formatCurrency(toDouble(invoice['amount_due'])),
-              style: KasaFont.sans(
-                fontSize: 40, fontWeight: FontWeight.w600,
-                letterSpacing: -1.2, color: cs.onSurface, height: 1,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              '${invoice['tenant_name'] ?? ''} · Unit ${invoice['unit_number'] ?? ''}',
-              style: KasaFont.sans(
-                fontSize: 13, fontWeight: FontWeight.w500, color: cs.kasaTextSub,
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            // Detail rows
-            KasaCard(
-              padding: EdgeInsets.zero,
-              child: Column(
-                children: [
-                  _DetailRow('Amount due', formatCurrency(toDouble(invoice['amount_due'])), isFirst: true),
-                  _DetailRow('Amount paid', formatCurrency(toDouble(invoice['amount_paid']))),
-                  _DetailRow('Balance', formatCurrency(toDouble(invoice['balance'])),
-                      bold: true,
-                      valueColor: isPaid ? cs.statusPaid : cs.error),
-                  if (invoice['due_date'] != null)
-                    _DetailRow('Due date', _tryFormatDate(invoice['due_date'] as String)),
-                  if (invoice['period_start'] != null)
-                    _DetailRow(
-                      'Period',
-                      '${_tryFormatDate(invoice['period_start'] as String)} – '
-                          '${_tryFormatDate(invoice['period_end'] as String? ?? '')}',
-                    ),
-                  if (invoice['notes']?.isNotEmpty == true)
-                    _DetailRow('Notes', invoice['notes'] as String),
-                ],
-              ),
-            ),
-
-            // Line items breakdown
-            Builder(builder: (context) {
-              final lineItems = invoice['line_items'] as List<dynamic>? ?? [];
-              if (lineItems.isEmpty) return const SizedBox.shrink();
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const SizedBox(height: 16),
-                  Text(
-                    'Breakdown',
-                    style: KasaFont.sans(
-                      fontSize: 11, fontWeight: FontWeight.w600,
-                      letterSpacing: 0.04, color: cs.kasaTextSub,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  KasaCard(
-                    padding: EdgeInsets.zero,
-                    child: Column(
-                      children: lineItems.asMap().entries.map((e) {
-                        final i = e.key;
-                        final li = e.value as Map<String, dynamic>;
-                        final isMetered = li['previous_reading'] != null;
-                        return Container(
-                          decoration: BoxDecoration(
-                            border: Border(
-                              top: i > 0
-                                  ? BorderSide(color: cs.kasaStroke, width: KasaBorders.card)
-                                  : BorderSide.none,
-                            ),
-                          ),
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      li['description'] as String? ?? '',
-                                      style: KasaFont.sans(
-                                        fontSize: 13, fontWeight: FontWeight.w600,
-                                        color: cs.onSurface,
-                                      ),
-                                    ),
-                                    if (isMetered) ...[
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        '${toDouble(li['current_reading']).toStringAsFixed(0)} − '
-                                        '${toDouble(li['previous_reading']).toStringAsFixed(0)} = '
-                                        '${toDouble(li['units_consumed']).toStringAsFixed(0)} units '
-                                        '× ${AppConstants.currency} '
-                                        '${toDouble(li['unit_price']).toStringAsFixed(2)}',
-                                        style: KasaFont.mono(
-                                          fontSize: 10, color: cs.kasaTextSub,
-                                        ),
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                              ),
-                              Text(
-                                formatCurrency(toDouble(li['amount'])),
-                                style: KasaFont.sans(
-                                  fontSize: 13, fontWeight: FontWeight.w600,
-                                  color: cs.onSurface,
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ),
-                ],
-              );
-            }),
-
-            const SizedBox(height: 16),
-
-            // Payments
-            Text(
-              'Payments (${payments.length})',
-              style: KasaFont.sans(
-                fontSize: 11, fontWeight: FontWeight.w600,
-                letterSpacing: 0.04, color: cs.kasaTextSub,
-              ),
-            ),
-            const SizedBox(height: 8),
-            if (payments.isEmpty)
-              KasaCard(
-                padding: const EdgeInsets.all(16),
-                child: Text(
-                  'No payments recorded yet.',
-                  style: KasaFont.sans(fontSize: 13, color: cs.kasaTextSub),
+          const SizedBox(width: 4),
+        ],
+      ),
+      bottomNavigationBar: !isOpen
+          ? null
+          : KasaActionBar(children: [
+              if (isLandlord)
+                _SquareIconButton(
+                  icon: Icons.sms_outlined,
+                  tooltip: 'Send reminder SMS',
+                  onTap: _sendReminder,
                 ),
-              )
-            else
-              KasaCard(
-                padding: EdgeInsets.zero,
-                child: Column(
-                  children: payments.asMap().entries.map((e) {
-                    final i = e.key;
-                    final pm = e.value as Map<String, dynamic>;
-                    return Container(
-                      decoration: BoxDecoration(
-                        border: Border(
-                          top: i > 0
-                              ? BorderSide(color: cs.kasaStroke, width: KasaBorders.card)
-                              : BorderSide.none,
-                        ),
-                      ),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 36, height: 36,
-                            decoration: BoxDecoration(
-                              color: cs.primary,
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
-                            ),
-                            child: Icon(Icons.check, size: 18, color: cs.onPrimary),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  formatCurrency(toDouble(pm['amount'])),
-                                  style: KasaFont.sans(
-                                    fontSize: 14, fontWeight: FontWeight.w600,
-                                    color: cs.onSurface,
-                                  ),
-                                ),
-                                Text(
-                                  '${(pm['method_display'] as String? ?? (pm['method'] as String? ?? '')).toUpperCase()} · ${_tryFormatDate(pm['paid_at'] as String? ?? '')}',
-                                  style: KasaFont.mono(
-                                    fontSize: 10, color: cs.kasaTextSub,
-                                  ),
-                                ),
-                                // Bank details
-                                if (pm['method'] == 'bank') ...[
-                                  if (pm['bank_name'] != null)
-                                    Text(
-                                      pm['bank_name'] as String,
-                                      style: KasaFont.sans(
-                                        fontSize: 11, color: cs.kasaTextSub,
-                                      ),
-                                    ),
-                                  if (pm['bank_reference'] != null)
-                                    Text(
-                                      'Ref: ${pm['bank_reference']}',
-                                      style: KasaFont.mono(
-                                        fontSize: 10, color: cs.kasaTextSub,
-                                      ),
-                                    ),
-                                  if (pm['bank_account'] != null)
-                                    Text(
-                                      'From: ${pm['bank_account']}',
-                                      style: KasaFont.mono(
-                                        fontSize: 10, color: cs.kasaTextSub,
-                                      ),
-                                    ),
-                                  if (pm['bank_branch'] != null)
-                                    Text(
-                                      'Branch: ${pm['bank_branch']}',
-                                      style: KasaFont.sans(
-                                        fontSize: 10, color: cs.kasaTextSub,
-                                      ),
-                                    ),
-                                ],
-                                // KRA checks declared rent against their eTIMS
-                                // records, so the receipt sits on the payment
-                                // it belongs to rather than somewhere separate.
-                                if (isLandlord) ...[
-                                  const SizedBox(height: 2),
-                                  if (pm['etims_receipt_number'] != null)
-                                    Text(
-                                      'eTIMS: ${pm['etims_receipt_number']}',
-                                      style: KasaFont.mono(
-                                        fontSize: 10, color: cs.kasaTextSub,
-                                      ),
-                                    )
-                                  else
-                                    InkWell(
-                                      onTap: () => _captureEtimsReceipt(
-                                          context, ref, pm['id'] as int),
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                            vertical: 2),
-                                        child: Text(
-                                          '+ Add eTIMS receipt',
-                                          style: KasaFont.sans(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w600,
-                                            color: cs.secondary,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                ],
-                              ],
-                            ),
-                          ),
-                          const KasaChip(label: 'Paid', variant: KasaChipVariant.primary, small: true),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-
-            const SizedBox(height: 20),
-
-            // Actions
-            if (!isPaid)
               KasaButton(
-                label: 'Pay with M-Pesa',
+                label: isLandlord ? 'Record payment' : 'Pay ${formatCurrency(balance)} with M-Pesa',
                 variant: KasaButtonVariant.primary,
-                leading: Icon(Icons.phone_android, size: 16, color: cs.onPrimary),
                 isLoading: _stkLoading,
                 onTap: _stkLoading ? null : () => _showPaymentMethodSheet(context, ref),
               ),
-            if (isLandlord) ...[
-              if (canEdit) ...[
-                const SizedBox(height: 8),
-                KasaButton(
-                  label: 'Edit invoice',
-                  variant: KasaButtonVariant.ghost,
-                  leading: Icon(Icons.edit_outlined, size: 16, color: cs.onSurface),
-                  onTap: () async {
-                    Navigator.pop(context);
-                    await Future.delayed(const Duration(milliseconds: 350));
-                    if (!context.mounted) return;
-                    showDialog(
-                      context: context,
-                      useRootNavigator: true,
-                      barrierDismissible: false,
-                      builder: (_) => _EditInvoiceDialog(
-                        invoice: invoice,
-                        onDone: onChanged,
-                      ),
-                    );
-                  },
-                ),
-              ],
-              if (canVoid) ...[
-                const SizedBox(height: 8),
-                KasaButton(
-                  label: 'Void invoice',
-                  variant: KasaButtonVariant.ghost,
-                  leading: Icon(Icons.cancel_outlined, size: 16, color: cs.tertiary),
-                  onTap: () async {
-                    Navigator.pop(context);
-                    await Future.delayed(const Duration(milliseconds: 350));
-                    if (!context.mounted) return;
-                    final confirmed = await showDialog<bool>(
-                      context: context,
-                      useRootNavigator: true,
-                      builder: (ctx) => AlertDialog(
-                        title: const Text('Void Invoice'),
-                        content: Text(
-                            'Mark ${invoice['invoice_number']} as cancelled? '
-                            'No payments or ledger entries will be deleted.'),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(ctx, false),
-                            child: const Text('Cancel'),
-                          ),
-                          ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                                backgroundColor: Theme.of(ctx).colorScheme.tertiary,
-                                foregroundColor: Theme.of(ctx).colorScheme.onTertiary),
-                            onPressed: () => Navigator.pop(ctx, true),
-                            child: const Text('Void'),
-                          ),
-                        ],
-                      ),
-                    );
-                    if (confirmed != true || !context.mounted) return;
-                    try {
-                      final dio = ref.read(dioProvider);
-                      await dio.post(
-                          '/api/v1/payments/invoices/${invoice['id']}/cancel/');
-                      onChanged();
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                          content: const Text('Invoice voided.'),
-                          backgroundColor: Theme.of(context).colorScheme.tertiary,
-                        ));
-                      }
-                    } catch (e) {
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                          content: Text(apiError(e)),
-                          backgroundColor: Theme.of(context).colorScheme.error,
-                        ));
-                      }
-                    }
-                  },
-                ),
-              ],
-            ],
+            ]),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+        children: [
+          Text('${bill['tenant_name'] ?? ''} \u00b7 Unit ${bill['unit_number'] ?? ''}', style: muted),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(
+              child: Text(formatCurrency(balance),
+                  style: KasaType.moneyXl.copyWith(color: cs.onSurface)),
+            ),
+            KasaStatusChip(kind: chip.$1, label: chip.$2),
+          ]),
+          const SizedBox(height: 8),
+          Text('Balance \u00b7 ${_dueLine(status, due)}', style: muted),
+          const SizedBox(height: 4),
+          Text('${bill['invoice_number'] ?? ''}',
+              style: KasaFont.mono(fontSize: 12, color: cs.kasaTextSub)),
+          const SizedBox(height: 16),
+
+          KasaCard(
+            padding: EdgeInsets.zero,
+            child: Column(children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Column(children: [
+                  if (lines.isEmpty)
+                    KasaKeyValue('Amount due', Text(_plain(toDouble(bill['amount_due'])), style: amount))
+                  else
+                    for (final li in lines) _LineItemRow(item: li, amount: amount),
+                ]),
+              ),
+              Divider(height: 1, color: cs.kasaStroke),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Column(children: [
+                  KasaKeyValue('Total',
+                      Text(formatCurrency(toDouble(bill['amount_due'])),
+                          style: amount.copyWith(fontWeight: FontWeight.w600)),
+                      strong: true),
+                  if (toDouble(bill['amount_paid']) > 0)
+                    KasaKeyValue('Paid',
+                        Text('\u2212 ${_plain(toDouble(bill['amount_paid']))}', style: amount)),
+                  KasaKeyValue('Balance',
+                      Text(formatCurrency(balance),
+                          style: amount.copyWith(fontWeight: FontWeight.w600)),
+                      strong: true),
+                ]),
+              ),
+            ]),
+          ),
+          if ('${bill['notes'] ?? ''}'.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text('Notes: ${bill['notes']}', style: muted),
           ],
-        ),
+          const SizedBox(height: 20),
+
+          const KasaSectionHeader('Payments'),
+          const SizedBox(height: 8),
+          if (payments.isEmpty)
+            KasaCard(
+              padding: const EdgeInsets.all(16),
+              child: Text('No payments recorded yet.', style: muted),
+            )
+          else
+            KasaListGroup(children: [
+              for (final pm in payments)
+                _BillPaymentRow(
+                  payment: pm,
+                  canAddReceipt: isLandlord,
+                  onAddReceipt: () => _captureEtimsReceipt(context, ref, pm['id'] as int),
+                ),
+            ]),
+        ],
       ),
     );
   }
+}
 
-  String _tryFormatDate(String raw) {
-    if (raw.isEmpty) return '';
-    try {
-      return _displayDate.format(DateTime.parse(raw));
-    } catch (_) {
-      return raw;
-    }
+/// One line of the bill. A metered charge also shows the readings it came from,
+/// which is what settles a dispute about the water.
+class _LineItemRow extends StatelessWidget {
+  const _LineItemRow({required this.item, required this.amount});
+  final Map<String, dynamic> item;
+  final TextStyle amount;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final metered = item['previous_reading'] != null;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('${item['description'] ?? ''}',
+                    style: KasaFont.sans(fontSize: 14, color: cs.kasaTextSub)),
+                if (metered)
+                  Text(
+                    '${toDouble(item['current_reading']).toStringAsFixed(0)} \u2212 '
+                    '${toDouble(item['previous_reading']).toStringAsFixed(0)} = '
+                    '${toDouble(item['units_consumed']).toStringAsFixed(0)} units '
+                    '\u00d7 ${AppConstants.currency} ${toDouble(item['unit_price']).toStringAsFixed(2)}',
+                    style: KasaFont.mono(fontSize: 11, color: cs.kasaTextSub),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Text(NumberFormat('#,##0').format(toDouble(item['amount'])), style: amount),
+        ],
+      ),
+    );
+  }
+}
+
+/// A payment against this bill: how, when, the receipt, and (for the
+/// landlord) the eTIMS receipt KRA will check the rent against.
+class _BillPaymentRow extends StatelessWidget {
+  const _BillPaymentRow({
+    required this.payment,
+    required this.canAddReceipt,
+    required this.onAddReceipt,
+  });
+
+  final Map<String, dynamic> payment;
+  final bool canAddReceipt;
+  final VoidCallback onAddReceipt;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final when = DateTime.tryParse('${payment['paid_at']}')?.toLocal();
+    final receipt = '${payment['mpesa_receipt_number'] ?? payment['bank_reference'] ?? ''}'.trim();
+    final bank = [
+      if ('${payment['bank_name'] ?? ''}'.isNotEmpty) '${payment['bank_name']}',
+      if ('${payment['bank_account'] ?? ''}'.isNotEmpty) 'from ${payment['bank_account']}',
+      if ('${payment['bank_branch'] ?? ''}'.isNotEmpty) '${payment['bank_branch']} branch',
+    ].join(' \u00b7 ');
+    final etims = '${payment['etims_receipt_number'] ?? ''}'.trim();
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const KasaLeadIcon(Icons.phone_iphone_rounded),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  [
+                    '${payment['method_display'] ?? ''}',
+                    if (when != null) DateFormat('d MMM').format(when),
+                  ].join(' \u00b7 '),
+                  style: KasaFont.sans(fontSize: 15, fontWeight: FontWeight.w500, color: cs.onSurface),
+                ),
+                if (receipt.isNotEmpty)
+                  Text(receipt, style: KasaFont.mono(fontSize: 12, color: cs.kasaTextSub)),
+                if (bank.isNotEmpty)
+                  Text(bank, style: KasaFont.sans(fontSize: 13, color: cs.kasaTextSub)),
+                // KRA checks declared rent against eTIMS records, so the
+                // receipt sits on the payment it belongs to.
+                if (canAddReceipt) ...[
+                  const SizedBox(height: 4),
+                  if (etims.isNotEmpty)
+                    Text('eTIMS $etims', style: KasaFont.mono(fontSize: 12, color: cs.kasaTextSub))
+                  else
+                    InkWell(
+                      onTap: onAddReceipt,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        child: Text('+ Add eTIMS receipt',
+                            style: KasaFont.sans(
+                                fontSize: 13, fontWeight: FontWeight.w600, color: cs.primary)),
+                      ),
+                    ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(NumberFormat('#,##0').format(toDouble(payment['amount'])),
+              style: KasaFont.sans(fontSize: 15, fontWeight: FontWeight.w600, color: cs.onSurface)
+                  .copyWith(fontFeatures: KasaType.tabular)),
+        ],
+      ),
+    );
+  }
+}
+
+/// The small outlined square beside the primary action.
+class _SquareIconButton extends StatelessWidget {
+  const _SquareIconButton({required this.icon, required this.tooltip, required this.onTap});
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: cs.kasaCard,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: cs.kasaStrokeStrong),
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onTap,
+          child: SizedBox(width: 52, height: 52, child: Icon(icon, color: cs.onSurface)),
+        ),
+      ),
+    );
   }
 }
 
@@ -1435,54 +1366,6 @@ class _EditInvoiceDialogState extends ConsumerState<_EditInvoiceDialog> {
     );
   }
 }
-
-class _DetailRow extends StatelessWidget {
-  const _DetailRow(this.label, this.value,
-      {this.isFirst = false, this.bold = false, this.valueColor});
-  final String label, value;
-  final bool isFirst;
-  final bool bold;
-  final Color? valueColor;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Container(
-      decoration: isFirst
-          ? null
-          : BoxDecoration(
-              border: Border(top: BorderSide(color: cs.kasaStroke, width: KasaBorders.card))),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: KasaFont.sans(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.04,
-              color: cs.kasaTextSub,
-            ),
-          ),
-          const Spacer(),
-          Flexible(
-            child: Text(
-              value,
-              textAlign: TextAlign.right,
-              style: KasaFont.sans(
-                fontSize: 13,
-                fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
-                color: valueColor ?? cs.onSurface,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 // ─── Payment Method Sheet ─────────────────────────────────────────────────────
 
 class _PaymentMethodSheet extends StatelessWidget {
