@@ -338,6 +338,7 @@ class KasaUnitTile extends StatelessWidget {
     required this.occupant,
     required this.state,
     this.onTap,
+    this.onLongPress,
   });
 
   final String number;
@@ -346,6 +347,10 @@ class KasaUnitTile extends StatelessWidget {
   /// The server's unit state: paid, due, arrears, vacant or notice.
   final String? state;
   final VoidCallback? onTap;
+
+  /// Secondary actions (edit, delete) live here rather than in a menu on every
+  /// tile, which the grid has no room for.
+  final VoidCallback? onLongPress;
 
   static (KasaStatusKind, String)? statusFor(String? state) => switch (state) {
         'paid' => (KasaStatusKind.paid, 'Paid'),
@@ -369,6 +374,7 @@ class KasaUnitTile extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         child: ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 104),
           child: Padding(
@@ -387,9 +393,68 @@ class KasaUnitTile extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: KasaFont.sans(fontSize: 13, color: cs.kasaTextSub)),
-                if (status != null) KasaStatusChip(kind: status.$1, label: status.$2),
+                // WHY the FittedBox: a tile is 104 wide on a 360 phone, and the
+                // chip with its dot and word is a few pixels wider. Shrinking
+                // it a little keeps the whole word, which truncating would not.
+                if (status != null)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: KasaStatusChip(kind: status.$1, label: status.$2),
+                    ),
+                  ),
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// Filters
+
+/// A rounded filter with its count: "Overdue 3". The selected one is filled.
+class KasaFilterPill extends StatelessWidget {
+  const KasaFilterPill({
+    super.key,
+    required this.label,
+    required this.count,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final int count;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final fg = selected ? cs.kasaBg : cs.onSurface;
+    return Material(
+      color: selected ? cs.onSurface : cs.kasaCard,
+      shape: StadiumBorder(side: BorderSide(color: selected ? cs.onSurface : cs.kasaStrokeStrong)),
+      child: InkWell(
+        customBorder: const StadiumBorder(),
+        onTap: onTap,
+        child: Container(
+          height: 40,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          alignment: Alignment.center,
+          child: Text.rich(
+            TextSpan(children: [
+              TextSpan(text: '$label ', style: KasaFont.sans(fontSize: 14, fontWeight: FontWeight.w500, color: fg)),
+              TextSpan(
+                text: '$count',
+                style: KasaFont.sans(
+                  fontSize: 14,
+                  color: selected ? fg.withValues(alpha: 0.7) : cs.kasaTextSub,
+                ).copyWith(fontFeatures: KasaType.tabular),
+              ),
+            ]),
           ),
         ),
       ),

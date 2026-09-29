@@ -8,9 +8,13 @@ import '../../core/providers/user_role_provider.dart';
 import '../../core/theme/kasa_tokens.dart';
 import '../../core/utils/api_error.dart';
 import '../../core/utils/currency.dart';
+import '../../core/widgets/kasa_layout.dart';
 import '../../core/widgets/kasa_primitives.dart';
+import '../dashboard/needs_attention.dart';
+import '../tenants/tenants_screen.dart';
 import 'meter_readings_screen.dart';
 import 'renumber_units_screen.dart';
+import 'unit_numbering.dart';
 
 final propertyDetailProvider =
     FutureProvider.family.autoDispose<Map<String, dynamic>, int>((ref, id) async {
@@ -73,7 +77,7 @@ class PropertyDetailScreen extends ConsumerWidget {
   }
 }
 
-class _PropertyDetailView extends ConsumerWidget {
+class _PropertyDetailView extends ConsumerStatefulWidget {
   const _PropertyDetailView({
     required this.propertyId,
     required this.data,
@@ -84,133 +88,274 @@ class _PropertyDetailView extends ConsumerWidget {
   final VoidCallback onRefresh;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final units = (data['units'] as List<dynamic>? ?? []);
+  ConsumerState<_PropertyDetailView> createState() => _PropertyDetailViewState();
+}
+
+class _PropertyDetailViewState extends ConsumerState<_PropertyDetailView> {
+  String _filter = 'all';
+
+  int get propertyId => widget.propertyId;
+  Map<String, dynamic> get data => widget.data;
+  VoidCallback get onRefresh => widget.onRefresh;
+
+  static const _filters = [
+    ('all', 'All'),
+    ('arrears', 'Arrears'),
+    ('vacant', 'Vacant'),
+    ('notice', 'Notice'),
+  ];
+
+  /// What a tile shows. The server works this out; a response without it
+  /// (an older server) still shows who is vacant.
+  static String? _stateOf(Map<String, dynamic> unit) =>
+      unit['state'] as String? ?? (unit['status'] == 'vacant' ? 'vacant' : null);
+
+  /// Ground floor first, then up the building; within a floor G1, G2, G10.
+  List<Map<String, dynamic>> _sorted(List<dynamic> units) {
+    final list = units.cast<Map<String, dynamic>>().toList();
+    list.sort((a, b) {
+      final byFloor = ((a['floor'] as num?) ?? 0).compareTo((b['floor'] as num?) ?? 0);
+      return byFloor != 0
+          ? byFloor
+          : compareUnitNumbers('${a['unit_number']}', '${b['unit_number']}');
+    });
+    return list;
+  }
+
+  bool _matches(Map<String, dynamic> unit) =>
+      _filter == 'all' || _stateOf(unit) == _filter;
+
+  void _addUnit() => showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => _AddUnitDialog(propertyId: propertyId, onDone: onRefresh),
+      );
+
+  /// Add tenant needs a unit to put them in. One vacant unit is used without
+  /// asking; several are offered; none says what to do first.
+  Future<void> _addTenant(List<Map<String, dynamic>> units) async {
+    final vacant = units.where((u) => _stateOf(u) == 'vacant').toList();
+    if (vacant.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Every unit is occupied. Add a unit first.'),
+      ));
+      return;
+    }
+    final unitId = vacant.length == 1
+        ? vacant.first['id'] as int
+        : await showModalBottomSheet<int>(
+            context: context,
+            useRootNavigator: true,
+            builder: (ctx) => SafeArea(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(20, 20, 20, 8),
+                    child: Text('Which unit is the tenant moving into?',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  ),
+                  for (final u in vacant)
+                    ListTile(
+                      title: Text('Unit ${u['unit_number']}'),
+                      subtitle: Text('${formatCurrency(toDouble(u['rent_amount']))}/mo'),
+                      onTap: () => Navigator.pop(ctx, u['id'] as int),
+                    ),
+                ],
+              ),
+            ),
+          );
+    if (unitId == null || !mounted) return;
+    await startTenancyForUnit(context, ref, unitId);
+    onRefresh();
+  }
+
+  /// Edit and delete, from a long press on a tile.
+  Future<void> _unitActions(Map<String, dynamic> unit) async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      useRootNavigator: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: Text('Edit unit ${unit['unit_number']}'),
+              onTap: () => Navigator.pop(ctx, 'edit'),
+            ),
+            ListTile(
+              leading: Icon(Icons.delete_outline, color: Theme.of(ctx).colorScheme.error),
+              title: Text('Delete unit ${unit['unit_number']}',
+                  style: TextStyle(color: Theme.of(ctx).colorScheme.error)),
+              onTap: () => Navigator.pop(ctx, 'delete'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+    if (choice == 'edit') {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => _EditUnitDialog(unit: unit, onDone: onRefresh),
+      );
+    } else {
+      await _deleteUnit(unit);
+    }
+  }
+
+  Future<void> _deleteUnit(Map<String, dynamic> unit) async {
+    if (_stateOf(unit) != 'vacant') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Only vacant units can be deleted.')),
+      );
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete unit?'),
+        content: Text('Delete unit ${unit['unit_number']}?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final errorColor = Theme.of(context).colorScheme.error;
+    try {
+      await ref.read(dioProvider).delete('/api/v1/properties/units/${unit['id']}/');
+      onRefresh();
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(apiError(e)), backgroundColor: errorColor));
+    }
+  }
+
+  Future<void> _renumber(List<Map<String, dynamic>> units) async {
+    final changed = await Navigator.of(context, rootNavigator: true).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => RenumberUnitsScreen(propertyId: propertyId, units: units),
+      ),
+    );
+    if (changed == true) onRefresh();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final unitCount = data['unit_count'] as int? ?? units.length;
-    final vacantCount = data['vacant_count'] as int? ?? 0;
-    final occupiedCount = unitCount - vacantCount;
     final role = ref.watch(userRoleProvider).valueOrNull;
     final canManage = role == 'landlord';
-    // Either of them may walk round and read the meters.
-    final canReadMeters = role == 'landlord' || role == 'caretaker';
+    // Either of them may walk round and read the meters, and place a tenant.
+    final canWork = role == 'landlord' || role == 'caretaker';
+
+    final units = _sorted(data['units'] as List<dynamic>? ?? const []);
+    final shown = units.where(_matches).toList();
+    int count(String f) =>
+        f == 'all' ? units.length : units.where((u) => _stateOf(u) == f).length;
+    final occupied = units.where((u) => _stateOf(u) != 'vacant').length;
+
+    final missing = (ref.watch(missingReadingsProvider).valueOrNull ?? const <MissingReadings>[])
+        .where((m) => m.propertyId == propertyId)
+        .fold<int>(0, (sum, m) => sum + m.missing);
+
+    final place = [
+      for (final k in ['address', 'town', 'county'])
+        if ('${data[k] ?? ''}'.trim().isNotEmpty) '${data[k]}'.trim(),
+    ].take(2).join(', ');
+    final muted = KasaFont.sans(fontSize: 14, color: cs.kasaTextSub);
+
+    Widget tool(IconData icon, String title, String? caption, VoidCallback onTap,
+            {bool warn = false}) =>
+        Expanded(
+          child: KasaCard(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            onTap: onTap,
+            child: Row(children: [
+              Icon(icon, size: 20, color: cs.onSurface),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: KasaFont.sans(
+                            fontSize: 14, fontWeight: FontWeight.w600, color: cs.onSurface)),
+                    if (caption != null)
+                      Text(caption,
+                          style: KasaFont.sans(
+                              fontSize: 13, color: warn ? cs.statusDue : cs.kasaTextSub)),
+                  ],
+                ),
+              ),
+            ]),
+          ),
+        );
 
     return Scaffold(
       backgroundColor: cs.kasaBg,
+      appBar: AppBar(
+        toolbarHeight: 60,
+        backgroundColor: cs.kasaBg,
+        surfaceTintColor: Colors.transparent,
+        titleSpacing: 0,
+        title: Text(data['name'] as String? ?? 'Property',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: KasaFont.sans(fontSize: 20, fontWeight: FontWeight.w600, color: cs.onSurface)),
+        actions: [
+          if (canManage)
+            PopupMenuButton<String>(
+              tooltip: 'Property options',
+              icon: const Icon(Icons.more_horiz_rounded),
+              onSelected: (v) {
+                if (v == 'add_unit') _addUnit();
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'add_unit', child: Text('Add unit')),
+              ],
+            ),
+          const SizedBox(width: 4),
+        ],
+      ),
+      bottomNavigationBar: canWork
+          ? KasaActionBar(children: [
+              KasaButton(
+                label: 'Add tenant',
+                variant: KasaButtonVariant.primary,
+                leading: Icon(Icons.add_rounded, size: 20, color: cs.onPrimary),
+                onTap: () => _addTenant(units),
+              ),
+            ])
+          : null,
       body: RefreshIndicator(
         onRefresh: () async => onRefresh(),
-        child: CustomScrollView(
-          slivers: [
-            // ── App bar ────────────────────────────────────────────────────
-            SliverAppBar(
-              backgroundColor: cs.kasaBg,
-              pinned: true,
-              elevation: 0,
-              leading: IconButton(
-                icon: Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: cs.kasaCard,
-                    borderRadius: BorderRadius.circular(KasaRadius.sm),
-                    border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
-                  ),
-                  child: Icon(Icons.arrow_back, size: 18, color: cs.onSurface),
-                ),
-                onPressed: () => Navigator.of(context).pop(),
-              ),
-              actions: canManage ? [
-                Padding(
-                  padding: const EdgeInsets.only(right: 16),
-                  child: KasaButton(
-                    label: 'Add unit',
-                    variant: KasaButtonVariant.primary,
-                    fullWidth: false,
-                    leading: Icon(Icons.add, size: 14, color: cs.onPrimary),
-                    onTap: () => showDialog(
-                      context: context,
-                      barrierDismissible: false,
-                      builder: (_) => _AddUnitDialog(propertyId: propertyId, onDone: onRefresh),
-                    ),
-                  ),
-                ),
-              ] : null,
-            ),
-
-            // ── Property summary card ──────────────────────────────────────
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-                child: KasaCard(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            width: 52,
-                            height: 52,
-                            decoration: BoxDecoration(
-                              color: cs.secondary,
-                              borderRadius: BorderRadius.circular(KasaRadius.md),
-                              border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
-                            ),
-                            child: Icon(Icons.home_work, size: 26, color: cs.onSecondary),
-                          ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  data['name'] as String? ?? 'Property',
-                                  style: KasaFont.sans(
-                                    fontSize: 20, fontWeight: FontWeight.w600,
-                                    letterSpacing: -0.4, color: cs.onSurface, height: 1,
-                                  ),
-                                ),
-                                if ((data['address'] as String? ?? '').isNotEmpty) ...[
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    data['address'] as String,
-                                    style: KasaFont.sans(fontSize: 12, color: cs.kasaTextSub),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      // KPI row
-                      Row(
-                        children: [
-                          _KpiTile(label: 'Total', value: '$unitCount', accent: KasaCardAccent.elevated),
-                          const SizedBox(width: 10),
-                          _KpiTile(label: 'Occupied', value: '$occupiedCount', accent: KasaCardAccent.secondary),
-                          const SizedBox(width: 10),
-                          _KpiTile(label: 'Vacant', value: '$vacantCount',
-                              accent: vacantCount > 0 ? KasaCardAccent.tertiary : KasaCardAccent.none),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-
-            if (canReadMeters)
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-                  child: KasaButton(
-                    label: 'Meter readings',
-                    variant: KasaButtonVariant.ghost,
-                    leading: Icon(Icons.speed, size: 16, color: cs.onSurface),
-                    onTap: () => Navigator.of(context, rootNavigator: true).push(
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+          children: [
+            Row(children: [
+              Expanded(child: Text(place, style: muted, maxLines: 1, overflow: TextOverflow.ellipsis)),
+              Text.rich(TextSpan(children: [
+                TextSpan(
+                    text: '$occupied/${units.length}',
+                    style: KasaFont.sans(
+                        fontSize: 14, fontWeight: FontWeight.w600, color: cs.onSurface)),
+                TextSpan(text: ' occupied', style: muted),
+              ])),
+            ]),
+            const SizedBox(height: 16),
+            if (canWork)
+              IntrinsicHeight(
+                child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  tool(
+                    Icons.speed_rounded,
+                    'Meter readings',
+                    missing > 0 ? '$missing missing' : null,
+                    () => Navigator.of(context, rootNavigator: true).push(
                       MaterialPageRoute(
                         builder: (_) => MeterReadingsScreen(
                           propertyId: propertyId,
@@ -218,307 +363,102 @@ class _PropertyDetailView extends ConsumerWidget {
                         ),
                       ),
                     ),
+                    warn: true,
                   ),
-                ),
-              ),
-
-            if (canManage && units.isNotEmpty)
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
-                  child: KasaButton(
-                    label: 'Renumber units',
-                    variant: KasaButtonVariant.ghost,
-                    leading: Icon(Icons.format_list_numbered, size: 16, color: cs.onSurface),
-                    onTap: () async {
-                      final changed = await Navigator.of(context, rootNavigator: true).push<bool>(
-                        MaterialPageRoute(
-                          builder: (_) => RenumberUnitsScreen(
-                            propertyId: propertyId,
-                            units: units.cast<Map<String, dynamic>>(),
-                          ),
-                        ),
-                      );
-                      if (changed == true) onRefresh();
-                    },
-                  ),
-                ),
-              ),
-
-            // ── Units heading ─────────────────────────────────────────────
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
-                child: Text(
-                  'Units',
-                  style: KasaFont.sans(
-                    fontSize: 13, fontWeight: FontWeight.w600,
-                    letterSpacing: 0.04, color: cs.kasaTextSub,
-                  ),
-                ),
-              ),
-            ),
-
-            // ── Units list ────────────────────────────────────────────────
-            if (units.isEmpty)
-              SliverFillRemaining(
-                child: Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.meeting_room_outlined, size: 64, color: cs.kasaTextSub),
-                      const SizedBox(height: 12),
-                      Text('No units yet.',
-                          style: KasaFont.sans(
-                              fontWeight: FontWeight.w600, color: cs.kasaTextSub)),
-                      const SizedBox(height: 4),
-                      Text('Tap ADD UNIT to create one.',
-                          style: KasaFont.sans(fontSize: 12, color: cs.kasaTextSub)),
-                    ],
-                  ),
-                ),
-              )
-            else
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
-                sliver: SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                    (_, i) {
-                      final u = units[i] as Map<String, dynamic>;
-                      final uStatus = u['status'] as String? ?? 'vacant';
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: _UnitCard(
-                          unit: u,
-                          status: uStatus,
-                          canManage: canManage,
-                          onOpen: () => context.push(
-                            '/properties/$propertyId/units/${u['id']}',
-                          ),
-                          onEdit: () => showDialog(
-                            context: context,
-                            barrierDismissible: false,
-                            builder: (_) => _EditUnitDialog(unit: u, onDone: onRefresh),
-                          ),
-                          onDelete: () async {
-                            if (uStatus != 'vacant') {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Only vacant units can be deleted.')),
-                              );
-                              return;
-                            }
-                            final confirmed = await showDialog<bool>(
-                              context: context,
-                              builder: (ctx) => AlertDialog(
-                                title: const Text('Delete Unit'),
-                                content: Text('Delete Unit ${u['unit_number']}?'),
-                                actions: [
-                                  TextButton(
-                                      onPressed: () => Navigator.pop(ctx, false),
-                                      child: const Text('Cancel')),
-                                  ElevatedButton(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Theme.of(ctx).colorScheme.error,
-                                      foregroundColor: Colors.white,
-                                    ),
-                                    onPressed: () => Navigator.pop(ctx, true),
-                                    child: const Text('Delete'),
-                                  ),
-                                ],
-                              ),
-                            );
-                            if (confirmed == true && context.mounted) {
-                              try {
-                                await ref.read(dioProvider).delete('/api/v1/properties/units/${u['id']}/');
-                                onRefresh();
-                              } catch (e) {
-                                if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                                    content: Text(apiError(e)),
-                                    backgroundColor: Theme.of(context).colorScheme.error,
-                                  ));
-                                }
-                              }
-                            }
-                          },
-                        ),
-                      );
-                    },
-                    childCount: units.length,
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ─── KPI tile ─────────────────────────────────────────────────────────────────
-
-class _KpiTile extends StatelessWidget {
-  const _KpiTile({required this.label, required this.value, required this.accent});
-  final String label, value;
-  final KasaCardAccent accent;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final fill = switch (accent) {
-      KasaCardAccent.secondary => cs.secondary,
-      KasaCardAccent.tertiary  => cs.tertiary,
-      KasaCardAccent.elevated  => cs.surfaceContainerHighest,
-      _                        => cs.kasaCard,
-    };
-    final fg = switch (accent) {
-      KasaCardAccent.secondary => cs.onSecondary,
-      KasaCardAccent.tertiary  => cs.onTertiary,
-      _                        => cs.onSurface,
-    };
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-        decoration: BoxDecoration(
-          color: fill,
-          borderRadius: BorderRadius.circular(KasaRadius.sm),
-          border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
-        ),
-        child: Column(
-          children: [
-            Text(value,
-                style: KasaFont.sans(
-                    fontSize: 28, fontWeight: FontWeight.w900, color: fg, height: 1)),
-            const SizedBox(height: 2),
-            Text(label,
-                style: KasaFont.sans(
-                    fontSize: 9, fontWeight: FontWeight.w600,
-                    letterSpacing: 0.04, color: fg.withValues(alpha: 0.7))),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Unit card ────────────────────────────────────────────────────────────────
-
-class _UnitCard extends StatelessWidget {
-  const _UnitCard({
-    required this.unit,
-    required this.status,
-    required this.canManage,
-    required this.onEdit,
-    required this.onDelete,
-    required this.onOpen,
-  });
-  final Map<String, dynamic> unit;
-  final String status;
-  final bool canManage;
-  final VoidCallback onEdit, onDelete;
-
-  /// Opens the unit's own screen. The row has always looked like a list item;
-  /// until now only the overflow menu did anything, so tapping the row itself
-  /// did nothing at all.
-  final VoidCallback onOpen;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-
-    final (accentColor, chipVariant, chipLabel) = switch (status) {
-      'occupied'    => (cs.secondary,   KasaChipVariant.secondary, 'Occupied'),
-      'maintenance' => (cs.tertiary,    KasaChipVariant.tertiary,  'Maintenance'),
-      _             => (cs.kasaTextSub, KasaChipVariant.neutral,   'Vacant'),
-    };
-
-    return GestureDetector(
-      onTap: onOpen,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(KasaRadius.md),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(KasaRadius.md),
-        child: Container(
-          decoration: BoxDecoration(
-            color: cs.kasaCard,
-            border: Border(
-              left:   BorderSide(color: accentColor,   width: 6),
-              right:  BorderSide(color: cs.kasaStroke, width: KasaBorders.card),
-              top:    BorderSide(color: cs.kasaStroke, width: KasaBorders.card),
-              bottom: BorderSide(color: cs.kasaStroke, width: KasaBorders.card),
-            ),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Text(
-                            'Unit ${unit['unit_number']}',
-                            style: KasaFont.sans(
-                              fontSize: 15, fontWeight: FontWeight.w600,
-                              letterSpacing: -0.15, color: cs.onSurface,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          KasaChip(label: chipLabel, variant: chipVariant, small: true),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '${_unitTypeLabels[unit['unit_type']] ?? unit['unit_type']} · Floor ${unit['floor']}',
-                        style: KasaFont.sans(fontSize: 11, color: cs.kasaTextSub),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '${formatCurrency(toDouble(unit['rent_amount']))}/mo',
-                        style: KasaFont.sans(
-                          fontSize: 13, fontWeight: FontWeight.w600,
-                          color: cs.secondary, letterSpacing: -0.1,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (canManage)
-                  PopupMenuButton<String>(
-                  icon: Icon(Icons.more_vert, color: cs.kasaTextSub, size: 20),
-                  onSelected: (action) {
-                    if (action == 'edit') onEdit();
-                    if (action == 'delete') onDelete();
-                  },
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(
-                        value: 'edit',
-                        child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Edit'), dense: true, contentPadding: EdgeInsets.zero)),
-                    PopupMenuItem(
-                        value: 'delete',
-                        child: ListTile(
-                            leading: Icon(Icons.delete_outline, color: Colors.red),
-                            title: Text('Delete', style: TextStyle(color: Colors.red)),
-                            dense: true,
-                            contentPadding: EdgeInsets.zero)),
+                  if (canManage && units.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    tool(Icons.format_list_numbered_rounded, 'Renumber units', 'G1, 1A \u2026',
+                        () => _renumber(units)),
                   ],
-                ),
-              ],
-            ),
-          ),
+                ]),
+              ),
+            if (canWork) const SizedBox(height: 16),
+            if (units.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 48),
+                child: Column(children: [
+                  Icon(Icons.meeting_room_outlined, size: 56, color: cs.kasaTextSub),
+                  const SizedBox(height: 12),
+                  Text('No units yet.',
+                      style: KasaFont.sans(
+                          fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
+                  const SizedBox(height: 4),
+                  Text(canManage ? 'Add the first one to start.' : 'Your landlord has not added any.',
+                      style: muted),
+                  if (canManage) ...[
+                    const SizedBox(height: 16),
+                    KasaButton(
+                      label: 'Add unit',
+                      variant: KasaButtonVariant.secondary,
+                      fullWidth: false,
+                      onTap: _addUnit,
+                    ),
+                  ],
+                ]),
+              )
+            else ...[
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(children: [
+                  for (final (value, label) in _filters) ...[
+                    KasaFilterPill(
+                      label: label,
+                      count: count(value),
+                      selected: _filter == value,
+                      onTap: () => setState(() => _filter = value),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                ]),
+              ),
+              const SizedBox(height: 12),
+              if (shown.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 32),
+                  child: Text('No units match.', textAlign: TextAlign.center, style: muted),
+                )
+              else
+                for (var i = 0; i < shown.length; i += 3)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    // Equal heights within a row, and no fixed height to
+                    // overflow when the phone's text is set large.
+                    child: IntrinsicHeight(
+                      child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                        for (var j = 0; j < 3; j++) ...[
+                          if (j > 0) const SizedBox(width: 8),
+                          Expanded(
+                            child: i + j < shown.length
+                                ? KasaUnitTile(
+                                    number: '${shown[i + j]['unit_number']}',
+                                    occupant: '${shown[i + j]['tenant_name'] ?? 'No tenant'}',
+                                    state: _stateOf(shown[i + j]),
+                                    onTap: () => context.push(
+                                        '/properties/$propertyId/units/${shown[i + j]['id']}'),
+                                    onLongPress:
+                                        canManage ? () => _unitActions(shown[i + j]) : null,
+                                  )
+                                : const SizedBox.shrink(),
+                          ),
+                        ],
+                      ]),
+                    ),
+                  ),
+              const SizedBox(height: 4),
+              Text(
+                'Ground floor first. Tap a unit for its tenant, bills and repairs'
+                '${canManage ? '; hold to edit or delete.' : '.'}',
+                style: KasaFont.sans(fontSize: 13, color: cs.kasaTextSub),
+              ),
+            ],
+          ],
         ),
-      ),
       ),
     );
   }
 }
 
-// ─── Add Unit Dialog ──────────────────────────────────────────────────────────
+// Add unit
 
 class _AddUnitDialog extends ConsumerStatefulWidget {
   const _AddUnitDialog({required this.propertyId, required this.onDone});

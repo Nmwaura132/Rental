@@ -272,7 +272,7 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
                         ('due', 'Due'),
                         ('paid', 'Paid'),
                       ]) ...[
-                        _FilterPill(
+                        KasaFilterPill(
                           label: label,
                           count: count(value),
                           selected: _filter == value,
@@ -392,51 +392,6 @@ class _PaymentsToAssign extends ConsumerWidget {
               ),
           ]),
         ],
-      ),
-    );
-  }
-}
-
-class _FilterPill extends StatelessWidget {
-  const _FilterPill({
-    required this.label,
-    required this.count,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final int count;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final fg = selected ? cs.kasaBg : cs.onSurface;
-    return Material(
-      color: selected ? cs.onSurface : cs.kasaCard,
-      shape: StadiumBorder(side: BorderSide(color: selected ? cs.onSurface : cs.kasaStrokeStrong)),
-      child: InkWell(
-        customBorder: const StadiumBorder(),
-        onTap: onTap,
-        child: Container(
-          height: 40,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          alignment: Alignment.center,
-          child: Text.rich(
-            TextSpan(children: [
-              TextSpan(text: '$label ', style: KasaFont.sans(fontSize: 14, fontWeight: FontWeight.w500, color: fg)),
-              TextSpan(
-                text: '$count',
-                style: KasaFont.sans(
-                  fontSize: 14,
-                  color: selected ? fg.withValues(alpha: 0.7) : cs.kasaTextSub,
-                ).copyWith(fontFeatures: KasaType.tabular),
-              ),
-            ]),
-          ),
-        ),
       ),
     );
   }

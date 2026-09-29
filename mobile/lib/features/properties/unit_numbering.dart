@@ -112,3 +112,20 @@ class NumberingStylePicker extends StatelessWidget {
     );
   }
 }
+
+/// Orders house numbers the way a person would: G1, G2, G10, then 1A, 1B, 2A.
+/// Digit runs compare as numbers, so "G2" comes before "G10".
+int compareUnitNumbers(String a, String b) {
+  final runs = RegExp(r'\d+|\D+');
+  final pa = runs.allMatches(a).map((m) => m[0]!).toList();
+  final pb = runs.allMatches(b).map((m) => m[0]!).toList();
+  for (var i = 0; i < pa.length && i < pb.length; i++) {
+    final x = pa[i];
+    final y = pb[i];
+    final nx = int.tryParse(x);
+    final ny = int.tryParse(y);
+    final c = (nx != null && ny != null) ? nx.compareTo(ny) : x.compareTo(y);
+    if (c != 0) return c;
+  }
+  return pa.length.compareTo(pb.length);
+}

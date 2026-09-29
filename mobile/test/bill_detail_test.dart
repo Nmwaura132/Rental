@@ -7,6 +7,8 @@ import 'package:rental_manager/core/providers/user_role_provider.dart';
 import 'package:rental_manager/features/payments/invoices_screen.dart';
 import 'package:rental_manager/features/payments/unplaced_payments.dart';
 
+import 'support/kasa_test_fonts.dart';
+
 class _Offline implements HttpClientAdapter {
   @override
   void close({bool force = false}) {}
@@ -93,6 +95,8 @@ Future<void> _open(WidgetTester tester, String tenant) async {
 }
 
 void main() {
+  setUpAll(loadKasaFonts);
+
   testWidgets('Money lists what is owed, most urgent first', (tester) async {
     await tester.pumpWidget(_host());
     await tester.pumpAndSettle();
