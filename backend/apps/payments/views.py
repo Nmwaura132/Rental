@@ -304,22 +304,105 @@ class DashboardStatsView(APIView):
             paid_at__date__gte=this_month,
         ).exclude(method=Payment.Method.DEPOSIT).aggregate(total=Sum("amount"))["total"] or 0
 
-        overdue_count = invoices.filter(status=Invoice.Status.OVERDUE).count()
-        overdue_amount = invoices.filter(status=Invoice.Status.OVERDUE).aggregate(
-            total=Sum("amount_due") - Sum("amount_paid")
-        )["total"] or 0
+        overdue = invoices.filter(status=Invoice.Status.OVERDUE)
+        overdue_count = overdue.count()
 
-        return Response({
+        occupancy = {
             "properties": props.count(),
             "total_units": total_units,
             "occupied_units": occupied_units,
             "vacant_units": vacant_units,
             "occupancy_rate": round(occupied_units / total_units * 100, 1) if total_units else 0,
             "active_tenancies": tenancies.count(),
+        }
+
+        # WHY a separate payload: the design keeps money from caretakers
+        # entirely, and hiding it in the app is not enough while the server
+        # still sends it. A caretaker gets their day's work instead.
+        if not user.is_landlord:
+            return Response({**occupancy, **_caretaker_today(props, tenancies)})
+
+        overdue_amount = overdue.aggregate(
+            total=Sum("amount_due") - Sum("amount_paid")
+        )["total"] or 0
+        oldest = overdue.order_by("due_date").values_list("due_date", flat=True).first()
+
+        # "Of KES 252,000 expected": this month's bills and what has been paid
+        # against them, so the percentage means "how much of this month's rent
+        # is in", not money that happened to arrive this month for old bills.
+        this_months_bills = invoices.filter(period_start=this_month).exclude(
+            status=Invoice.Status.CANCELLED
+        )
+        expected = this_months_bills.aggregate(total=Sum("amount_due"))["total"] or 0
+        collected_against = sum(
+            (min(b.amount_paid, b.amount_due) for b in this_months_bills), Decimal("0")
+        )
+
+        return Response({
+            **occupancy,
             "monthly_collected_kes": monthly_collected,
+            "expected_this_month_kes": expected,
+            "collected_against_expected_kes": collected_against,
             "overdue_invoices": overdue_count,
             "overdue_amount_kes": overdue_amount,
+            "oldest_overdue_days": (timezone.localdate() - oldest).days if oldest else None,
         })
+
+
+def _caretaker_today(props, tenancies):
+    """A caretaker's day: meters to read, repairs to see to, people moving."""
+    from datetime import timedelta
+
+    from apps.properties.models import MeterReading, PropertyCharge
+    from apps.tenants.models import MaintenanceRequest
+
+    today = timezone.localdate()
+    period = today.replace(day=1)
+    metered = PropertyCharge.objects.filter(
+        property__in=props, is_active=True, billing_method=PropertyCharge.BillingMethod.METERED
+    )
+    readings_left = 0
+    for tenancy in tenancies.select_related("unit"):
+        for charge in metered:
+            if charge.property_id != tenancy.unit.property_id:
+                continue
+            if not MeterReading.objects.filter(unit=tenancy.unit, charge=charge, period=period).exists():
+                readings_left += 1
+
+    open_repairs = MaintenanceRequest.objects.filter(
+        tenancy__unit__property__in=props,
+        status__in=[MaintenanceRequest.Status.OPEN, MaintenanceRequest.Status.IN_PROGRESS],
+    ).count()
+
+    def person(t, when):
+        return {
+            "unit": t.unit.unit_number,
+            "property": t.unit.property.name,
+            "tenant": t.tenant.get_full_name(),
+            "date": when,
+        }
+
+    moving_out = [
+        person(t, t.notice_effective_date)
+        for t in tenancies.filter(
+            notice_effective_date__gte=today,
+            notice_effective_date__lte=today + timedelta(days=45),
+        ).select_related("unit__property", "tenant").order_by("notice_effective_date")
+    ]
+    from apps.tenants.models import Tenancy
+
+    arriving = [
+        person(t, t.start_date)
+        for t in Tenancy.objects.filter(
+            unit__property__in=props, status=Tenancy.Status.ACTIVE, start_date__gt=today
+        ).select_related("unit__property", "tenant").order_by("start_date")
+    ]
+    return {
+        "readings_left": readings_left,
+        "open_repairs": open_repairs,
+        "moving_out": moving_out,
+        "arriving": arriving,
+    }
 
 
 @extend_schema(exclude=True)  # WHY: documented in handoff.md; ad-hoc body schema

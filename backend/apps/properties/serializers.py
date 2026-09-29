@@ -41,8 +41,29 @@ class PropertySerializer(serializers.ModelSerializer):
         # is enough to look up the landlord's title in the land registry.
         request = self.context.get("request")
         viewer = getattr(request, "user", None)
-        if viewer is None or viewer.id != instance.owner_id:
+        is_owner = viewer is not None and viewer.id == instance.owner_id
+        if not is_owner:
             data.pop("lr_number", None)
+
+        # WHY only for the people who run the building: a tenant can read the
+        # property they live in, and must not see who else is in arrears or
+        # on notice. A caretaker sees each unit's status and tenant, but no
+        # money — the design keeps totals and balances to the landlord.
+        is_caretaker = viewer is not None and viewer.id == instance.caretaker_id
+        if is_owner or is_caretaker:
+            from .summary import MONEY_KEYS, property_summary, unit_states
+
+            states = unit_states(instance)
+            summary = property_summary(instance, states)
+            if not is_owner:
+                summary = {k: v for k, v in summary.items() if k not in MONEY_KEYS}
+            data["summary"] = summary
+            for unit in data.get("units", []):
+                info = states.get(unit["id"], {})
+                unit["state"] = info.get("state")
+                unit["tenant_name"] = info.get("tenant")
+                if is_owner:
+                    unit["balance"] = info.get("balance")
         return data
 
     def get_unit_count(self, obj) -> int:
