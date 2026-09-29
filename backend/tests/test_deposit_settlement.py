@@ -262,3 +262,17 @@ class TestKraFigures:
         today = timezone.localdate()
         summary = mri_summary(owner=landlord, period_start=today.replace(day=1), period_end=today)
         assert summary["gross_rent_received"] == Decimal("8000.00")
+
+
+class TestTheDashboard:
+    def test_a_deposit_applied_at_move_out_is_not_money_collected(self, leaving, landlord):
+        # It arrived at move-in and was counted then.
+        from django.core.cache import cache
+
+        _bill(leaving, "8000.00", 0, "INV-DASH")
+        _settle(leaving, landlord)
+        cache.clear()
+        api = APIClient()
+        api.force_authenticate(user=landlord)
+        data = api.get("/api/v1/payments/dashboard/").data
+        assert Decimal(str(data["monthly_collected_kes"])) == Decimal("0")

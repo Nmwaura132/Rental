@@ -294,11 +294,14 @@ class DashboardStatsView(APIView):
         occupied_units = units.filter(status=Unit.Status.OCCUPIED).count()
 
         this_month = timezone.now().date().replace(day=1)
+        # WHY the deposit is left out: "collected" is money that arrived this
+        # month. A deposit applied to arrears at move-out arrived at move-in and
+        # was counted then, so counting it again here would count it twice.
         monthly_collected = Payment.objects.filter(
             invoice__tenancy__unit__property_id__in=prop_ids,
             status=Payment.Status.CONFIRMED,
             paid_at__date__gte=this_month,
-        ).aggregate(total=Sum("amount"))["total"] or 0
+        ).exclude(method=Payment.Method.DEPOSIT).aggregate(total=Sum("amount"))["total"] or 0
 
         overdue_count = invoices.filter(status=Invoice.Status.OVERDUE).count()
         overdue_amount = invoices.filter(status=Invoice.Status.OVERDUE).aggregate(
