@@ -32,12 +32,21 @@ class KasaActionBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       child: SafeArea(
         top: false,
-        child: Row(
+        // WHY the Column: a Scaffold hands its bottomNavigationBar the whole
+        // screen height as the upper bound, and KasaButton grows to fill the
+        // height it is given — so without this the bar covered the screen.
+        // A min-sized Column lets the button take its own height.
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            for (var i = 0; i < children.length; i++) ...[
-              if (i > 0) const SizedBox(width: 8),
-              i == children.length - 1 ? Expanded(child: children[i]) : children[i],
-            ],
+            Row(
+              children: [
+                for (var i = 0; i < children.length; i++) ...[
+                  if (i > 0) const SizedBox(width: 8),
+                  i == children.length - 1 ? Expanded(child: children[i]) : children[i],
+                ],
+              ],
+            ),
           ],
         ),
       ),

@@ -230,6 +230,7 @@ class KasaButton extends StatelessWidget {
     this.fullWidth = true,
     this.leading,
     this.isLoading = false,
+    this.compact = false,
   });
 
   final String label;
@@ -238,6 +239,9 @@ class KasaButton extends StatelessWidget {
   final bool fullWidth;
   final Widget? leading;
   final bool isLoading;
+
+  /// The small button that sits inside a list row: 40 tall instead of 52.
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -270,7 +274,7 @@ class KasaButton extends StatelessWidget {
       final text = Text(
         label,
         style: KasaFont.sans(
-          fontSize: 16,
+          fontSize: compact ? 14 : 16,
           fontWeight: FontWeight.w600,
           color: ink,
           height: 1.1,
@@ -304,8 +308,10 @@ class KasaButton extends StatelessWidget {
           opacity: onTap == null && !isLoading ? 0.5 : 1.0,
           child: Container(
             width: fullWidth ? double.infinity : null,
-            constraints: const BoxConstraints(minHeight: 52),
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+            constraints: BoxConstraints(minHeight: compact ? 40 : 52),
+            padding: compact
+                ? const EdgeInsets.symmetric(horizontal: 14, vertical: 10)
+                : const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: bg,
