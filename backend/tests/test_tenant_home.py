@@ -10,7 +10,7 @@ import pytest
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from apps.payments.models import Invoice, InvoiceLineItem, Payment, TenancyCredit
+from apps.payments.models import Invoice, InvoiceLineItem, MpesaSTKRequest, Payment, TenancyCredit
 from apps.payments.services import apply_confirmed_payment
 
 
@@ -155,6 +155,14 @@ class TestTheLastPayment:
         assert _home(tenant)["last_paid"] is None
 
 
+class TestReachingTheLandlord:
+    def test_the_landlords_number_is_there_to_call(self, tenant, tenancy, landlord):
+        assert _home(tenant)["landlord_phone"] == landlord.phone_number
+
+    def test_the_landlord_is_named(self, tenant, tenancy, landlord):
+        assert _home(tenant)["landlord_name"] == landlord.get_full_name()
+
+
 class TestTheirOwnPhone:
     def test_it_is_hinted_not_spelled_out(self, tenant, tenancy):
         assert _home(tenant)["phone_hint"] == "0700 ••• 111"
@@ -177,3 +185,28 @@ class TestPaymentsNameTheirMonth:
         _pay_in_full(invoice)
         rows = _client(tenant).get("/api/v1/payments/").data["results"]
         assert rows[0]["period_start"] == invoice.period_start.isoformat()
+
+
+class TestWatchingAPrompt:
+    def _prompt(self, invoice, tenant):
+        return MpesaSTKRequest.objects.create(
+            checkout_request_id="ws_CO_TEST_1",
+            merchant_request_id="merchant-1",
+            phone=tenant.phone_number,
+            amount=invoice.balance,
+            account_ref="A1",
+            invoice=invoice,
+        )
+
+    def _status(self, tenant):
+        return _client(tenant).get(
+            "/api/v1/payments/stk/status/", {"checkout_request_id": "ws_CO_TEST_1"}
+        ).data
+
+    def test_it_says_when_the_prompt_was_sent(self, tenant, invoice):
+        request = self._prompt(invoice, tenant)
+        assert self._status(tenant)["created_at"] == request.created_at
+
+    def test_it_says_when_the_outcome_last_changed(self, tenant, invoice):
+        request = self._prompt(invoice, tenant)
+        assert self._status(tenant)["updated_at"] == request.updated_at

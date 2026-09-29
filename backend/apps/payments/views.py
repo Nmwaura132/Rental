@@ -322,7 +322,8 @@ class DashboardStatsView(APIView):
             )
             tenancy = Tenancy.objects.filter(
                 tenant=user, status=Tenancy.Status.ACTIVE
-            ).select_related("unit__property").first()
+            ).select_related("unit__property__owner").first()
+            landlord = tenancy.unit.property.owner if tenancy else None
 
             last_paid = None
             settled = invoices.filter(status=Invoice.Status.PAID).order_by("-period_start").first()
@@ -364,6 +365,11 @@ class DashboardStatsView(APIView):
                 "deposit_held": tenancy.deposit_amount if (tenancy and tenancy.deposit_paid) else 0,
                 "last_paid": last_paid,
                 "phone_hint": _phone_hint(user.phone_number),
+                # For "Contact landlord" when a payment is slow to show. The
+                # landlord is a party to the tenancy the tenant signed, so this
+                # is theirs to know.
+                "landlord_name": landlord.get_full_name() if landlord else None,
+                "landlord_phone": landlord.phone_number if landlord else None,
                 "unit_number": tenancy.unit.unit_number if tenancy else None,
                 "property_name": tenancy.unit.property.name if tenancy else None,
                 "monthly_rent": float(tenancy.rent_amount) if tenancy else None,
@@ -525,7 +531,7 @@ class MpesaSTKPushView(APIView):
         # let Safaricom's error surface as "STK Push failed".
         if not django_settings.STK_PUSH_ENABLED:
             return Response(
-                {"error": "This account does not send M-Pesa prompts. Pay to the paybill and account shown instead."},
+                {"error": "M-Pesa prompts are switched off for this account. Pay to the paybill and account number instead."},
                 status=400,
             )
 
@@ -645,6 +651,10 @@ class MpesaSTKStatusView(APIView):
             "result_desc": req.result_desc,
             "mpesa_receipt_number": req.mpesa_receipt_number,
             "amount": req.amount,
+            # When the prompt was sent, and when the outcome last changed: the
+            # app shows both on its result screens.
+            "created_at": req.created_at,
+            "updated_at": req.updated_at,
         })
 
 
