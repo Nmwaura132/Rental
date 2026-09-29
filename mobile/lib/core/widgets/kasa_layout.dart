@@ -358,6 +358,7 @@ class KasaUnitTile extends StatelessWidget {
         'arrears' => (KasaStatusKind.overdue, 'Arrears'),
         'vacant' => (KasaStatusKind.vacant, 'Vacant'),
         'notice' => (KasaStatusKind.notice, 'Notice'),
+        'occupied' => (KasaStatusKind.occupied, 'Occupied'),
         _ => null,
       };
 

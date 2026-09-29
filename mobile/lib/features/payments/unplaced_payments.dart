@@ -180,13 +180,22 @@ class _UnplacedRow extends ConsumerWidget {
 
 /// Asks which open bill something is for. Returns the bill's id, or null if
 /// the landlord backed out or there is nothing open.
-Future<int?> pickOpenBill(BuildContext context, WidgetRef ref, {required String title}) async {
+Future<int?> pickOpenBill(
+  BuildContext context,
+  WidgetRef ref, {
+  required String title,
+  int? tenancyId,
+}) async {
   const open = {'pending', 'overdue', 'partially_paid'};
   final invoices = (await ref.read(invoicesProvider.future))
       .cast<Map<String, dynamic>>()
       .where((i) => open.contains(i['status']))
+      // From a unit, only that tenant's bills are relevant.
+      .where((i) => tenancyId == null || i['tenancy'] == tenancyId)
       .toList();
   if (!context.mounted) return null;
+  // One bill needs no question.
+  if (invoices.length == 1) return invoices.first['id'] as int;
 
   return showModalBottomSheet<int>(
     context: context,

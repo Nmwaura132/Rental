@@ -10,6 +10,8 @@ import '../../core/providers/user_role_provider.dart';
 import '../../core/theme/kasa_tokens.dart';
 import '../../core/utils/api_error.dart';
 import '../../core/utils/phone.dart';
+import '../../core/utils/currency.dart';
+import '../../core/widgets/kasa_layout.dart';
 import '../../core/widgets/kasa_primitives.dart';
 import 'unit_numbering.dart';
 import '../../shared/widgets/shimmer_loading.dart';
@@ -19,13 +21,46 @@ final propertiesProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async
   return fetchAllPages(dio, '/api/v1/properties/');
 });
 
+/// Asks, then deletes a property and everything in it. True once it is gone.
+Future<bool> confirmDeleteProperty(
+  BuildContext context,
+  WidgetRef ref, {
+  required int id,
+  required String name,
+}) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    useRootNavigator: true,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Delete property?'),
+      content: Text('Delete "$name"? This will also delete all its units and data.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+        TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+      ],
+    ),
+  );
+  if (confirmed != true || !context.mounted) return false;
+  final messenger = ScaffoldMessenger.of(context);
+  final errorColor = Theme.of(context).colorScheme.error;
+  try {
+    await ref.read(dioProvider).delete('/api/v1/properties/$id/');
+    ref.invalidate(propertiesProvider);
+    return true;
+  } catch (e) {
+    messenger.showSnackBar(SnackBar(content: Text(apiError(e)), backgroundColor: errorColor));
+    return false;
+  }
+}
+
 class PropertiesScreen extends ConsumerWidget {
   const PropertiesScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final props = ref.watch(propertiesProvider);
-    final canManage = ref.watch(userRoleProvider).valueOrNull == 'landlord';
+    final role = ref.watch(userRoleProvider).valueOrNull;
+    final isLandlord = role == 'landlord';
     final cs = Theme.of(context).colorScheme;
 
     void openAddProperty() => Navigator.of(context, rootNavigator: true).push(
@@ -33,218 +68,229 @@ class PropertiesScreen extends ConsumerWidget {
             fullscreenDialog: true,
             builder: (ctx) => Scaffold(
               appBar: AppBar(
-                title: const Text('Add Property'),
+                title: const Text('Add property'),
                 leading: IconButton(
                   icon: const Icon(Icons.close),
                   onPressed: () => Navigator.of(ctx).pop(),
                 ),
               ),
-              body: _AddPropertyPage(
-                onDone: () => ref.invalidate(propertiesProvider),
-              ),
+              body: _AddPropertyPage(onDone: () => ref.invalidate(propertiesProvider)),
             ),
           ),
         );
 
     return Scaffold(
       backgroundColor: cs.kasaBg,
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // ── Header ──────────────────────────────────────────────────────
-          SafeArea(
-            bottom: false,
+      appBar: AppBar(
+        toolbarHeight: 60,
+        backgroundColor: cs.kasaBg,
+        surfaceTintColor: Colors.transparent,
+        automaticallyImplyLeading: false,
+        titleSpacing: 16,
+        // A caretaker looks after units, not a portfolio.
+        title: Text(isLandlord ? 'Properties' : 'Units',
+            style: KasaFont.sans(fontSize: 20, fontWeight: FontWeight.w600, color: cs.onSurface)),
+      ),
+      bottomNavigationBar: isLandlord
+          ? KasaActionBar(children: [
+              KasaButton(
+                label: 'Add property',
+                variant: KasaButtonVariant.primary,
+                leading: Icon(Icons.add_rounded, size: 20, color: cs.onPrimary),
+                onTap: openAddProperty,
+              ),
+            ])
+          : null,
+      body: KasaContentSwitcher(
+        child: props.when(
+          loading: () => const SkeletonList(),
+          error: (e, _) => Center(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
-              child: Row(
+              padding: const EdgeInsets.all(32),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    'Properties',
-                    style: KasaFont.sans(
-                      fontSize: 32, fontWeight: FontWeight.w600,
-                      letterSpacing: -0.96, color: cs.onSurface, height: 1,
-                    ),
+                  Icon(Icons.cloud_off_outlined, size: 48, color: cs.kasaTextSub),
+                  const SizedBox(height: 12),
+                  Text(apiError(e), style: KasaFont.sans(color: cs.kasaTextSub)),
+                  const SizedBox(height: 16),
+                  KasaButton(
+                    label: 'Retry',
+                    variant: KasaButtonVariant.secondary,
+                    fullWidth: false,
+                    onTap: () => ref.invalidate(propertiesProvider),
                   ),
-                  const Spacer(),
-                  if (canManage)
-                    KasaButton(
-                      variant: KasaButtonVariant.primary,
-                      fullWidth: false,
-                      label: 'ADD',
-                      leading: Icon(Icons.add, size: 14, color: cs.onPrimary),
-                      onTap: openAddProperty,
-                    ),
                 ],
               ),
             ),
           ),
-
-          // ── List ────────────────────────────────────────────────────────
-          Expanded(
-            child: KasaContentSwitcher(
-              child: props.when(
-                loading: () => const SkeletonList(),
-                error: (e, _) => Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.cloud_off_outlined, size: 56, color: cs.kasaTextSub),
-                        const SizedBox(height: 12),
-                        Text(apiError(e),
-                            style: KasaFont.sans(color: cs.kasaTextSub)),
-                        const SizedBox(height: 16),
-                        KasaButton(
-                          label: 'Retry',
-                          variant: KasaButtonVariant.secondary,
-                          onTap: () => ref.invalidate(propertiesProvider),
-                        ),
-                      ],
+          data: (list) {
+            final properties = list.cast<Map<String, dynamic>>();
+            if (properties.isEmpty) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.apartment_rounded, size: 56, color: cs.kasaTextSub),
+                    const SizedBox(height: 12),
+                    Text('No properties yet.',
+                        style: KasaFont.sans(
+                            fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
+                    const SizedBox(height: 4),
+                    Text(
+                      isLandlord
+                          ? 'Add your first property to start.'
+                          : 'You have not been assigned a property yet.',
+                      textAlign: TextAlign.center,
+                      style: KasaFont.sans(fontSize: 14, color: cs.kasaTextSub),
                     ),
-                  ),
+                  ]),
                 ),
-                data: (list) => list.isEmpty
-                    ? Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(32),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.home_work_outlined, size: 64, color: cs.kasaTextSub),
-                              const SizedBox(height: 12),
-                              Text(
-                                'No properties yet.',
-                                style: KasaFont.sans(
-                                  fontSize: 16, fontWeight: FontWeight.w600,
-                                  color: cs.onSurface,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'Tap "ADD" to get started.',
-                                style: KasaFont.sans(
-                                  fontSize: 13, color: cs.kasaTextSub,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      )
-                    : RefreshIndicator(
-                        onRefresh: () => ref.refresh(propertiesProvider.future),
-                        child: ListView.builder(
-                          padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
-                          itemCount: list.length,
-                          itemBuilder: (_, i) {
-                            final p = list[i] as Map<String, dynamic>;
-                            final unitCount = p['unit_count'] as int? ?? 0;
-                            final vacantCount = p['vacant_count'] as int? ?? 0;
-                            final occupiedCount = unitCount - vacantCount;
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 10),
-                              child: KasaCard(
-                                onTap: () => context.go('/properties/${p['id']}'),
-                                child: Row(
-                                  children: [
-                                    Container(
-                                      width: 44, height: 44,
-                                      decoration: BoxDecoration(
-                                        color: cs.secondary,
-                                        borderRadius: BorderRadius.circular(KasaRadius.md),
-                                        border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
-                                      ),
-                                      child: Icon(Icons.home_work, size: 22, color: cs.onSecondary),
-                                    ),
-                                    const SizedBox(width: 14),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            p['name'] as String,
-                                            style: KasaFont.sans(
-                                              fontSize: 15, fontWeight: FontWeight.w600,
-                                              letterSpacing: -0.15, color: cs.onSurface,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 2),
-                                          Text(
-                                            '$unitCount unit${unitCount == 1 ? '' : 's'} · $occupiedCount occupied · $vacantCount vacant',
-                                            style: KasaFont.sans(
-                                              fontSize: 12, color: cs.kasaTextSub,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    PopupMenuButton<String>(
-                                      icon: Icon(Icons.more_vert, color: cs.kasaTextSub, size: 20),
-                                      onSelected: (action) async {
-                                        if (action == 'open') {
-                                          context.go('/properties/${p['id']}');
-                                        } else if (action == 'edit') {
-                                          await showDialog(
-                                            context: context,
-                                            useRootNavigator: true,
-                                            barrierDismissible: false,
-                                            builder: (_) => _EditPropertyDialog(
-                                              propertyId: p['id'] as int,
-                                              currentName: p['name'] as String,
-                                              currentCaretakerId: p['caretaker'] as int?,
-                                              onDone: () => ref.invalidate(propertiesProvider),
-                                            ),
-                                          );
-                                        } else if (action == 'delete') {
-                                          final confirmed = await showDialog<bool>(
-                                            context: context,
-                                            useRootNavigator: true,
-                                            builder: (ctx) => AlertDialog(
-                                              title: const Text('Delete Property'),
-                                              content: Text('Delete "${p['name']}"? This will also delete all its units and data.'),
-                                              actions: [
-                                                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                                                ElevatedButton(
-                                                  style: ElevatedButton.styleFrom(backgroundColor: Theme.of(ctx).colorScheme.error, foregroundColor: Colors.white),
-                                                  onPressed: () => Navigator.pop(ctx, true),
-                                                  child: const Text('Delete'),
-                                                ),
-                                              ],
-                                            ),
-                                          );
-                                          if (confirmed == true && context.mounted) {
-                                            try {
-                                              await ref.read(dioProvider).delete('/api/v1/properties/${p['id']}/');
-                                              ref.invalidate(propertiesProvider);
-                                            } catch (e) {
-                                              if (context.mounted) {
-                                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                                                  content: Text(apiError(e)),
-                                                  backgroundColor: Theme.of(context).colorScheme.error,
-                                                ));
-                                              }
-                                            }
-                                          }
-                                        }
-                                      },
-                                      itemBuilder: (_) => [
-                                        const PopupMenuItem(value: 'open', child: ListTile(leading: Icon(Icons.open_in_new), title: Text('Open'), dense: true, contentPadding: EdgeInsets.zero)),
-                                        if (canManage)
-                                          const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Edit'), dense: true, contentPadding: EdgeInsets.zero)),
-                                        if (canManage)
-                                          const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline, color: Colors.red), title: Text('Delete', style: TextStyle(color: Colors.red)), dense: true, contentPadding: EdgeInsets.zero)),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                    ),
+              );
+            }
+
+            int total(String key) => properties.fold<int>(
+                0, (sum, p) => sum + (((p['summary'] as Map?)?[key] as num?)?.toInt() ?? 0));
+            final units = properties.fold<int>(
+                0,
+                (sum, p) =>
+                    sum +
+                    (((p['summary'] as Map?)?['units'] as num?) ?? (p['unit_count'] as num?) ?? 0)
+                        .toInt());
+
+            return RefreshIndicator(
+              onRefresh: () => ref.refresh(propertiesProvider.future),
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                children: [
+                  Text(
+                    '${properties.length} ${properties.length == 1 ? 'property' : 'properties'}'
+                    ' \u00b7 $units ${units == 1 ? 'unit' : 'units'}'
+                    ' \u00b7 ${total('occupied')} occupied',
+                    style: KasaFont.sans(fontSize: 14, color: cs.kasaTextSub)
+                        .copyWith(fontFeatures: KasaType.tabular),
                   ),
+                  const SizedBox(height: 12),
+                  for (final p in properties) ...[
+                    _PropertyCard(property: p, showMoney: isLandlord),
+                    const SizedBox(height: 12),
+                  ],
+                ],
               ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+/// One building at a glance: how full, how much of this month's rent is in,
+/// what is owed, and what needs attention. A caretaker sees who is where but
+/// not the money, which the server does not send them.
+class _PropertyCard extends StatelessWidget {
+  const _PropertyCard({required this.property, required this.showMoney});
+  final Map<String, dynamic> property;
+  final bool showMoney;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final summary = (property['summary'] as Map?)?.cast<String, dynamic>() ?? const {};
+    int n(String key) => (summary[key] as num?)?.toInt() ?? 0;
+
+    final units = summary.containsKey('units') ? n('units') : (property['unit_count'] as num?)?.toInt() ?? 0;
+    final occupied = summary.containsKey('occupied')
+        ? n('occupied')
+        : units - ((property['vacant_count'] as num?)?.toInt() ?? 0);
+    final pct = summary['collected_pct'] as num?;
+    final place = [
+      for (final k in ['address', 'town', 'county'])
+        if ('${property[k] ?? ''}'.trim().isNotEmpty) '${property[k]}'.trim(),
+    ].take(2).join(', ');
+    final subtitle = [if (place.isNotEmpty) place, '$units ${units == 1 ? 'unit' : 'units'}'].join(' \u00b7 ');
+
+    final chips = <Widget>[
+      if (showMoney && n('overdue_bills') > 0)
+        KasaStatusChip(kind: KasaStatusKind.overdue, label: '${n('overdue_bills')} overdue'),
+      if (n('notice') > 0) KasaStatusChip(kind: KasaStatusKind.notice, label: '${n('notice')} notice'),
+      if (n('vacant') > 0) KasaStatusChip(kind: KasaStatusKind.vacant, label: '${n('vacant')} vacant'),
+    ];
+
+    Widget stat(String label, String value, {Color? color}) => Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: KasaFont.sans(fontSize: 13, color: cs.kasaTextSub)),
+              const SizedBox(height: 4),
+              Text(value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: KasaFont.sans(
+                          fontSize: 16, fontWeight: FontWeight.w600, color: color ?? cs.onSurface)
+                      .copyWith(fontFeatures: KasaType.tabular)),
+            ],
+          ),
+        );
+
+    return KasaCard(
+      padding: const EdgeInsets.all(16),
+      onTap: () => context.go('/properties/${property['id']}'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(children: [
+            const KasaLeadIcon(Icons.apartment_rounded),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('${property['name']}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: KasaFont.sans(
+                          fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
+                  const SizedBox(height: 4),
+                  Text(subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: KasaFont.sans(fontSize: 14, color: cs.kasaTextSub)),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, color: cs.kasaTextSub),
+          ]),
+          const SizedBox(height: 12),
+          if (showMoney) ...[
+            ClipRRect(
+              borderRadius: BorderRadius.circular(KasaRadius.pill),
+              child: LinearProgressIndicator(
+                value: ((pct ?? 0) / 100).clamp(0.0, 1.0).toDouble(),
+                minHeight: 8,
+                backgroundColor: cs.kasaElev,
+                color: cs.statusPaid,
+                semanticsLabel: 'Share of this month collected',
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          Row(children: [
+            stat('Occupied', '$occupied/$units'),
+            if (showMoney) ...[
+              stat('Collected', pct == null ? '\u2013' : '$pct%'),
+              stat(
+                'Arrears',
+                formatCurrency(toDouble(summary['arrears'])),
+                color: toDouble(summary['arrears']) > 0 ? cs.statusOverdue : null,
+              ),
+            ],
+          ]),
+          if (chips.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Wrap(spacing: 6, runSpacing: 6, children: chips),
+          ],
         ],
       ),
     );
@@ -755,8 +801,9 @@ class _CounterField extends StatelessWidget {
 
 // ─── Edit Property Dialog ─────────────────────────────────────────────────────
 
-class _EditPropertyDialog extends ConsumerStatefulWidget {
-  const _EditPropertyDialog({
+class EditPropertyDialog extends ConsumerStatefulWidget {
+  const EditPropertyDialog({
+    super.key,
     required this.propertyId,
     required this.currentName,
     required this.currentCaretakerId,
@@ -768,10 +815,10 @@ class _EditPropertyDialog extends ConsumerStatefulWidget {
   final VoidCallback onDone;
 
   @override
-  ConsumerState<_EditPropertyDialog> createState() => _EditPropertyDialogState();
+  ConsumerState<EditPropertyDialog> createState() => _EditPropertyDialogState();
 }
 
-class _EditPropertyDialogState extends ConsumerState<_EditPropertyDialog> {
+class _EditPropertyDialogState extends ConsumerState<EditPropertyDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameCtrl;
   bool _loading = false;

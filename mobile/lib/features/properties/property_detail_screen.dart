@@ -13,6 +13,7 @@ import '../../core/widgets/kasa_primitives.dart';
 import '../dashboard/needs_attention.dart';
 import '../tenants/tenants_screen.dart';
 import 'meter_readings_screen.dart';
+import 'properties_screen.dart';
 import 'renumber_units_screen.dart';
 import 'unit_numbering.dart';
 
@@ -98,12 +99,13 @@ class _PropertyDetailViewState extends ConsumerState<_PropertyDetailView> {
   Map<String, dynamic> get data => widget.data;
   VoidCallback get onRefresh => widget.onRefresh;
 
-  static const _filters = [
-    ('all', 'All'),
-    ('arrears', 'Arrears'),
-    ('vacant', 'Vacant'),
-    ('notice', 'Notice'),
-  ];
+  /// A caretaker filters by who lives where; only the landlord sees arrears.
+  List<(String, String)> _filters(bool isLandlord) => [
+        ('all', 'All'),
+        if (isLandlord) ('arrears', 'Arrears') else ('occupied', 'Occupied'),
+        ('vacant', 'Vacant'),
+        ('notice', 'Notice'),
+      ];
 
   /// What a tile shows. The server works this out; a response without it
   /// (an older server) still shows who is vacant.
@@ -130,6 +132,31 @@ class _PropertyDetailViewState extends ConsumerState<_PropertyDetailView> {
         barrierDismissible: false,
         builder: (_) => _AddUnitDialog(propertyId: propertyId, onDone: onRefresh),
       );
+
+  void _editProperty() => showDialog(
+        context: context,
+        useRootNavigator: true,
+        barrierDismissible: false,
+        builder: (_) => EditPropertyDialog(
+          propertyId: propertyId,
+          currentName: data['name'] as String? ?? '',
+          currentCaretakerId: data['caretaker'] as int?,
+          onDone: () {
+            ref.invalidate(propertiesProvider);
+            onRefresh();
+          },
+        ),
+      );
+
+  Future<void> _deleteProperty() async {
+    final gone = await confirmDeleteProperty(
+      context,
+      ref,
+      id: propertyId,
+      name: data['name'] as String? ?? 'this property',
+    );
+    if (gone && mounted) Navigator.of(context).pop();
+  }
 
   /// Add tenant needs a unit to put them in. One vacant unit is used without
   /// asking; several are offered; none says what to do first.
@@ -199,7 +226,7 @@ class _PropertyDetailViewState extends ConsumerState<_PropertyDetailView> {
       showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (_) => _EditUnitDialog(unit: unit, onDone: onRefresh),
+        builder: (_) => EditUnitDialog(unit: unit, onDone: onRefresh),
       );
     } else {
       await _deleteUnit(unit);
@@ -313,9 +340,13 @@ class _PropertyDetailViewState extends ConsumerState<_PropertyDetailView> {
               icon: const Icon(Icons.more_horiz_rounded),
               onSelected: (v) {
                 if (v == 'add_unit') _addUnit();
+                if (v == 'edit') _editProperty();
+                if (v == 'delete') _deleteProperty();
               },
               itemBuilder: (_) => const [
                 PopupMenuItem(value: 'add_unit', child: Text('Add unit')),
+                PopupMenuItem(value: 'edit', child: Text('Edit property')),
+                PopupMenuItem(value: 'delete', child: Text('Delete property')),
               ],
             ),
           const SizedBox(width: 4),
@@ -400,7 +431,7 @@ class _PropertyDetailViewState extends ConsumerState<_PropertyDetailView> {
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(children: [
-                  for (final (value, label) in _filters) ...[
+                  for (final (value, label) in _filters(canManage)) ...[
                     KasaFilterPill(
                       label: label,
                       count: count(value),
@@ -592,16 +623,16 @@ class _AddUnitDialogState extends ConsumerState<_AddUnitDialog> {
 
 // ─── Edit Unit Dialog ─────────────────────────────────────────────────────────
 
-class _EditUnitDialog extends ConsumerStatefulWidget {
-  const _EditUnitDialog({required this.unit, required this.onDone});
+class EditUnitDialog extends ConsumerStatefulWidget {
+  const EditUnitDialog({super.key, required this.unit, required this.onDone});
   final Map<String, dynamic> unit;
   final VoidCallback onDone;
 
   @override
-  ConsumerState<_EditUnitDialog> createState() => _EditUnitDialogState();
+  ConsumerState<EditUnitDialog> createState() => _EditUnitDialogState();
 }
 
-class _EditUnitDialogState extends ConsumerState<_EditUnitDialog> {
+class _EditUnitDialogState extends ConsumerState<EditUnitDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _unitNumberCtrl;
   late final TextEditingController _rentCtrl;

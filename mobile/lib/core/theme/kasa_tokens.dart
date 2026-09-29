@@ -164,7 +164,9 @@ class KasaType {
 }
 
 /// Status colours: muted, always shown with a dot AND a word.
-enum KasaStatusKind { paid, due, overdue, vacant, notice }
+/// [occupied] is the plain "someone lives here": neutral, with none of the
+/// payment colours. A caretaker sees this in place of paid, due and overdue.
+enum KasaStatusKind { paid, due, overdue, vacant, notice, occupied }
 
 typedef KasaStatusPair = ({Color fg, Color bg});
 
@@ -177,6 +179,7 @@ class KasaStatus {
     KasaStatusKind.overdue: (fg: Color(0xFFA3321F), bg: Color(0xFFF9E7E3)),
     KasaStatusKind.vacant: (fg: Color(0xFF4A5261), bg: Color(0xFFECEEF2)),
     KasaStatusKind.notice: (fg: Color(0xFF4E3F9E), bg: Color(0xFFECEAF8)),
+    KasaStatusKind.occupied: (fg: Color(0xFF5E6168), bg: Color(0xFFF0F0ED)),
   };
 
   static const _dark = <KasaStatusKind, KasaStatusPair>{
@@ -185,6 +188,7 @@ class KasaStatus {
     KasaStatusKind.overdue: (fg: Color(0xFFF39C89), bg: Color(0xFF2E1814)),
     KasaStatusKind.vacant: (fg: Color(0xFFA9B0BC), bg: Color(0xFF1F2227)),
     KasaStatusKind.notice: (fg: Color(0xFFB6ABF2), bg: Color(0xFF211D35)),
+    KasaStatusKind.occupied: (fg: Color(0xFF9DA1A9), bg: Color(0xFF1E2024)),
   };
 
   static KasaStatusPair of(KasaStatusKind kind, Brightness brightness) =>

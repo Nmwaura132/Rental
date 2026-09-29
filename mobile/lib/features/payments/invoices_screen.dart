@@ -94,6 +94,29 @@ final paymentsReceivedProvider = FutureProvider.autoDispose<List<Map<String, dyn
   return rows.cast<Map<String, dynamic>>();
 });
 
+/// Records a cash or bank payment against one bill.
+///
+/// Public so the Money tab and a unit's own screen use the same flow.
+Future<void> recordPaymentOn(BuildContext context, WidgetRef ref, int invoiceId) async {
+  final bill = (await ref.read(invoicesProvider.future))
+      .cast<Map<String, dynamic>>()
+      .firstWhere((b) => b['id'] == invoiceId);
+  if (!context.mounted) return;
+  await showDialog(
+    context: context,
+    useRootNavigator: true,
+    barrierDismissible: false,
+    builder: (_) => _RecordPaymentDialog(
+      invoiceId: invoiceId,
+      balance: toDouble(bill['balance']),
+      onDone: () {
+        ref.invalidate(invoicesProvider);
+        ref.invalidate(paymentsReceivedProvider);
+      },
+    ),
+  );
+}
+
 class InvoicesScreen extends ConsumerStatefulWidget {
   const InvoicesScreen({super.key});
 
@@ -139,20 +162,7 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
   Future<void> _recordPayment() async {
     final id = await pickOpenBill(context, ref, title: 'Which bill is this payment for?');
     if (id == null || !mounted) return;
-    final bill = (await ref.read(invoicesProvider.future))
-        .cast<Map<String, dynamic>>()
-        .firstWhere((b) => b['id'] == id);
-    if (!mounted) return;
-    showDialog(
-      context: context,
-      useRootNavigator: true,
-      barrierDismissible: false,
-      builder: (_) => _RecordPaymentDialog(
-        invoiceId: id,
-        balance: toDouble(bill['balance']),
-        onDone: () => ref.invalidate(invoicesProvider),
-      ),
-    );
+    await recordPaymentOn(context, ref, id);
   }
 
   @override
