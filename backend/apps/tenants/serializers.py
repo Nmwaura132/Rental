@@ -1,5 +1,11 @@
 from rest_framework import serializers
-from .models import Tenancy, MaintenanceRequest, MaintenanceNote
+from .models import (
+    DepositSettlement,
+    MaintenanceNote,
+    MaintenanceRequest,
+    SettlementDeduction,
+    Tenancy,
+)
 
 
 class TenancySerializer(serializers.ModelSerializer):
@@ -86,3 +92,22 @@ class MaintenanceRequestSerializer(serializers.ModelSerializer):
             return private_file_url(obj.photo.name)
         request = self.context.get("request")
         return request.build_absolute_uri(obj.photo.url) if request else obj.photo.url
+
+
+class SettlementDeductionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SettlementDeduction
+        fields = ["description", "amount"]
+
+
+class DepositSettlementSerializer(serializers.ModelSerializer):
+    deductions = SettlementDeductionSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = DepositSettlement
+        fields = [
+            "deposit_held", "applied_to_arrears", "deductions", "deductions_total",
+            "refund_due", "tenant_owes", "forfeited", "notes", "settled_at",
+            "refunded_at", "refund_method", "refund_reference",
+        ]
+        read_only_fields = fields

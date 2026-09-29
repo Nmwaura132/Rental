@@ -55,6 +55,15 @@ def apply_confirmed_payment(
     invoice.amount_paid = (invoice.amount_paid or Decimal("0")) + amount
     invoice.status = invoice_status_for(invoice)
     invoice.save(update_fields=["amount_paid", "status", "updated_at"])
+
+    # WHY: deposit_paid was only ever set by hand when the tenancy was created,
+    # so a deposit billed on the move-in invoice and then paid still read as
+    # unpaid — and the deposit could not be settled when the tenant left. Rent
+    # is settled first, so the deposit is only fully held once the bill is.
+    if invoice.status == Invoice.Status.PAID and invoice.line_items.filter(charge_type="deposit").exists():
+        from apps.tenants.models import Tenancy
+
+        Tenancy.objects.filter(pk=invoice.tenancy_id, deposit_paid=False).update(deposit_paid=True)
     return payment, True
 
 

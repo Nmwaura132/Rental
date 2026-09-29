@@ -53,6 +53,10 @@ class Payment(models.Model):
         BANK = "bank", "Bank Transfer"
         CASH = "cash", "Cash"
         CARD = "card", "Card"
+        # The tenant's own deposit, applied to their unpaid bills when they move
+        # out. No new money arrives, but the bill is settled and, for KRA, the
+        # deposit becomes rent received at that point.
+        DEPOSIT = "deposit", "Deposit applied"
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"

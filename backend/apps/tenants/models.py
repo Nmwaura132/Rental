@@ -135,3 +135,57 @@ class MaintenanceNote(models.Model):
 
     def __str__(self):
         return f"Note by {self.author} on {self.request_id}"
+
+
+class DepositSettlement(models.Model):
+    """What happened to a tenant's deposit when they moved out.
+
+    WHY a permanent record rather than a note: the deposit is where landlord and
+    tenant disputes happen, and the agreement allows deductions for "arrears,
+    charges on repairs or bills". Every figure is stored as it stood when the
+    landlord settled, and nothing is edited afterwards except to record that
+    the refund was paid.
+    """
+
+    tenancy = models.OneToOneField(Tenancy, on_delete=models.PROTECT, related_name="deposit_settlement")
+    deposit_held = models.DecimalField(max_digits=10, decimal_places=2)
+    applied_to_arrears = models.DecimalField(max_digits=10, decimal_places=2)
+    deductions_total = models.DecimalField(max_digits=10, decimal_places=2)
+    refund_due = models.DecimalField(max_digits=10, decimal_places=2)
+    # What the tenant still owes once the deposit is used up.
+    tenant_owes = models.DecimalField(max_digits=10, decimal_places=2)
+    # The agreement forfeits the deposit if the tenant does not vacate before
+    # the next payment month. Kasa cannot see who is physically in a unit, so
+    # the landlord says so, with a reason.
+    forfeited = models.BooleanField(default=False)
+    notes = models.TextField(blank=True)
+    settled_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
+    settled_at = models.DateTimeField(auto_now_add=True)
+
+    refunded_at = models.DateTimeField(null=True, blank=True)
+    refund_method = models.CharField(max_length=20, blank=True)
+    refund_reference = models.CharField(max_length=100, blank=True)
+
+    class Meta:
+        db_table = "deposit_settlements"
+        constraints = [
+            models.CheckConstraint(condition=models.Q(deposit_held__gte=0), name="settlement_held_nonnegative"),
+            models.CheckConstraint(condition=models.Q(refund_due__gte=0), name="settlement_refund_nonnegative"),
+            models.CheckConstraint(condition=models.Q(tenant_owes__gte=0), name="settlement_owed_nonnegative"),
+        ]
+
+    def __str__(self):
+        return f"Deposit settlement for tenancy {self.tenancy_id}: refund KES {self.refund_due}"
+
+
+class SettlementDeduction(models.Model):
+    settlement = models.ForeignKey(DepositSettlement, on_delete=models.CASCADE, related_name="deductions")
+    description = models.CharField(max_length=120)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+
+    class Meta:
+        db_table = "deposit_settlement_deductions"
+        ordering = ["id"]
+        constraints = [
+            models.CheckConstraint(condition=models.Q(amount__gt=0), name="settlement_deduction_positive"),
+        ]

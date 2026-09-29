@@ -14,6 +14,7 @@ import '../../core/utils/kra.dart';
 import '../../core/utils/phone.dart';
 import '../../core/widgets/kasa_primitives.dart';
 import '../../shared/widgets/shimmer_loading.dart';
+import 'deposit_settlement_screen.dart';
 
 final tenanciesProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
   final dio = ref.read(dioProvider);
@@ -422,11 +423,25 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                                           ],
                                         ),
                                       ),
-                                      if (apiStatus == 'active')
+                                      // Ended tenancies keep a menu for the
+                                      // one thing left to do: settle the deposit.
+                                      if (apiStatus == 'active' || apiStatus == 'terminated')
                                         PopupMenuButton<String>(
                                           icon: Icon(Icons.more_vert,
                                               size: 20, color: cs.kasaTextSub),
                                           onSelected: (action) async {
+                                            if (action == 'settle_deposit') {
+                                              await Navigator.of(context, rootNavigator: true).push(
+                                                MaterialPageRoute(
+                                                  builder: (_) => DepositSettlementScreen(
+                                                    tenancyId: tenancy['id'] as int,
+                                                    tenantName: tenancy['tenant_name']?.toString() ?? 'Tenant',
+                                                  ),
+                                                ),
+                                              );
+                                              ref.invalidate(tenanciesProvider);
+                                              return;
+                                            }
                                             if (action == 'give_notice') {
                                               await giveNoticeAsLandlord(context, ref, tenancy);
                                               return;
@@ -523,8 +538,19 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                                             }
                                           },
                                           itemBuilder: (_) => [
-                                            PopupMenuItem(
-                                              value: 'send_tenancy',
+                                            if (apiStatus == 'terminated' || noticeDate != null)
+                                              PopupMenuItem(
+                                                value: 'settle_deposit',
+                                                child: ListTile(
+                                                  leading: Icon(
+                                                      Icons.account_balance_wallet_outlined,
+                                                      color: cs.primary),
+                                                  title: const Text('Settle deposit'),
+                                                ),
+                                              ),
+                                            if (apiStatus == 'active')
+                                              PopupMenuItem(
+                                                value: 'send_tenancy',
                                               child: ListTile(
                                                 leading: Icon(
                                                     Icons.picture_as_pdf_outlined,
@@ -533,7 +559,7 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                                                     'Send Tenancy Agreement'),
                                               ),
                                             ),
-                                            if (noticeDate == null)
+                                            if (apiStatus == 'active' && noticeDate == null)
                                               PopupMenuItem(
                                                 value: 'give_notice',
                                                 child: ListTile(
@@ -543,8 +569,9 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                                                   title: const Text('Give notice'),
                                                 ),
                                               ),
-                                            PopupMenuItem(
-                                              value: 'terminate',
+                                            if (apiStatus == 'active')
+                                              PopupMenuItem(
+                                                value: 'terminate',
                                               child: ListTile(
                                                 leading: Icon(
                                                     Icons.cancel_outlined,

@@ -197,6 +197,79 @@ class TenancyViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK,
         )
 
+    @action(detail=True, methods=["get", "post"], url_path="settlement")
+    def settlement(self, request, pk=None):
+        """The deposit settlement at move-out.
+
+        GET  — the settlement if made, otherwise the figures to start from.
+               The tenant may read their own.
+        POST — the landlord settles: {"deductions": [{"description", "amount"}],
+               "forfeited": bool, "notes": str}. Once only.
+        """
+        from django.core.exceptions import ValidationError as DjangoValidationError
+
+        from . import settlement as deposit
+        from .serializers import DepositSettlementSerializer
+
+        tenancy = self.get_object()
+        is_owner = tenancy.unit.property.owner_id == request.user.id
+
+        if request.method == "GET":
+            if not (is_owner or tenancy.tenant_id == request.user.id):
+                return Response({"error": "Not permitted."}, status=status.HTTP_403_FORBIDDEN)
+            existing = getattr(tenancy, "deposit_settlement", None)
+            if existing:
+                return Response({"settled": True, **DepositSettlementSerializer(existing).data})
+            return Response({"settled": False, **deposit.preview(tenancy)})
+
+        # Money leaves the landlord's hands here, so only the landlord decides it.
+        if not is_owner:
+            return Response(
+                {"error": "Only the landlord can settle the deposit."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        try:
+            result = deposit.settle(
+                tenancy,
+                by=request.user,
+                deductions=request.data.get("deductions") or [],
+                forfeited=bool(request.data.get("forfeited")),
+                notes=request.data.get("notes") or "",
+            )
+        except DjangoValidationError as exc:
+            return Response({"error": exc.messages[0]}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {"settled": True, **DepositSettlementSerializer(result).data},
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=["post"], url_path="settlement/refund")
+    def settlement_refund(self, request, pk=None):
+        """Record that the refund was paid: {"method": "cash|mpesa|bank", "reference": ""}."""
+        from django.core.exceptions import ValidationError as DjangoValidationError
+
+        from . import settlement as deposit
+        from .serializers import DepositSettlementSerializer
+
+        tenancy = self.get_object()
+        if tenancy.unit.property.owner_id != request.user.id:
+            return Response(
+                {"error": "Only the landlord can record the refund."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        existing = getattr(tenancy, "deposit_settlement", None)
+        if existing is None:
+            return Response({"error": "Settle the deposit first."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            deposit.mark_refunded(
+                existing,
+                method=request.data.get("method"),
+                reference=request.data.get("reference") or "",
+            )
+        except DjangoValidationError as exc:
+            return Response({"error": exc.messages[0]}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"settled": True, **DepositSettlementSerializer(existing).data})
+
     @action(detail=True, methods=["post"], url_path="send-tenancy")
     def send_tenancy(self, request, pk=None):
         """
