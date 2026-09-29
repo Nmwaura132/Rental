@@ -127,3 +127,81 @@ class TestScoping:
             role=django_user_model.Role.LANDLORD,
         )
         assert _get(stranger, occupied).status_code == 404
+
+
+class TestMoneyIsTheLandlords:
+    """A caretaker looks after the building. What a tenant has paid, owes or
+    put down as a deposit is the landlord's business."""
+
+    def _make_caretaker(self, caretaker, property_):
+        property_.caretaker = caretaker
+        property_.save(update_fields=["caretaker"])
+
+    def _bill(self, tenancy, amount="15000.00", overdue=False):
+        from apps.payments.models import Invoice
+
+        start = timezone.localdate().replace(day=1)
+        bill = Invoice.objects.create(
+            tenancy=tenancy, invoice_number="INV-OCC-1", amount_due=Decimal(amount),
+            due_date=start.replace(day=5), period_start=start,
+            period_end=start + timedelta(days=27),
+        )
+        if overdue:
+            bill.status = Invoice.Status.OVERDUE
+            bill.save(update_fields=["status"])
+        return bill
+
+    def test_the_landlord_sees_what_the_tenant_owes(self, landlord, occupied, tenancy):
+        self._bill(tenancy)
+        assert Decimal(str(_get(landlord, occupied).data["tenancy"]["balance"])) == Decimal("15000.00")
+
+    def test_the_landlord_is_told_when_it_is_overdue(self, landlord, occupied, tenancy):
+        self._bill(tenancy, overdue=True)
+        assert _get(landlord, occupied).data["tenancy"]["overdue"] is True
+
+    def test_the_landlord_sees_the_deposit(self, landlord, occupied):
+        assert "deposit_amount" in _get(landlord, occupied).data["tenancy"]
+
+    def test_a_caretaker_is_not_told_the_balance(self, caretaker, occupied, tenancy, property_):
+        self._make_caretaker(caretaker, property_)
+        self._bill(tenancy, overdue=True)
+        assert "balance" not in _get(caretaker, occupied).data["tenancy"]
+
+    def test_a_caretaker_is_not_told_it_is_overdue(self, caretaker, occupied, tenancy, property_):
+        self._make_caretaker(caretaker, property_)
+        self._bill(tenancy, overdue=True)
+        assert "overdue" not in _get(caretaker, occupied).data["tenancy"]
+
+    def test_a_caretaker_does_not_see_the_deposit(self, caretaker, occupied, property_):
+        self._make_caretaker(caretaker, property_)
+        tenancy = _get(caretaker, occupied).data["tenancy"]
+        assert ("deposit_amount" in tenancy, "deposit_paid" in tenancy) == (False, False)
+
+    def test_a_caretaker_does_not_see_payments(self, caretaker, occupied, invoice, property_):
+        self._make_caretaker(caretaker, property_)
+        Payment.objects.create(
+            invoice=invoice, method=Payment.Method.MPESA, status=Payment.Status.CONFIRMED,
+            amount=Decimal("5000.00"), idempotency_key="occ:caretaker", paid_at=timezone.now(),
+        )
+        assert _get(caretaker, occupied).data["payments"] == []
+
+    def test_a_caretaker_still_sees_repairs(self, caretaker, occupied, tenancy, property_):
+        self._make_caretaker(caretaker, property_)
+        MaintenanceRequest.objects.create(tenancy=tenancy, title="Blocked sink", description="x")
+        assert _get(caretaker, occupied).data["maintenance"][0]["title"] == "Blocked sink"
+
+    def test_a_payment_names_how_it_was_made(self, landlord, occupied, invoice):
+        Payment.objects.create(
+            invoice=invoice, method=Payment.Method.MPESA, status=Payment.Status.CONFIRMED,
+            amount=Decimal("5000.00"), idempotency_key="occ:owner", paid_at=timezone.now(),
+            mpesa_receipt_number="SIR8B3M1TK",
+        )
+        row = _get(landlord, occupied).data["payments"][0]
+        assert (row["method_display"], row["reference"]) == ("M-Pesa", "SIR8B3M1TK")
+
+    def test_a_fixed_repair_says_when(self, landlord, occupied, tenancy):
+        request = MaintenanceRequest.objects.create(
+            tenancy=tenancy, title="Leaking tap", description="x",
+            status=MaintenanceRequest.Status.RESOLVED, resolved_at=timezone.now(),
+        )
+        assert _get(landlord, occupied).data["maintenance"][0]["resolved_at"] is not None

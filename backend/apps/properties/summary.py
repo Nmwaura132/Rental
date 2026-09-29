@@ -94,3 +94,18 @@ def property_summary(property_, states=None) -> dict:
 
 
 MONEY_KEYS = ("expected_this_month", "collected_this_month", "collected_pct", "arrears")
+
+# What a caretaker may not see: the money, and how many bills are overdue, which
+# says the same thing about who is behind.
+CARETAKER_HIDDEN = MONEY_KEYS + ("overdue_bills",)
+
+OCCUPIED = "occupied"
+
+
+def without_payment_status(state: str | None) -> str | None:
+    """A unit's state with what the tenant owes taken out of it.
+
+    A caretaker sees who lives where and who is leaving, but never who is
+    behind on rent: paid, due and arrears all read as plain "occupied".
+    """
+    return OCCUPIED if state in (PAID, DUE, ARREARS) else state

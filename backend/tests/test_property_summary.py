@@ -111,11 +111,37 @@ class TestWhoSeesWhat:
         unit = self._property(landlord, tenancy.unit.property)["units"][0]
         assert Decimal(str(unit["balance"])) == Decimal("15000")
 
-    def test_a_caretaker_sees_unit_states(self, caretaker, tenancy):
+    def test_a_caretaker_sees_who_is_in_a_unit(self, caretaker, tenancy):
         prop = tenancy.unit.property
         prop.caretaker = caretaker
         prop.save(update_fields=["caretaker"])
-        assert self._property(caretaker, prop)["units"][0]["state"] == "paid"
+        assert self._property(caretaker, prop)["units"][0]["state"] == "occupied"
+
+    def test_a_caretaker_is_not_told_who_is_behind_on_rent(self, caretaker, tenancy):
+        _bill(tenancy, "15000", months_ago=1, overdue=True)
+        prop = tenancy.unit.property
+        prop.caretaker = caretaker
+        prop.save(update_fields=["caretaker"])
+        assert self._property(caretaker, prop)["units"][0]["state"] == "occupied"
+
+    def test_a_caretaker_is_not_told_how_many_bills_are_overdue(self, caretaker, tenancy):
+        _bill(tenancy, "15000", months_ago=1, overdue=True)
+        prop = tenancy.unit.property
+        prop.caretaker = caretaker
+        prop.save(update_fields=["caretaker"])
+        assert "overdue_bills" not in self._property(caretaker, prop)["summary"]
+
+    def test_a_caretaker_still_sees_who_is_leaving(self, caretaker, tenancy):
+        prop = tenancy.unit.property
+        prop.caretaker = caretaker
+        prop.save(update_fields=["caretaker"])
+        tenancy.notice_effective_date = timezone.localdate() + timedelta(days=20)
+        tenancy.save(update_fields=["notice_effective_date"])
+        assert self._property(caretaker, prop)["units"][0]["state"] == "notice"
+
+    def test_a_landlord_still_sees_arrears(self, landlord, tenancy):
+        _bill(tenancy, "15000", months_ago=1, overdue=True)
+        assert self._property(landlord, tenancy.unit.property)["units"][0]["state"] == "arrears"
 
     def test_a_caretaker_sees_no_money(self, caretaker, tenancy):
         prop = tenancy.unit.property

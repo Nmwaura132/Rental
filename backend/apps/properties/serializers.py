@@ -51,16 +51,19 @@ class PropertySerializer(serializers.ModelSerializer):
         # money — the design keeps totals and balances to the landlord.
         is_caretaker = viewer is not None and viewer.id == instance.caretaker_id
         if is_owner or is_caretaker:
-            from .summary import MONEY_KEYS, property_summary, unit_states
+            from .summary import (
+                CARETAKER_HIDDEN, property_summary, unit_states, without_payment_status,
+            )
 
             states = unit_states(instance)
             summary = property_summary(instance, states)
             if not is_owner:
-                summary = {k: v for k, v in summary.items() if k not in MONEY_KEYS}
+                summary = {k: v for k, v in summary.items() if k not in CARETAKER_HIDDEN}
             data["summary"] = summary
             for unit in data.get("units", []):
                 info = states.get(unit["id"], {})
-                unit["state"] = info.get("state")
+                state = info.get("state")
+                unit["state"] = state if is_owner else without_payment_status(state)
                 unit["tenant_name"] = info.get("tenant")
                 if is_owner:
                     unit["balance"] = info.get("balance")

@@ -205,9 +205,16 @@ class UnitViewSet(viewsets.ModelViewSet):
             .first()
         )
 
+        from apps.payments.services import pay_to
+
+        paybill, pay_account = pay_to(unit)
         payload = {
             "unit": UnitSerializer(unit).data,
             "property_name": unit.property.name,
+            # What the tenant types into M-Pesa for this unit, so the landlord
+            # can read it out when a payment does not arrive where expected.
+            "paybill": paybill,
+            "pay_account": pay_account,
             "tenancy": None,
             "tenant": None,
             "payments": [],
@@ -228,12 +235,27 @@ class UnitViewSet(viewsets.ModelViewSet):
             "start_date": tenancy.start_date,
             "end_date": tenancy.end_date,
             "rent_amount": tenancy.rent_amount,
-            "deposit_amount": tenancy.deposit_amount,
-            "deposit_paid": tenancy.deposit_paid,
             "status": tenancy.status,
             "notice_given_at": tenancy.notice_given_at,
             "notice_effective_date": tenancy.notice_effective_date,
         }
+        if is_owner:
+            from decimal import Decimal
+
+            from apps.payments.models import Invoice
+
+            open_bills = Invoice.objects.filter(
+                tenancy=tenancy,
+                status__in=[
+                    Invoice.Status.PENDING, Invoice.Status.PARTIALLY_PAID, Invoice.Status.OVERDUE,
+                ],
+            )
+            # WHY these are owner-only: the deposit and what the tenant owes are
+            # the landlord's business. A caretaker looks after the building.
+            payload["tenancy"]["deposit_amount"] = tenancy.deposit_amount
+            payload["tenancy"]["deposit_paid"] = tenancy.deposit_paid
+            payload["tenancy"]["balance"] = sum((b.balance for b in open_bills), Decimal("0"))
+            payload["tenancy"]["overdue"] = open_bills.filter(status=Invoice.Status.OVERDUE).exists()
         payload["tenant"] = {
             "id": tenant.id,
             "name": f"{tenant.first_name} {tenant.last_name}".strip(),
@@ -248,23 +270,27 @@ class UnitViewSet(viewsets.ModelViewSet):
             ),
         }
 
-        payments = (
-            Payment.objects.filter(
-                invoice__tenancy=tenancy, status=Payment.Status.CONFIRMED
+        if is_owner:
+            payments = (
+                Payment.objects.filter(
+                    invoice__tenancy=tenancy, status=Payment.Status.CONFIRMED
+                )
+                .select_related("invoice")
+                .order_by("-paid_at")[:20]
             )
-            .select_related("invoice")
-            .order_by("-paid_at")[:20]
-        )
-        payload["payments"] = [
-            {
-                "id": p.id,
-                "amount": p.amount,
-                "method": p.method,
-                "paid_at": p.paid_at,
-                "invoice_number": p.invoice.invoice_number,
-            }
-            for p in payments
-        ]
+            payload["payments"] = [
+                {
+                    "id": p.id,
+                    "amount": p.amount,
+                    "method": p.method,
+                    "method_display": p.get_method_display(),
+                    "paid_at": p.paid_at,
+                    "invoice_number": p.invoice.invoice_number,
+                    "reference": p.mpesa_receipt_number or p.bank_reference or "",
+                    "period_start": p.invoice.period_start,
+                }
+                for p in payments
+            ]
 
         requests = MaintenanceRequest.objects.filter(tenancy=tenancy).order_by(
             "-created_at"
@@ -276,6 +302,7 @@ class UnitViewSet(viewsets.ModelViewSet):
                 "status": m.status,
                 "priority": m.priority,
                 "created_at": m.created_at,
+                "resolved_at": m.resolved_at,
             }
             for m in requests
         ]
