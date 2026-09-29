@@ -111,8 +111,10 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Payment.objects.none()  # for drf-spectacular schema introspection
 
     def get_queryset(self):
-        return _payment_qs_for_user(self.request.user).select_related(
-            "invoice__tenancy__tenant"
+        return (
+            _payment_qs_for_user(self.request.user)
+            .select_related("invoice__tenancy__tenant", "invoice__tenancy__unit__property")
+            .order_by("-paid_at", "-id")
         )
 
     @action(detail=False, methods=["post"], url_path="record",

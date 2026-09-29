@@ -168,3 +168,33 @@ class TestTheDashboard:
         )
         data = _client(caretaker).get("/api/v1/payments/dashboard/").data
         assert data["readings_left"] == 1
+
+
+class TestThePaymentsList:
+    def _pay(self, invoice, amount, days_ago, key):
+        from apps.payments.models import Payment
+
+        return Payment.objects.create(
+            invoice=invoice, method=Payment.Method.MPESA, status=Payment.Status.CONFIRMED,
+            amount=Decimal(amount), idempotency_key=key,
+            paid_at=timezone.now() - timedelta(days=days_ago),
+        )
+
+    def test_each_payment_says_who_paid(self, landlord, invoice):
+        self._pay(invoice, "5000", 1, "list:who")
+        row = _client(landlord).get("/api/v1/payments/").data["results"][0]
+        assert (row["tenant_name"], row["unit_number"]) == ("Test Tenant", invoice.tenancy.unit.unit_number)
+
+    def test_newest_first(self, landlord, invoice):
+        self._pay(invoice, "1000", 5, "list:old")
+        self._pay(invoice, "2000", 1, "list:new")
+        rows = _client(landlord).get("/api/v1/payments/").data["results"]
+        assert [Decimal(r["amount"]) for r in rows] == [Decimal("2000"), Decimal("1000")]
+
+    def test_another_landlord_sees_none_of_them(self, invoice, django_user_model):
+        self._pay(invoice, "5000", 1, "list:private")
+        stranger = django_user_model.objects.create_user(
+            phone_number="+254700666777", password="Other@Test1",
+            first_name="O", last_name="L", role=django_user_model.Role.LANDLORD,
+        )
+        assert _client(stranger).get("/api/v1/payments/").data["results"] == []

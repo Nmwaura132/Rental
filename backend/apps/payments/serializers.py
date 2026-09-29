@@ -6,11 +6,18 @@ from .services import pay_to
 
 class PaymentSerializer(serializers.ModelSerializer):
     method_display = serializers.CharField(source="get_method_display", read_only=True)
+    # Who paid and for what, so a list of payments reads without opening each
+    # bill.
+    tenant_name = serializers.CharField(source="invoice.tenancy.tenant.get_full_name", read_only=True)
+    unit_number = serializers.CharField(source="invoice.tenancy.unit.unit_number", read_only=True)
+    property_name = serializers.CharField(source="invoice.tenancy.unit.property.name", read_only=True)
+    invoice_number = serializers.CharField(source="invoice.invoice_number", read_only=True)
 
     class Meta:
         model = Payment
         fields = [
-            "id", "invoice", "method", "method_display", "status", "amount",
+            "id", "invoice", "invoice_number", "tenant_name", "unit_number", "property_name",
+            "method", "method_display", "status", "amount",
             # M-Pesa
             "mpesa_receipt_number", "mpesa_phone",
             # Bank transfer

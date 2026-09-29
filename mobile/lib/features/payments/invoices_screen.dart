@@ -89,6 +89,12 @@ class _LineItemEntry {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Every confirmed payment the viewer may see, newest first.
+final paymentsReceivedProvider = FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
+  final rows = await fetchAllPages(ref.watch(dioProvider), '/api/v1/payments/?status=confirmed');
+  return rows.cast<Map<String, dynamic>>();
+});
+
 class InvoicesScreen extends ConsumerStatefulWidget {
   const InvoicesScreen({super.key});
 
@@ -98,6 +104,7 @@ class InvoicesScreen extends ConsumerStatefulWidget {
 
 class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
   String _filter = 'all';
+  bool _showPayments = false;
 
   static const _due = {'pending', 'partially_paid'};
 
@@ -110,6 +117,7 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
 
   Future<void> _refresh() {
     ref.invalidate(unplacedPaymentsProvider);
+    ref.invalidate(paymentsReceivedProvider);
     return ref.refresh(invoicesProvider.future);
   }
 
@@ -205,7 +213,19 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
           ),
           data: (raw) {
             final all = raw.cast<Map<String, dynamic>>();
-            final shown = all.where(_matches).toList();
+            // What needs chasing first: overdue, then due, then settled;
+            // oldest first within each.
+            int rank(Map<String, dynamic> b) => switch (b['status']) {
+                  'overdue' => 0,
+                  'partially_paid' || 'pending' => 1,
+                  'paid' => 2,
+                  _ => 3,
+                };
+            final shown = all.where(_matches).toList()
+              ..sort((a, b) {
+                final byRank = rank(a).compareTo(rank(b));
+                return byRank != 0 ? byRank : '${a['due_date']}'.compareTo('${b['due_date']}');
+              });
             final outstanding = all
                 .where((b) => b['status'] != 'paid' && b['status'] != 'cancelled')
                 .fold<double>(0, (sum, b) => sum + toDouble(b['balance']));
@@ -231,6 +251,12 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
                     const SizedBox(height: 16),
                     const _PaymentsToAssign(),
                   ],
+                  _ViewSwitch(
+                    showPayments: _showPayments,
+                    onChanged: (v) => setState(() => _showPayments = v),
+                  ),
+                  const SizedBox(height: 16),
+                  if (_showPayments) const _PaymentsReceived() else ...[
                   KasaSectionHeader(
                     'Bills',
                     trailing: Text('${formatCurrency(outstanding)} outstanding',
@@ -274,6 +300,7 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
                       for (final bill in shown)
                         _BillRow(invoice: bill, onChanged: () => ref.invalidate(invoicesProvider)),
                     ]),
+                  ],
                 ],
               ),
             );
@@ -308,11 +335,13 @@ class _MoneyShortcuts extends StatelessWidget {
             ]),
           ),
         );
-    return Row(children: [
-      tile(Icons.description_outlined, 'Reports', '/reports'),
-      const SizedBox(width: 8),
-      tile(Icons.receipt_outlined, 'Tax statement', '/tax'),
-    ]);
+    return IntrinsicHeight(
+      child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        tile(Icons.description_outlined, 'Reports', '/reports'),
+        const SizedBox(width: 8),
+        tile(Icons.receipt_outlined, 'Tax statement', '/tax'),
+      ]),
+    );
   }
 }
 
@@ -358,6 +387,7 @@ class _PaymentsToAssign extends ConsumerWidget {
                   label: 'Assign',
                   variant: KasaButtonVariant.secondary,
                   fullWidth: false,
+                  compact: true,
                   onTap: () => assignUnplacedPayment(context, ref, r),
                 ),
               ),
@@ -408,6 +438,192 @@ class _FilterPill extends StatelessWidget {
             ]),
           ),
         ),
+      ),
+    );
+  }
+}
+
+// Bills | Payments
+
+class _ViewSwitch extends StatelessWidget {
+  const _ViewSwitch({required this.showPayments, required this.onChanged});
+  final bool showPayments;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    Widget half(String label, bool on, bool value) => Expanded(
+          child: Semantics(
+            selected: on,
+            button: true,
+            child: Material(
+              color: on ? cs.kasaCard : Colors.transparent,
+              borderRadius: BorderRadius.circular(9),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(9),
+                onTap: () => onChanged(value),
+                child: Container(
+                  height: 40,
+                  alignment: Alignment.center,
+                  child: Text(label,
+                      style: KasaFont.sans(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: on ? cs.onSurface : cs.kasaTextSub,
+                      )),
+                ),
+              ),
+            ),
+          ),
+        );
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(color: cs.kasaElev, borderRadius: BorderRadius.circular(12)),
+      child: Row(children: [
+        half('Bills', !showPayments, false),
+        const SizedBox(width: 4),
+        half('Payments', showPayments, true),
+      ]),
+    );
+  }
+}
+
+/// Money that came in: who paid, for which unit, how, and the receipt.
+/// Searchable, because the question is usually about one person.
+class _PaymentsReceived extends ConsumerStatefulWidget {
+  const _PaymentsReceived();
+
+  @override
+  ConsumerState<_PaymentsReceived> createState() => _PaymentsReceivedState();
+}
+
+class _PaymentsReceivedState extends ConsumerState<_PaymentsReceived> {
+  String _query = '';
+
+  bool _matches(Map<String, dynamic> p) {
+    final q = _query.trim().toLowerCase();
+    if (q.isEmpty) return true;
+    return [
+      p['tenant_name'], p['unit_number'], p['property_name'],
+      p['mpesa_receipt_number'], p['mpesa_phone'], p['bank_reference'],
+    ].any((v) => '${v ?? ''}'.toLowerCase().contains(q));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final payments = ref.watch(paymentsReceivedProvider);
+    return payments.when(
+      loading: () => const Padding(
+        padding: EdgeInsets.symmetric(vertical: 40),
+        child: Center(child: CircularProgressIndicator()),
+      ),
+      error: (e, _) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 40),
+        child: Text(apiError(e), textAlign: TextAlign.center),
+      ),
+      data: (all) {
+        final now = DateTime.now();
+        // What arrived this month, not the deposit applied at a move-out,
+        // which arrived at move-in and was counted then.
+        final thisMonth = all
+            .where((p) {
+              final d = DateTime.tryParse('${p['paid_at']}')?.toLocal();
+              return d != null && d.year == now.year && d.month == now.month && p['method'] != 'deposit';
+            })
+            .fold<double>(0, (sum, p) => sum + toDouble(p['amount']));
+        final shown = all.where(_matches).toList();
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            KasaSectionHeader(
+              'Payments',
+              trailing: Text('${formatCurrency(thisMonth)} in ${DateFormat('MMMM').format(now)}',
+                  style: KasaFont.sans(fontSize: 14, color: cs.kasaTextSub)
+                      .copyWith(fontFeatures: KasaType.tabular)),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              onChanged: (v) => setState(() => _query = v),
+              textInputAction: TextInputAction.search,
+              decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.search_rounded),
+                hintText: 'Name, unit, phone or receipt',
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 12),
+            if (shown.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 40),
+                child: Text(
+                  all.isEmpty ? 'No payments yet.' : 'No payment matches \u201c$_query\u201d.',
+                  textAlign: TextAlign.center,
+                  style: KasaFont.sans(fontSize: 14, color: cs.kasaTextSub),
+                ),
+              )
+            else
+              KasaListGroup(children: [for (final p in shown) _PaymentRow(payment: p)]),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _PaymentRow extends StatelessWidget {
+  const _PaymentRow({required this.payment});
+  final Map<String, dynamic> payment;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final when = DateTime.tryParse('${payment['paid_at']}')?.toLocal();
+    final receipt = '${payment['mpesa_receipt_number'] ?? payment['bank_reference'] ?? ''}'.trim();
+    final detail = [
+      '${payment['method_display'] ?? ''}',
+      if (when != null) DateFormat('d MMM, HH:mm').format(when),
+    ].join(' \u00b7 ');
+
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 64),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+        child: Row(children: [
+          Container(
+            width: 40,
+            height: 40,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(color: cs.kasaElev, borderRadius: BorderRadius.circular(10)),
+            child: Text('${payment['unit_number'] ?? ''}',
+                maxLines: 1,
+                style: KasaFont.sans(fontSize: 14, fontWeight: FontWeight.w600, color: cs.onSurface)),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('${payment['tenant_name'] ?? ''}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: KasaFont.sans(fontSize: 15, fontWeight: FontWeight.w500, color: cs.onSurface)),
+                const SizedBox(height: 4),
+                Text(detail, style: KasaFont.sans(fontSize: 13, color: cs.kasaTextSub)),
+                if (receipt.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(receipt, style: KasaFont.mono(fontSize: 12, color: cs.kasaTextSub)),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(formatCurrency(toDouble(payment['amount'])),
+              style: KasaFont.sans(fontSize: 15, fontWeight: FontWeight.w600, color: cs.onSurface)
+                  .copyWith(fontFeatures: KasaType.tabular)),
+        ]),
       ),
     );
   }
