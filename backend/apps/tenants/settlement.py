@@ -16,8 +16,8 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from apps.payments.models import Invoice, Payment
-from apps.payments.services import apply_confirmed_payment
+from apps.payments.models import Invoice, Payment, TenancyCredit
+from apps.payments.services import apply_confirmed_payment, apply_credit, credit_remaining
 
 from .models import DepositSettlement, SettlementDeduction, Tenancy
 
@@ -53,6 +53,7 @@ def preview(tenancy) -> dict:
             for b in bills
         ],
         "available_after_arrears": max(held - arrears, Decimal("0")),
+        "credit": credit_remaining(tenancy),
         "can_settle": can_settle(tenancy),
     }
 
@@ -95,6 +96,10 @@ def settle(tenancy, *, by, deductions=(), forfeited=False, notes="") -> DepositS
         if DepositSettlement.objects.filter(tenancy=tenancy).exists():
             raise ValidationError("This deposit has already been settled.")
 
+        # Rent paid ahead is the tenant's own money and settles unpaid bills
+        # before the deposit does.
+        apply_credit(tenancy)
+
         remaining = held
         applied = Decimal("0")
         for bill in unpaid_bills(tenancy):
@@ -118,8 +123,18 @@ def settle(tenancy, *, by, deductions=(), forfeited=False, notes="") -> DepositS
         # Forfeiture only means the leftover is kept rather than refunded. The
         # deposit still counts against the deductions, so a forfeiting tenant
         # is not charged twice for the same repairs.
-        owes = arrears_left + max(deductions_total - remaining, Decimal("0"))
-        refund = Decimal("0") if forfeited else max(remaining - deductions_total, Decimal("0"))
+        over_deposit = max(deductions_total - remaining, Decimal("0"))
+        deposit_refund = Decimal("0") if forfeited else max(remaining - deductions_total, Decimal("0"))
+
+        # Unused credit covers deductions the deposit could not, and the rest
+        # goes back to the tenant — forfeiture does not touch it.
+        credit = credit_remaining(tenancy)
+        from_credit = min(over_deposit, credit)
+        credit_returned = credit - from_credit
+        TenancyCredit.objects.filter(tenancy=tenancy, remaining__gt=0).update(remaining=0)
+
+        owes = arrears_left + over_deposit - from_credit
+        refund = deposit_refund + credit_returned
 
         settlement = DepositSettlement.objects.create(
             tenancy=tenancy,
@@ -128,6 +143,7 @@ def settle(tenancy, *, by, deductions=(), forfeited=False, notes="") -> DepositS
             deductions_total=deductions_total,
             refund_due=refund,
             tenant_owes=owes,
+            credit_returned=credit_returned,
             forfeited=forfeited,
             notes=notes[:2000],
             settled_by=by,
@@ -165,6 +181,8 @@ def _send_statement(settlement):
         parts.append(f"unpaid rent -{settlement.applied_to_arrears:,.0f}")
     for deduction in settlement.deductions.all():
         parts.append(f"{deduction.description} -{deduction.amount:,.0f}")
+    if settlement.credit_returned:
+        parts.append(f"unused credit +{settlement.credit_returned:,.0f}")
 
     if settlement.forfeited:
         outcome = f"The deposit is forfeited: {settlement.notes}"

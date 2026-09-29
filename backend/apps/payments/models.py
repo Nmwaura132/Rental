@@ -107,6 +107,18 @@ class Payment(models.Model):
         help_text="The user who entered this payment by hand, if anyone did.",
     )
 
+    # WHY: one M-Pesa payment can clear several bills, or leave credit for the
+    # next. The receipt number is unique, so it sits on the first part only;
+    # the other parts point back to it, so every part still traces to the
+    # money that actually arrived.
+    carried_from = models.ForeignKey(
+        "self",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="carried_parts",
+    )
+
     paid_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -278,3 +290,44 @@ class InvoiceLineItem(models.Model):
 
     def __str__(self):
         return f"{self.description} — KES {self.amount}"
+
+
+class TenancyCredit(models.Model):
+    """Money a tenant paid beyond what they owed at the time.
+
+    Kept against the tenancy and applied automatically to the next bill raised,
+    so a tenant who paid ahead is not chased for money already handed over.
+    It becomes a Payment only when it meets a bill, dated when it actually
+    arrived, so totals and KRA figures fall in the month it was received.
+    """
+
+    tenancy = models.ForeignKey("tenants.Tenancy", on_delete=models.PROTECT, related_name="credits")
+    # The incoming payment's key, so a retried callback cannot create it twice.
+    idempotency_key = models.CharField(max_length=80, unique=True)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    remaining = models.DecimalField(max_digits=10, decimal_places=2)
+    method = models.CharField(max_length=10, choices=Payment.Method.choices)
+    paid_at = models.DateTimeField()
+    # The receipt, phone and reference as they arrived, for the Payment made
+    # when this credit is applied.
+    source_fields = models.JSONField(default=dict)
+    # The part of the same payment already applied to a bill, if any. Null
+    # when the whole payment arrived before any bill existed.
+    first_payment = models.ForeignKey(
+        Payment, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "tenancy_credits"
+        ordering = ["created_at", "id"]
+        constraints = [
+            models.CheckConstraint(condition=models.Q(amount__gt=0), name="credit_amount_positive"),
+            models.CheckConstraint(
+                condition=models.Q(remaining__gte=0) & models.Q(remaining__lte=models.F("amount")),
+                name="credit_remaining_within_amount",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Credit KES {self.remaining} of {self.amount} on tenancy {self.tenancy_id}"

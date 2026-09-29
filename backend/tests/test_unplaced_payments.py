@@ -57,30 +57,41 @@ class TestAnUnknownReference:
         assert sent == []
 
 
-class TestPaidBeforeTheBillExists:
-    """Rent paid on the 30th for next month — the unit is known, the invoice
-    is not raised yet."""
+@pytest.fixture
+def vacant(property_):
+    """A unit with nobody living in it: the landlord is known, the tenant is not."""
+    from apps.properties.models import Unit
 
-    def test_the_payment_is_kept(self, tenancy, sent):
-        _pay(tenancy.unit.payment_code)
+    return Unit.objects.create(
+        property=property_, unit_number="V1", unit_type=Unit.UnitType.BEDSITTER,
+        rent_amount=Decimal("10000"), deposit_amount=Decimal("10000"),
+    )
+
+
+class TestPaidToAUnitWithNoTenant:
+    """The landlord can be identified but not who the money belongs to. Rent
+    paid ahead by a known tenant is not held here — it becomes their credit."""
+
+    def test_the_payment_is_kept(self, vacant, sent):
+        _pay(vacant.payment_code)
         assert _held().amount == Decimal("15000.00")
 
-    def test_it_belongs_to_the_landlord(self, tenancy, sent, landlord):
-        _pay(tenancy.unit.payment_code)
+    def test_it_belongs_to_the_landlord(self, vacant, sent, landlord):
+        _pay(vacant.payment_code)
         assert _held().owner == landlord
 
-    def test_the_landlord_is_told(self, tenancy, sent, landlord):
-        _pay(tenancy.unit.payment_code)
+    def test_the_landlord_is_told(self, vacant, sent, landlord):
+        _pay(vacant.payment_code)
         assert sent[0][0] == landlord.id
 
-    def test_a_retry_of_the_same_receipt_is_not_held_twice(self, tenancy, sent):
-        _pay(tenancy.unit.payment_code)
-        _pay(tenancy.unit.payment_code)
+    def test_a_retry_of_the_same_receipt_is_not_held_twice(self, vacant, sent):
+        _pay(vacant.payment_code)
+        _pay(vacant.payment_code)
         assert BankPaymentNotification.objects.count() == 1
 
-    def test_a_retry_does_not_alert_twice(self, tenancy, sent):
-        _pay(tenancy.unit.payment_code)
-        _pay(tenancy.unit.payment_code)
+    def test_a_retry_does_not_alert_twice(self, vacant, sent):
+        _pay(vacant.payment_code)
+        _pay(vacant.payment_code)
         assert len(sent) == 1
 
 
@@ -99,11 +110,10 @@ class TestPlacingItByHand:
             format="json",
         )
 
-    def test_the_landlord_can_see_a_payment_with_a_mistyped_reference(self, tenancy, invoice, client, sent):
+    def test_the_landlord_can_see_a_payment_with_a_mistyped_reference(self, vacant, client, sent):
         # Owner is set from the unit when the payment is held, so it stays
         # visible even when its reference matches nothing the landlord owns.
-        invoice.delete()
-        _pay(tenancy.unit.payment_code)
+        _pay(vacant.payment_code)
         held = _held()
         held.payment_ref = "TYPO"
         held.save(update_fields=["payment_ref"])
@@ -111,30 +121,12 @@ class TestPlacingItByHand:
         ids = [row["id"] for row in (response.data.get("results", response.data))]
         assert held.id in ids
 
-    def test_matching_records_it_as_an_mpesa_payment(self, tenancy, invoice, client, sent):
-        invoice.delete()
-        _pay(tenancy.unit.payment_code)
-        from datetime import date, timedelta
-        from apps.payments.models import Invoice
-        new_invoice = Invoice.objects.create(
-            tenancy=tenancy, invoice_number="INV-LATER", amount_due=Decimal("15000.00"),
-            due_date=date.today() + timedelta(days=4),
-            period_start=date.today().replace(day=1),
-            period_end=date.today().replace(day=1) + timedelta(days=30),
-        )
-        self._match(client, new_invoice)
+    def test_matching_records_it_as_an_mpesa_payment(self, vacant, invoice, client, sent):
+        _pay(vacant.payment_code)
+        self._match(client, invoice)
         assert Payment.objects.get().method == Payment.Method.MPESA
 
-    def test_matching_keeps_the_mpesa_receipt(self, tenancy, invoice, client, sent):
-        invoice.delete()
-        _pay(tenancy.unit.payment_code)
-        from datetime import date, timedelta
-        from apps.payments.models import Invoice
-        new_invoice = Invoice.objects.create(
-            tenancy=tenancy, invoice_number="INV-LATER", amount_due=Decimal("15000.00"),
-            due_date=date.today() + timedelta(days=4),
-            period_start=date.today().replace(day=1),
-            period_end=date.today().replace(day=1) + timedelta(days=30),
-        )
-        self._match(client, new_invoice)
+    def test_matching_keeps_the_mpesa_receipt(self, vacant, invoice, client, sent):
+        _pay(vacant.payment_code)
+        self._match(client, invoice)
         assert Payment.objects.get().mpesa_receipt_number == "RUNPLACED1"

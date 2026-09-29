@@ -15,7 +15,7 @@ from apps.core.permissions import IsLandlord
 from .models import Invoice, Payment, MpesaSTKRequest
 from .serializers import InvoiceSerializer, PaymentSerializer
 from .mpesa import make_idempotency_key
-from .services import apply_confirmed_payment, how_to_pay
+from .services import apply_confirmed_payment, apply_credit, how_to_pay
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +60,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         if user.is_caretaker and tenancy.unit.property.caretaker_id != user.id:
             raise PermissionDenied("You cannot create invoices for this tenancy.")
         super().perform_create(serializer)
+        apply_credit(serializer.instance.tenancy)
         invoice = Invoice.objects.select_related(
             "tenancy__tenant", "tenancy__unit__property"
         ).get(pk=serializer.instance.pk)

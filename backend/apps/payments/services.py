@@ -146,6 +146,8 @@ def create_move_in_invoice(tenancy, *, notify=True):
                 charge_type="deposit",
                 amount=deposit,
             )
+        apply_credit(tenancy)
+        invoice.refresh_from_db()
 
     if notify:
         _notify_move_in(tenancy, invoice, rent, deposit)
@@ -169,3 +171,159 @@ def _notify_move_in(tenancy, invoice, rent, deposit):
         f"KES {invoice.amount_due:,.0f}, due {invoice.due_date.strftime('%d %b %Y')}. "
         f"{how_to_pay(unit)}",
     )
+
+
+_OPEN_STATUSES = [Invoice.Status.PENDING, Invoice.Status.PARTIALLY_PAID, Invoice.Status.OVERDUE]
+_RECEIPT_FIELDS = ("mpesa_receipt_number",)
+
+
+def _without_receipt(fields: dict) -> dict:
+    """The fields for a later part of a payment. The receipt number is unique,
+    so only the first part carries it; the rest point back to that part."""
+    return {k: v for k, v in (fields or {}).items() if k not in _RECEIPT_FIELDS}
+
+
+@transaction.atomic
+def allocate_payment(
+    *,
+    tenancy,
+    amount,
+    method: str,
+    idempotency_key: str,
+    paid_at,
+    payment_fields: dict | None = None,
+    recorded_by=None,
+    first_invoice_id: int | None = None,
+):
+    """Place money that arrived for a tenancy.
+
+    Clears open bills oldest first — or the one named, then the rest — and
+    keeps anything left over as credit for the next bill.
+
+    WHY: the whole payment used to land on the oldest open bill. A tenant two
+    months behind who cleared both at once saw the old bill marked overpaid and
+    this month's still chased; anyone who paid ahead was chased the same way.
+
+    Returns (payments, credit_or_None, created). A repeated idempotency key
+    returns what was recorded the first time, with created False.
+    """
+    from .models import TenancyCredit
+
+    amount = Decimal(str(amount))
+    if amount <= 0:
+        raise ValidationError("Payment amount must be greater than zero.")
+
+    first = Payment.objects.filter(idempotency_key=idempotency_key).first()
+    prior_credit = TenancyCredit.objects.filter(idempotency_key=idempotency_key).first()
+    if first or prior_credit:
+        parts = [first, *first.carried_parts.all()] if first else []
+        return parts, prior_credit, False
+
+    bills = list(
+        Invoice.objects.select_for_update()
+        .filter(tenancy=tenancy, status__in=_OPEN_STATUSES)
+        .order_by("due_date", "id")
+    )
+    if first_invoice_id is not None:
+        bills.sort(key=lambda b: b.pk != first_invoice_id)
+
+    remaining = amount
+    parts = []
+    for bill in bills:
+        if remaining <= 0:
+            break
+        take = min(remaining, bill.balance)
+        if take <= 0:
+            continue
+        if not parts:
+            payment, _ = apply_confirmed_payment(
+                invoice_id=bill.pk, method=method, amount=take,
+                idempotency_key=idempotency_key, paid_at=paid_at,
+                payment_fields=payment_fields, recorded_by=recorded_by,
+            )
+        else:
+            payment, _ = apply_confirmed_payment(
+                invoice_id=bill.pk, method=method, amount=take,
+                idempotency_key=f"{idempotency_key}:{bill.pk}", paid_at=paid_at,
+                payment_fields={**_without_receipt(payment_fields), "carried_from": parts[0]},
+                recorded_by=recorded_by,
+            )
+        parts.append(payment)
+        remaining -= take
+
+    credit = None
+    if remaining > 0:
+        credit = TenancyCredit.objects.create(
+            tenancy=tenancy,
+            idempotency_key=idempotency_key,
+            amount=remaining,
+            remaining=remaining,
+            method=method,
+            paid_at=paid_at,
+            source_fields=payment_fields or {},
+            first_payment=parts[0] if parts else None,
+        )
+    return parts, credit, True
+
+
+@transaction.atomic
+def apply_credit(tenancy) -> list:
+    """Use a tenancy's credit against its open bills, oldest first.
+
+    Called whenever a bill is raised. Each use becomes a Payment dated when the
+    money arrived, so it counts in the month it was received.
+    """
+    from .models import TenancyCredit
+
+    credits = list(
+        TenancyCredit.objects.select_for_update()
+        .filter(tenancy=tenancy, remaining__gt=0)
+        .order_by("created_at", "id")
+    )
+    if not credits:
+        return []
+    bills = list(
+        Invoice.objects.select_for_update()
+        .filter(tenancy=tenancy, status__in=_OPEN_STATUSES)
+        .order_by("due_date", "id")
+    )
+
+    applied = []
+    for credit in credits:
+        for bill in bills:
+            if credit.remaining <= 0:
+                break
+            bill.refresh_from_db()
+            take = min(credit.remaining, bill.balance)
+            if take <= 0:
+                continue
+            if credit.first_payment is None:
+                # The whole payment arrived before any bill: this part carries
+                # the receipt, and later parts point back to it.
+                payment, _ = apply_confirmed_payment(
+                    invoice_id=bill.pk, method=credit.method, amount=take,
+                    idempotency_key=credit.idempotency_key, paid_at=credit.paid_at,
+                    payment_fields=credit.source_fields,
+                )
+                credit.first_payment = payment
+            else:
+                payment, _ = apply_confirmed_payment(
+                    invoice_id=bill.pk, method=credit.method, amount=take,
+                    idempotency_key=f"credit:{credit.pk}:{bill.pk}", paid_at=credit.paid_at,
+                    payment_fields={
+                        **_without_receipt(credit.source_fields),
+                        "carried_from": credit.first_payment,
+                    },
+                )
+            credit.remaining -= take
+            applied.append(payment)
+        credit.save(update_fields=["remaining", "first_payment"])
+    return applied
+
+
+def credit_remaining(tenancy) -> Decimal:
+    from django.db.models import Sum
+
+    from .models import TenancyCredit
+
+    return TenancyCredit.objects.filter(tenancy=tenancy).aggregate(s=Sum("remaining"))["s"] or Decimal("0")

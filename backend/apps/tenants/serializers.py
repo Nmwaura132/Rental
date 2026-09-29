@@ -107,7 +107,7 @@ class DepositSettlementSerializer(serializers.ModelSerializer):
         model = DepositSettlement
         fields = [
             "deposit_held", "applied_to_arrears", "deductions", "deductions_total",
-            "refund_due", "tenant_owes", "forfeited", "notes", "settled_at",
+            "refund_due", "tenant_owes", "credit_returned", "forfeited", "notes", "settled_at",
             "refunded_at", "refund_method", "refund_reference",
         ]
         read_only_fields = fields

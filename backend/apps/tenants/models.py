@@ -154,6 +154,9 @@ class DepositSettlement(models.Model):
     refund_due = models.DecimalField(max_digits=10, decimal_places=2)
     # What the tenant still owes once the deposit is used up.
     tenant_owes = models.DecimalField(max_digits=10, decimal_places=2)
+    # Rent the tenant paid ahead and never used. It is their money, not
+    # security, so it is returned even when the deposit is forfeited.
+    credit_returned = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     # The agreement forfeits the deposit if the tenant does not vacate before
     # the next payment month. Kasa cannot see who is physically in a unit, so
     # the landlord says so, with a reason.

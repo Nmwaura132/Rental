@@ -23,6 +23,40 @@ def mark_overdue_invoices():
     ).update(status=Invoice.Status.OVERDUE)
 
 
+def _send_allocation_receipt(tenancy, amount, receipt, credit):
+    """One receipt for the whole payment, however many bills it cleared.
+
+    The per-bill receipt quoted the balance of one bill, which was wrong as
+    soon as a payment covered two, or left credit.
+    """
+    from apps.notifications.tasks import send_sms
+
+    from .models import Invoice
+
+    owed = sum(
+        (i.balance for i in Invoice.objects.filter(
+            tenancy=tenancy,
+            status__in=[Invoice.Status.PENDING, Invoice.Status.PARTIALLY_PAID, Invoice.Status.OVERDUE],
+        )),
+        Decimal("0"),
+    )
+    unit = tenancy.unit
+    if credit is not None:
+        after = (
+            f"KES {credit.amount:,.0f} is kept as credit and will go towards your next bill."
+        )
+    elif owed > 0:
+        after = f"You still owe KES {owed:,.0f}."
+    else:
+        after = "You are fully paid up."
+    send_sms.delay(
+        tenancy.tenant_id,
+        f"Dear {tenancy.tenant.first_name}, your payment of KES {amount:,.0f} for "
+        f"{unit.property.name} Unit {unit.unit_number} has been received. "
+        f"Receipt: {receipt}. {after}",
+    )
+
+
 def _hold_unplaced(receipt_number, amount, account_ref, phone, *, owner):
     """Keep an M-Pesa payment Kasa could not place, and tell the landlord.
 
@@ -118,51 +152,39 @@ def process_mpesa_payment(self, receipt_number, amount, account_ref, phone, idem
         # invoice (Safaricom retries) would otherwise race the read-modify-write on
         # amount_paid and corrupt the balance. The idempotency_key prevents a
         # double Payment row; the lock prevents the lost-update on amount_paid.
-        with db_transaction.atomic():
-            # Find oldest unpaid invoice for this tenancy — locked for update.
-            invoice = (
-                Invoice.objects
-                .select_for_update()
-                .filter(tenancy=tenancy, status__in=[Invoice.Status.PENDING, Invoice.Status.OVERDUE, Invoice.Status.PARTIALLY_PAID])
-                .order_by("due_date")
-                .first()
-            )
+        from .services import allocate_payment
 
-            if not invoice:
-                # Typically rent paid ahead of the month's invoice. Held rather
-                # than applied anywhere, so it can be placed once the bill exists.
-                _hold_unplaced(
-                    receipt_number, amount_dec, account_ref, normalized_phone,
-                    owner=tenancy.unit.property.owner,
-                )
-                return
+        # Clears the tenant's open bills oldest first and keeps any excess as
+        # credit for the next bill — including all of it when no bill exists yet.
+        parts, credit, created = allocate_payment(
+            tenancy=tenancy,
+            amount=amount_dec,
+            method=Payment.Method.MPESA,
+            idempotency_key=idempotency_key,
+            paid_at=timezone.now(),
+            payment_fields={
+                "mpesa_receipt_number": receipt_number,
+                "mpesa_phone": normalized_phone,
+                "mpesa_account_ref": account_ref,
+            },
+        )
+        if not created:
+            logger.info("Idempotent skip for receipt=%s", receipt_number)
+            return
 
-            payment, created = apply_confirmed_payment(
-                invoice_id=invoice.pk,
-                method=Payment.Method.MPESA,
-                amount=amount_dec,
-                idempotency_key=idempotency_key,
-                paid_at=timezone.now(),
-                payment_fields={
-                    "mpesa_receipt_number": receipt_number,
-                    "mpesa_phone": normalized_phone,
-                    "mpesa_account_ref": account_ref,
-                },
-            )
-            if not created:
-                logger.info("Idempotent skip for receipt=%s", receipt_number)
-                return
-
-        # Send SMS receipt (after commit — task can be retried if the row isn't visible yet)
-        from apps.notifications.tasks import send_payment_receipt_sms
-        send_payment_receipt_sms.delay(payment.id)
+        db_transaction.on_commit(
+            lambda: _send_allocation_receipt(tenancy, amount_dec, receipt_number, credit)
+        )
 
         # Invalidate dashboard cache for tenant and landlord
         from django.core.cache import cache
         cache.delete(f"dashboard:{tenancy.tenant.id}")
         cache.delete(f"dashboard:{tenancy.unit.property.owner.id}")
 
-        logger.info("Payment recorded: receipt=%s amount=%s invoice=%s", receipt_number, amount_dec, invoice.invoice_number)
+        logger.info(
+            "Payment recorded: receipt=%s amount=%s bills=%d credit=%s",
+            receipt_number, amount_dec, len(parts), credit.amount if credit else 0,
+        )
 
     except Exception as exc:
         logger.error("Error processing M-Pesa payment %s: %s", receipt_number, exc)
@@ -483,6 +505,7 @@ def generate_monthly_invoices():
     """
     from apps.tenants.models import Tenancy
     from .billing import charge_lines
+    from .services import apply_credit
     from .models import Invoice, InvoiceLineItem
     from django.utils import timezone
     import uuid
@@ -528,6 +551,8 @@ def generate_monthly_invoices():
                 InvoiceLineItem.objects.bulk_create(
                     InvoiceLineItem(invoice=invoice, **line) for line in lines
                 )
+                apply_credit(tenancy)
+                invoice.refresh_from_db()
         if was_created:
             created += 1
             _send_bill(tenancy, invoice)
@@ -548,10 +573,18 @@ def _send_bill(tenancy, invoice):
         " + ".join(f"{line.charge_type.capitalize()} {line.amount:,.0f}" for line in lines) + " = "
         if len(lines) > 1 else ""
     )
+    if invoice.amount_paid <= 0:
+        tail = f"due {invoice.due_date.strftime('%d %b')}. {how_to_pay(unit)}"
+    elif invoice.balance > 0:
+        tail = (
+            f"less your credit of KES {invoice.amount_paid:,.0f} leaves KES "
+            f"{invoice.balance:,.0f} due {invoice.due_date.strftime('%d %b')}. {how_to_pay(unit)}"
+        )
+    else:
+        tail = "fully covered by the credit you paid ahead. Nothing to pay."
     send_sms.delay(
         tenancy.tenant_id,
         f"Dear {tenancy.tenant.first_name}, your {invoice.period_start.strftime('%B')} "
         f"bill for {unit.property.name} Unit {unit.unit_number}: "
-        f"{parts}KES {invoice.amount_due:,.0f}, due {invoice.due_date.strftime('%d %b')}. "
-        f"{how_to_pay(unit)}",
+        f"{parts}KES {invoice.amount_due:,.0f}, {tail}",
     )

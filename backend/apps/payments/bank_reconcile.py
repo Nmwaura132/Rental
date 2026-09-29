@@ -11,7 +11,7 @@ def reconcile_bank_notification(notification, *, invoice_id=None) -> bool:
     from apps.tenants.models import Tenancy
 
     from .models import BankPaymentNotification, Invoice, Payment
-    from .services import apply_confirmed_payment
+    from .services import allocate_payment
 
     if notification.status == BankPaymentNotification.Status.MATCHED:
         return True
@@ -80,16 +80,18 @@ def reconcile_bank_notification(notification, *, invoice_id=None) -> bool:
                 "bank_account": notification.payer_account or None,
                 "bank_reference": notification.transaction_ref,
             }
-        payment, _ = apply_confirmed_payment(
-            invoice_id=invoice.pk,
-            method=method,
+        # The chosen bill first, then the tenant's other open bills, with any
+        # excess kept as credit — rather than overpaying the one bill.
+        parts, _, _ = allocate_payment(
+            tenancy=invoice.tenancy,
             amount=notification.amount,
-            idempotency_key=(
-                f"bank:{notification.bank}:{notification.transaction_ref}"
-            ),
+            method=method,
+            idempotency_key=f"bank:{notification.bank}:{notification.transaction_ref}",
             paid_at=notification.credited_at,
             payment_fields=fields,
+            first_invoice_id=invoice.pk,
         )
+        payment = parts[0]
         notification.status = BankPaymentNotification.Status.MATCHED
         notification.payment = payment
         notification.save(update_fields=["status", "payment"])
