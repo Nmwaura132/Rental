@@ -163,6 +163,38 @@ class TestReachingTheLandlord:
         assert _home(tenant)["landlord_name"] == landlord.get_full_name()
 
 
+class TestNoticeToVacate:
+    def _give(self, tenancy, by, reason=""):
+        tenancy.notice_given_at = timezone.now()
+        tenancy.notice_effective_date = date.today() + timedelta(days=30)
+        tenancy.notice_given_by = by
+        tenancy.notice_reason = reason
+        tenancy.save()
+
+    def test_there_is_no_notice_by_default(self, tenant, tenancy):
+        assert _home(tenant)["notice_by"] is None
+
+    def test_notice_the_tenant_gave_is_theirs(self, tenant, tenancy):
+        self._give(tenancy, tenant)
+        assert _home(tenant)["notice_by"] == "tenant"
+
+    def test_notice_the_landlord_gave_says_so(self, tenant, tenancy, landlord):
+        self._give(tenancy, landlord, "Selling the building")
+        assert _home(tenant)["notice_by"] == "landlord"
+
+    def test_the_landlords_reason_is_shown_to_the_tenant(self, tenant, tenancy, landlord):
+        self._give(tenancy, landlord, "Selling the building")
+        assert _home(tenant)["notice_reason"] == "Selling the building"
+
+    def test_the_tenants_own_reason_is_not_played_back(self, tenant, tenancy):
+        self._give(tenancy, tenant, "Moving for work")
+        assert _home(tenant)["notice_reason"] == ""
+
+    def test_notice_with_no_giver_on_record_is_the_tenants(self, tenant, tenancy):
+        self._give(tenancy, None)
+        assert _home(tenant)["notice_by"] == "tenant"
+
+
 class TestTheirOwnPhone:
     def test_it_is_hinted_not_spelled_out(self, tenant, tenancy):
         assert _home(tenant)["phone_hint"] == "0700 ••• 111"

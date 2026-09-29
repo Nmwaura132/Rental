@@ -274,6 +274,13 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
         return Response(PaymentSerializer(payment).data)
 
 
+def _notice_by(tenancy) -> str | None:
+    if tenancy is None or not tenancy.has_notice:
+        return None
+    given_by = tenancy.notice_given_by_id
+    return "landlord" if given_by and given_by != tenancy.tenant_id else "tenant"
+
+
 def _phone_hint(e164: str | None) -> str | None:
     """"+254712345678" -> "0712 ••• 678": enough to recognise as theirs
     on the "we sent a request to..." screen, not enough to read out."""
@@ -380,6 +387,11 @@ class DashboardStatsView(APIView):
                 "tenancy_id": tenancy.id if tenancy else None,
                 "notice_given_at": tenancy.notice_given_at.isoformat() if (tenancy and tenancy.notice_given_at) else None,
                 "notice_effective_date": tenancy.notice_effective_date.isoformat() if (tenancy and tenancy.notice_effective_date) else None,
+                # Who ended it, so the tenant is told "your landlord has given
+                # notice" rather than shown their own words back. A notice with
+                # no giver on record predates landlords being able to give one.
+                "notice_by": _notice_by(tenancy),
+                "notice_reason": tenancy.notice_reason if _notice_by(tenancy) == "landlord" else "",
                 "mpesa_paybill": django_settings.RENT_PAYBILL,
             })
 
