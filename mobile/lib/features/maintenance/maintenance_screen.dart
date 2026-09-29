@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../../core/theme/kasa_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:dio/dio.dart' show FormData, MultipartFile;
@@ -15,6 +15,7 @@ import '../../core/providers/user_role_provider.dart';
 import '../../core/utils/api_error.dart';
 import '../../core/theme/kasa_tokens.dart';
 import '../../core/widgets/kasa_primitives.dart';
+import '../../core/utils/text.dart';
 
 // ─── Providers ────────────────────────────────────────────────────────────────
 
@@ -111,10 +112,10 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen> {
               child: Row(
                 children: [
                   Text(
-                    'MAINTENANCE',
-                    style: GoogleFonts.spaceGrotesk(
+                    'Maintenance',
+                    style: KasaFont.sans(
                       fontSize: 32,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w600,
                       letterSpacing: -0.96,
                       color: cs.onSurface,
                       height: 1,
@@ -177,7 +178,7 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen> {
                   child: GestureDetector(
                     onTap: () => setState(() => _selectedStatus = e.key),
                     child: KasaChip(
-                      label: e.value.toUpperCase(),
+                      label: e.value,
                       variant: _selectedStatus == e.key
                           ? KasaChipVariant.secondary
                           : KasaChipVariant.neutral,
@@ -210,7 +211,7 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen> {
                   child: GestureDetector(
                     onTap: () => setState(() => _selectedPriority = e.key),
                     child: KasaChip(
-                      label: e.value.toUpperCase(),
+                      label: e.value,
                       variant: _selectedPriority == e.key
                           ? KasaChipVariant.tertiary
                           : KasaChipVariant.neutral,
@@ -223,7 +224,7 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen> {
           Expanded(
             child: KasaContentSwitcher(
               child: listAsync.when(
-                loading: () => const Center(child: CircularProgressIndicator()),
+                loading: () => const KasaSkeletonList(),
                 error: (e, _) => _ErrorView(
                   message: 'Could not load requests',
                   onRetry: () => ref.invalidate(maintenanceListProvider),
@@ -370,7 +371,6 @@ class _RequestTile extends ConsumerWidget {
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(KasaRadius.md),
-            boxShadow: [BoxShadow(color: cs.kasaShadow, offset: const Offset(4, 4), blurRadius: 0)],
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(KasaRadius.md),
@@ -379,9 +379,9 @@ class _RequestTile extends ConsumerWidget {
                 color: cs.kasaCard,
                 border: Border(
                   left:   BorderSide(color: accentColor,    width: 8),
-                  right:  BorderSide(color: cs.kasaStroke,  width: 2),
-                  top:    BorderSide(color: cs.kasaStroke,  width: 2),
-                  bottom: BorderSide(color: cs.kasaStroke,  width: 2),
+                  right:  BorderSide(color: cs.kasaStroke,  width: KasaBorders.card),
+                  top:    BorderSide(color: cs.kasaStroke,  width: KasaBorders.card),
+                  bottom: BorderSide(color: cs.kasaStroke,  width: KasaBorders.card),
                 ),
               ),
               child: IntrinsicHeight(
@@ -393,7 +393,7 @@ class _RequestTile extends ConsumerWidget {
                       width: 52,
                       decoration: BoxDecoration(
                         color: cs.surfaceContainerHighest,
-                        border: Border(right: BorderSide(color: cs.kasaStroke, width: 2)),
+                        border: Border(right: BorderSide(color: cs.kasaStroke, width: KasaBorders.card)),
                       ),
                       alignment: Alignment.center,
                       child: Icon(priorityIcon, size: 22, color: cs.onSurface),
@@ -411,9 +411,9 @@ class _RequestTile extends ConsumerWidget {
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Text(
-                                    title.toUpperCase(),
-                                    style: GoogleFonts.spaceGrotesk(
-                                      fontSize: 14, fontWeight: FontWeight.w700,
+                                    title,
+                                    style: KasaFont.sans(
+                                      fontSize: 14, fontWeight: FontWeight.w600,
                                       letterSpacing: -0.14, color: cs.onSurface,
                                     ),
                                     maxLines: 1,
@@ -426,13 +426,13 @@ class _RequestTile extends ConsumerWidget {
                                     const SizedBox(height: 3),
                                     Text(
                                       [
-                                        if (unitNumber.isNotEmpty) 'UNIT $unitNumber',
-                                        if (tenantName.isNotEmpty) tenantName.toUpperCase(),
+                                        if (unitNumber.isNotEmpty) 'Unit $unitNumber',
+                                        if (tenantName.isNotEmpty) tenantName,
                                       ].join(' · '),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: GoogleFonts.spaceGrotesk(
-                                        fontSize: 10, fontWeight: FontWeight.w700,
+                                      style: KasaFont.sans(
+                                        fontSize: 10, fontWeight: FontWeight.w600,
                                         letterSpacing: 0.04, color: cs.kasaTextSub,
                                       ),
                                     ),
@@ -443,7 +443,7 @@ class _RequestTile extends ConsumerWidget {
                                       description,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: GoogleFonts.inter(
+                                      style: KasaFont.sans(
                                         fontSize: 11, fontWeight: FontWeight.w500,
                                         color: cs.kasaTextSub,
                                       ),
@@ -452,9 +452,9 @@ class _RequestTile extends ConsumerWidget {
                                   if (dateStr.isNotEmpty) ...[
                                     const SizedBox(height: 6),
                                     Text(
-                                      'SUBMITTED $dateStr',
-                                      style: GoogleFonts.spaceGrotesk(
-                                        fontSize: 10, fontWeight: FontWeight.w700,
+                                      'Submitted $dateStr',
+                                      style: KasaFont.sans(
+                                        fontSize: 10, fontWeight: FontWeight.w600,
                                         letterSpacing: 0.04, color: cs.kasaTextSub,
                                       ),
                                     ),
@@ -512,11 +512,11 @@ class _StatusBadge extends StatelessWidget {
       _             => KasaChipVariant.neutral,
     };
     final label = switch (status) {
-      'open'        => 'OPEN',
-      'in_progress' => 'IN PROGRESS',
-      'resolved'    => 'RESOLVED',
-      'closed'      => 'CLOSED',
-      _             => status.replaceAll('_', ' ').toUpperCase(),
+      'open'        => 'Open',
+      'in_progress' => 'In progress',
+      'resolved'    => 'Resolved',
+      'closed'      => 'Closed',
+      _             => sentenceCase(status),
     };
     return KasaChip(label: label, variant: variant, small: true);
   }
@@ -545,9 +545,9 @@ class _PriorityBadge extends StatelessWidget {
         border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
       ),
       child: Text(
-        (_priorityLabels[priority] ?? priority).toUpperCase(),
-        style: GoogleFonts.spaceGrotesk(
-          fontSize: 10, fontWeight: FontWeight.w700,
+        sentenceCase(_priorityLabels[priority] ?? priority),
+        style: KasaFont.sans(
+          fontSize: 10, fontWeight: FontWeight.w600,
           letterSpacing: 0.04, color: color,
         ),
       ),
@@ -814,8 +814,8 @@ class _DetailSheetState extends ConsumerState<_DetailSheet> {
                       child: _editMode
                           ? TextField(
                               controller: _editTitleCtrl,
-                              style: GoogleFonts.spaceGrotesk(
-                                fontSize: 20, fontWeight: FontWeight.w700,
+                              style: KasaFont.sans(
+                                fontSize: 20, fontWeight: FontWeight.w600,
                                 letterSpacing: -0.4, color: cs.onSurface,
                               ),
                               decoration: const InputDecoration(
@@ -824,9 +824,9 @@ class _DetailSheetState extends ConsumerState<_DetailSheet> {
                               ),
                             )
                           : Text(
-                              (_req['title'] as String? ?? '—').toUpperCase(),
-                              style: GoogleFonts.spaceGrotesk(
-                                fontSize: 20, fontWeight: FontWeight.w700,
+                              _req['title'] as String? ?? '—',
+                              style: KasaFont.sans(
+                                fontSize: 20, fontWeight: FontWeight.w600,
                                 letterSpacing: -0.4, color: cs.onSurface,
                               ),
                             ),
@@ -876,7 +876,7 @@ class _DetailSheetState extends ConsumerState<_DetailSheet> {
                       if (unitNumber.isNotEmpty) 'Unit $unitNumber',
                       if (tenantName.isNotEmpty) tenantName,
                     ].join(' · '),
-                    style: GoogleFonts.spaceGrotesk(
+                    style: KasaFont.sans(
                       fontSize: 12, fontWeight: FontWeight.w600,
                       letterSpacing: 0.02, color: cs.kasaTextSub,
                     ),
@@ -907,7 +907,7 @@ class _DetailSheetState extends ConsumerState<_DetailSheet> {
 
                 // Landlord-only status switcher
                 if (widget.isLandlord && !_editMode) ...[
-                  const _SectionLabel('CHANGE STATUS'),
+                  const _SectionLabel('Change status'),
                   const SizedBox(height: 6),
                   Wrap(
                     spacing: 8,
@@ -917,7 +917,7 @@ class _DetailSheetState extends ConsumerState<_DetailSheet> {
                       return GestureDetector(
                         onTap: _saving || selected ? null : () => _changeStatus(e.key),
                         child: KasaChip(
-                          label: e.value.toUpperCase(),
+                          label: e.value,
                           variant: selected
                               ? KasaChipVariant.secondary
                               : KasaChipVariant.neutral,
@@ -934,12 +934,12 @@ class _DetailSheetState extends ConsumerState<_DetailSheet> {
 
                 // Description
                 if (_editMode) ...[
-                  const _SectionLabel('DESCRIPTION'),
+                  const _SectionLabel('Description'),
                   const SizedBox(height: 4),
                   TextField(
                     controller: _editDescCtrl,
                     maxLines: 4,
-                    style: GoogleFonts.inter(fontSize: 14, color: cs.onSurface),
+                    style: KasaFont.sans(fontSize: 14, color: cs.onSurface),
                     decoration: const InputDecoration(
                       isDense: true,
                       hintText: 'Describe the issue',
@@ -964,16 +964,16 @@ class _DetailSheetState extends ConsumerState<_DetailSheet> {
                   ),
                   const SizedBox(height: 14),
                 ] else if ((_req['description'] as String? ?? '').isNotEmpty) ...[
-                  const _SectionLabel('DESCRIPTION'),
+                  const _SectionLabel('Description'),
                   const SizedBox(height: 4),
                   Text(_req['description'] as String,
-                      style: GoogleFonts.inter(fontSize: 14, color: cs.onSurface)),
+                      style: KasaFont.sans(fontSize: 14, color: cs.onSurface)),
                   const SizedBox(height: 14),
                 ],
 
                 // Photo
                 if (photoUrl != null) ...[
-                  const _SectionLabel('PHOTO'),
+                  const _SectionLabel('Photo'),
                   const SizedBox(height: 6),
                   ClipRRect(
                     borderRadius: BorderRadius.circular(KasaRadius.md),
@@ -981,7 +981,6 @@ class _DetailSheetState extends ConsumerState<_DetailSheet> {
                       decoration: BoxDecoration(
                         border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
                         borderRadius: BorderRadius.circular(KasaRadius.md),
-                        boxShadow: [BoxShadow(color: cs.kasaShadow, offset: const Offset(4, 4), blurRadius: 0)],
                       ),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(KasaRadius.md - KasaBorders.card),
@@ -1028,7 +1027,7 @@ class _DetailSheetState extends ConsumerState<_DetailSheet> {
                 const SizedBox(height: 20),
 
                 // Notes / replies
-                _SectionLabel('REPLIES (${_notes.length})'),
+                _SectionLabel('Replies (${_notes.length})'),
                 const SizedBox(height: 8),
                 if (_notesLoading)
                   const Center(child: Padding(
@@ -1039,7 +1038,7 @@ class _DetailSheetState extends ConsumerState<_DetailSheet> {
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     child: Text('No replies yet. Be the first to add one.',
-                        style: GoogleFonts.inter(fontSize: 13, color: cs.kasaTextSub)),
+                        style: KasaFont.sans(fontSize: 13, color: cs.kasaTextSub)),
                   )
                 else
                   ..._notes.map((n) => _NoteCard(note: n)),
@@ -1069,10 +1068,10 @@ class _DetailSheetState extends ConsumerState<_DetailSheet> {
                       controller: _replyCtrl,
                       maxLines: null,
                       textCapitalization: TextCapitalization.sentences,
-                      style: GoogleFonts.inter(fontSize: 14, color: cs.onSurface),
+                      style: KasaFont.sans(fontSize: 14, color: cs.onSurface),
                       decoration: InputDecoration(
                         hintText: 'Add a reply…',
-                        hintStyle: GoogleFonts.inter(fontSize: 14, color: cs.kasaTextSub),
+                        hintStyle: KasaFont.sans(fontSize: 14, color: cs.kasaTextSub),
                         border: InputBorder.none,
                         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                       ),
@@ -1088,7 +1087,6 @@ class _DetailSheetState extends ConsumerState<_DetailSheet> {
                       color: cs.secondary,
                       borderRadius: BorderRadius.circular(KasaRadius.sm),
                       border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
-                      boxShadow: [BoxShadow(color: cs.kasaShadow, offset: const Offset(3, 3), blurRadius: 0)],
                     ),
                     child: _sending
                         ? Padding(
@@ -1118,8 +1116,8 @@ class _SectionLabel extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     return Text(
       text,
-      style: GoogleFonts.spaceGrotesk(
-        fontSize: 11, fontWeight: FontWeight.w700,
+      style: KasaFont.sans(
+        fontSize: 11, fontWeight: FontWeight.w600,
         letterSpacing: 0.04, color: cs.kasaTextSub,
       ),
     );
@@ -1171,8 +1169,8 @@ class _NoteCard extends StatelessWidget {
                   alignment: Alignment.center,
                   child: Text(
                     author.isNotEmpty ? author[0].toUpperCase() : '?',
-                    style: GoogleFonts.spaceGrotesk(
-                      fontSize: 12, fontWeight: FontWeight.w700,
+                    style: KasaFont.sans(
+                      fontSize: 12, fontWeight: FontWeight.w600,
                       color: isTenant ? cs.onSecondary : cs.onSurface,
                     ),
                   ),
@@ -1180,20 +1178,20 @@ class _NoteCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    author.toUpperCase(),
-                    style: GoogleFonts.spaceGrotesk(
-                      fontSize: 11, fontWeight: FontWeight.w700,
+                    author,
+                    style: KasaFont.sans(
+                      fontSize: 11, fontWeight: FontWeight.w600,
                       color: cs.onSurface,
                     ),
                   ),
                 ),
                 if (timeStr.isNotEmpty)
                   Text(timeStr,
-                      style: GoogleFonts.inter(fontSize: 10, color: cs.kasaTextSub)),
+                      style: KasaFont.sans(fontSize: 10, color: cs.kasaTextSub)),
               ],
             ),
             const SizedBox(height: 8),
-            Text(body, style: GoogleFonts.inter(fontSize: 13, color: cs.onSurface)),
+            Text(body, style: KasaFont.sans(fontSize: 13, color: cs.onSurface)),
           ],
         ),
       ),
@@ -1213,16 +1211,16 @@ class _InfoRow extends StatelessWidget {
       child: Row(
         children: [
           Text(
-            label.toUpperCase(),
-            style: GoogleFonts.spaceGrotesk(
-              fontSize: 11, fontWeight: FontWeight.w700,
+            label,
+            style: KasaFont.sans(
+              fontSize: 11, fontWeight: FontWeight.w600,
               letterSpacing: 0.04, color: cs.kasaTextSub,
             ),
           ),
           const Spacer(),
           Text(
             value,
-            style: GoogleFonts.inter(
+            style: KasaFont.sans(
               fontSize: 13, fontWeight: FontWeight.w600, color: cs.onSurface,
             ),
           ),

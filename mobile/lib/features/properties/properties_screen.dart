@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../../core/theme/kasa_fonts.dart';
 import '../../core/api/api_client.dart';
 import '../../core/api/pagination.dart';
 import '../../core/constants.dart';
@@ -59,9 +59,9 @@ class PropertiesScreen extends ConsumerWidget {
               child: Row(
                 children: [
                   Text(
-                    'PROPERTIES',
-                    style: GoogleFonts.spaceGrotesk(
-                      fontSize: 32, fontWeight: FontWeight.w700,
+                    'Properties',
+                    style: KasaFont.sans(
+                      fontSize: 32, fontWeight: FontWeight.w600,
                       letterSpacing: -0.96, color: cs.onSurface, height: 1,
                     ),
                   ),
@@ -93,10 +93,10 @@ class PropertiesScreen extends ConsumerWidget {
                         Icon(Icons.cloud_off_outlined, size: 56, color: cs.kasaTextSub),
                         const SizedBox(height: 12),
                         Text(apiError(e),
-                            style: GoogleFonts.inter(color: cs.kasaTextSub)),
+                            style: KasaFont.sans(color: cs.kasaTextSub)),
                         const SizedBox(height: 16),
                         KasaButton(
-                          label: 'RETRY',
+                          label: 'Retry',
                           variant: KasaButtonVariant.secondary,
                           onTap: () => ref.invalidate(propertiesProvider),
                         ),
@@ -115,15 +115,15 @@ class PropertiesScreen extends ConsumerWidget {
                               const SizedBox(height: 12),
                               Text(
                                 'No properties yet.',
-                                style: GoogleFonts.spaceGrotesk(
-                                  fontSize: 16, fontWeight: FontWeight.w700,
+                                style: KasaFont.sans(
+                                  fontSize: 16, fontWeight: FontWeight.w600,
                                   color: cs.onSurface,
                                 ),
                               ),
                               const SizedBox(height: 4),
                               Text(
                                 'Tap "ADD" to get started.',
-                                style: GoogleFonts.inter(
+                                style: KasaFont.sans(
                                   fontSize: 13, color: cs.kasaTextSub,
                                 ),
                               ),
@@ -163,15 +163,15 @@ class PropertiesScreen extends ConsumerWidget {
                                         children: [
                                           Text(
                                             p['name'] as String,
-                                            style: GoogleFonts.spaceGrotesk(
-                                              fontSize: 15, fontWeight: FontWeight.w700,
+                                            style: KasaFont.sans(
+                                              fontSize: 15, fontWeight: FontWeight.w600,
                                               letterSpacing: -0.15, color: cs.onSurface,
                                             ),
                                           ),
                                           const SizedBox(height: 2),
                                           Text(
                                             '$unitCount unit${unitCount == 1 ? '' : 's'} · $occupiedCount occupied · $vacantCount vacant',
-                                            style: GoogleFonts.inter(
+                                            style: KasaFont.sans(
                                               fontSize: 12, color: cs.kasaTextSub,
                                             ),
                                           ),

@@ -2,12 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../../core/theme/kasa_fonts.dart';
 import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
 import '../../core/api/pagination.dart';
 import '../../core/widgets/kasa_primitives.dart';
 import '../../core/theme/kasa_tokens.dart';
+import '../../core/utils/text.dart';
 
 final notificationsProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
   final dio = ref.watch(dioProvider);
@@ -86,10 +87,10 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
                   Expanded(
                     child: Center(
                       child: Text(
-                        'NOTIFICATIONS',
-                        style: GoogleFonts.spaceGrotesk(
+                        'Notifications',
+                        style: KasaFont.sans(
                           fontSize: 15,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w600,
                           letterSpacing: 0.04,
                           color: cs.onSurface,
                         ),
@@ -105,10 +106,10 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
                       _markAllRead();
                     },
                     child: Text(
-                      'MARK READ',
-                      style: GoogleFonts.spaceGrotesk(
+                      'Mark read',
+                      style: KasaFont.sans(
                         fontSize: 11,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w600,
                         letterSpacing: 0.04,
                         color: cs.secondary,
                       ),
@@ -142,7 +143,7 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
                       setState(() => _tab = 'unread');
                     },
                     child: KasaChip(
-                      label: 'UNREAD',
+                      label: 'Unread',
                       variant: _tab == 'unread'
                           ? KasaChipVariant.primary
                           : KasaChipVariant.neutral,
@@ -155,7 +156,7 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
             // ── Body ─────────────────────────────────────────────────────────
             Expanded(
               child: notifs.when(
-                loading: () => const Center(child: CircularProgressIndicator()),
+                loading: () => const KasaSkeletonList(),
                 error: (e, _) => _ErrorState(
                   onRetry: () {
                     HapticFeedback.mediumImpact();
@@ -220,10 +221,10 @@ class _NotificationTile extends StatelessWidget {
             ? Colors.red
             : Colors.orange;
     final statusLabel = sent
-        ? 'SENT'
+        ? 'Sent'
         : failed
-            ? 'FAILED'
-            : 'QUEUED';
+            ? 'Failed'
+            : 'Queued';
     final subject = (n['subject'] as String?)?.trim();
     final message = (n['message'] as String? ?? '').trim();
     final rawDate = n['sent_at'] ?? n['created_at'];
@@ -250,13 +251,6 @@ class _NotificationTile extends StatelessWidget {
             top: borderOther,
             bottom: borderOther,
           ),
-          boxShadow: [
-            BoxShadow(
-              color: cs.kasaShadow,
-              offset: const Offset(KasaBorders.shadow, KasaBorders.shadow),
-              blurRadius: 0,
-            ),
-          ],
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -308,10 +302,10 @@ class _NotificationTile extends StatelessWidget {
                         child: Text(
                           subject != null && subject.isNotEmpty
                               ? subject
-                              : channel.toUpperCase(),
-                          style: GoogleFonts.spaceGrotesk(
+                              : sentenceCase(channel),
+                          style: KasaFont.sans(
                             fontSize: 13,
-                            fontWeight: isUnread ? FontWeight.w700 : FontWeight.w600,
+                            fontWeight: isUnread ? FontWeight.w600 : FontWeight.w600,
                             color: cs.onSurface,
                             height: 1.2,
                           ),
@@ -331,9 +325,9 @@ class _NotificationTile extends StatelessWidget {
                         ),
                         child: Text(
                           statusLabel,
-                          style: GoogleFonts.spaceGrotesk(
+                          style: KasaFont.sans(
                             fontSize: 9,
-                            fontWeight: FontWeight.w700,
+                            fontWeight: FontWeight.w600,
                             color: statusColor,
                             letterSpacing: 0.04,
                           ),
@@ -348,7 +342,7 @@ class _NotificationTile extends StatelessWidget {
                       message,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.inter(
+                      style: KasaFont.sans(
                         fontSize: 12,
                         fontWeight: FontWeight.w500,
                         color: cs.kasaTextSub,
@@ -362,7 +356,7 @@ class _NotificationTile extends StatelessWidget {
                   // Timestamp
                   Text(
                     dateStr,
-                    style: GoogleFonts.jetBrainsMono(
+                    style: KasaFont.mono(
                       fontSize: 10,
                       fontWeight: FontWeight.w700,
                       color: cs.kasaTextSub,
@@ -402,10 +396,10 @@ class _EmptyState extends StatelessWidget {
           Icon(Icons.notifications_none, size: 56, color: cs.kasaTextSub),
           const SizedBox(height: 16),
           Text(
-            'NO NOTIFICATIONS',
-            style: GoogleFonts.spaceGrotesk(
+            'No notifications',
+            style: KasaFont.sans(
               fontSize: 16,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w600,
               color: cs.onSurface,
               letterSpacing: 0.04,
             ),
@@ -413,7 +407,7 @@ class _EmptyState extends StatelessWidget {
           const SizedBox(height: 6),
           Text(
             'Rent reminders and receipts appear here.',
-            style: GoogleFonts.inter(
+            style: KasaFont.sans(
               fontSize: 13,
               fontWeight: FontWeight.w500,
               color: cs.kasaTextSub,
@@ -443,10 +437,10 @@ class _ErrorState extends StatelessWidget {
             Icon(Icons.cloud_off_outlined, size: 56, color: cs.kasaTextSub),
             const SizedBox(height: 16),
             Text(
-              'COULD NOT LOAD',
-              style: GoogleFonts.spaceGrotesk(
+              'Could not load',
+              style: KasaFont.sans(
                 fontSize: 16,
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w600,
                 color: cs.onSurface,
                 letterSpacing: 0.04,
               ),
@@ -455,7 +449,7 @@ class _ErrorState extends StatelessWidget {
             Text(
               'Check your connection and try again.',
               textAlign: TextAlign.center,
-              style: GoogleFonts.inter(
+              style: KasaFont.sans(
                 fontSize: 13,
                 fontWeight: FontWeight.w500,
                 color: cs.kasaTextSub,

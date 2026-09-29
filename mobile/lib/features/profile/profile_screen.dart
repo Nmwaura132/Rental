@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../../core/theme/kasa_fonts.dart';
 
 import '../../core/api/api_client.dart';
 import '../../core/auth/biometric_service.dart';
@@ -11,6 +11,7 @@ import '../../core/providers/theme_provider.dart';
 import '../../core/constants.dart';
 import '../../core/theme/kasa_tokens.dart';
 import '../../core/widgets/kasa_primitives.dart';
+import '../../core/utils/text.dart';
 
 const _storage = FlutterSecureStorage();
 
@@ -241,10 +242,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
               child: Text(
-                'PROFILE',
-                style: GoogleFonts.spaceGrotesk(
+                'Profile',
+                style: KasaFont.sans(
                   fontSize: 32,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w600,
                   letterSpacing: -0.96,
                   color: cs.onSurface,
                   height: 1,
@@ -283,9 +284,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         Text(
                           _name,
                           textAlign: TextAlign.center,
-                          style: GoogleFonts.spaceGrotesk(
+                          style: KasaFont.sans(
                             fontSize: 24,
-                            fontWeight: FontWeight.w700,
+                            fontWeight: FontWeight.w600,
                             letterSpacing: -0.02 * 24,
                             color: cs.onSurface,
                             height: 1.1,
@@ -296,7 +297,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           Text(
                             _phone,
                             textAlign: TextAlign.center,
-                            style: GoogleFonts.jetBrainsMono(
+                            style: KasaFont.mono(
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
                               color: cs.kasaTextSub,
@@ -316,10 +317,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
               child: Text(
-                'ACCOUNT',
-                style: GoogleFonts.spaceGrotesk(
+                'Account',
+                style: KasaFont.sans(
                   fontSize: 11,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w600,
                   letterSpacing: 0.04,
                   color: cs.kasaTextSub,
                 ),
@@ -332,22 +333,22 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 child: Column(
                   children: [
                     _DetailRow(
-                      label: 'NAME',
+                      label: 'Name',
                       value: _name,
                       isFirst: true,
                     ),
                     _DetailRow(
-                      label: 'PHONE',
+                      label: 'Phone',
                       value: _phone,
-                      valueStyle: GoogleFonts.jetBrainsMono(
+                      valueStyle: KasaFont.mono(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
                         color: cs.onSurface,
                       ),
                     ),
                     _DetailRow(
-                      label: 'ROLE',
-                      value: _role.isNotEmpty ? _role.toUpperCase() : '—',
+                      label: 'Role',
+                      value: _role.isNotEmpty ? sentenceCase(_role) : '—',
                     ),
                   ],
                 ),
@@ -360,10 +361,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
               child: Text(
-                'PREFERENCES',
-                style: GoogleFonts.spaceGrotesk(
+                'Preferences',
+                style: KasaFont.sans(
                   fontSize: 11,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w600,
                   letterSpacing: 0.04,
                   color: cs.kasaTextSub,
                 ),
@@ -382,10 +383,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       child: Row(
                         children: [
                           Text(
-                            'THEME',
-                            style: GoogleFonts.spaceGrotesk(
+                            'Theme',
+                            style: KasaFont.sans(
                               fontSize: 11,
-                              fontWeight: FontWeight.w700,
+                              fontWeight: FontWeight.w600,
                               letterSpacing: 0.04,
                               color: cs.kasaTextSub,
                             ),
@@ -422,7 +423,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     Container(
                       decoration: BoxDecoration(
                         border: Border(
-                          top: BorderSide(color: cs.kasaStroke, width: 2),
+                          top: BorderSide(color: cs.kasaStroke, width: KasaBorders.card),
                         ),
                       ),
                       child: GestureDetector(
@@ -434,10 +435,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           child: Row(
                             children: [
                               Text(
-                                'PASSWORD',
-                                style: GoogleFonts.spaceGrotesk(
+                                'Password',
+                                style: KasaFont.sans(
                                   fontSize: 11,
-                                  fontWeight: FontWeight.w700,
+                                  fontWeight: FontWeight.w600,
                                   letterSpacing: 0.04,
                                   color: cs.kasaTextSub,
                                 ),
@@ -462,7 +463,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       Container(
                         decoration: BoxDecoration(
                           border: Border(
-                            top: BorderSide(color: cs.kasaStroke, width: 2),
+                            top: BorderSide(color: cs.kasaStroke, width: KasaBorders.card),
                           ),
                         ),
                         padding: const EdgeInsets.symmetric(
@@ -470,10 +471,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         child: Row(
                           children: [
                             Text(
-                              'BIOMETRIC UNLOCK',
-                              style: GoogleFonts.spaceGrotesk(
+                              'Biometric unlock',
+                              style: KasaFont.sans(
                                 fontSize: 11,
-                                fontWeight: FontWeight.w700,
+                                fontWeight: FontWeight.w600,
                                 letterSpacing: 0.04,
                                 color: cs.kasaTextSub,
                               ),
@@ -494,7 +495,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     Container(
                       decoration: BoxDecoration(
                         border: Border(
-                          top: BorderSide(color: cs.kasaStroke, width: 2),
+                          top: BorderSide(color: cs.kasaStroke, width: KasaBorders.card),
                         ),
                       ),
                       padding: const EdgeInsets.symmetric(
@@ -502,10 +503,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       child: Row(
                         children: [
                           Text(
-                            'SERVER',
-                            style: GoogleFonts.spaceGrotesk(
+                            'Server',
+                            style: KasaFont.sans(
                               fontSize: 11,
-                              fontWeight: FontWeight.w700,
+                              fontWeight: FontWeight.w600,
                               letterSpacing: 0.04,
                               color: cs.kasaTextSub,
                             ),
@@ -516,7 +517,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                               AppConstants.apiBaseUrl,
                               textAlign: TextAlign.right,
                               overflow: TextOverflow.ellipsis,
-                              style: GoogleFonts.jetBrainsMono(
+                              style: KasaFont.mono(
                                 fontSize: 11,
                                 color: cs.kasaTextSub,
                               ),
@@ -562,10 +563,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                               size: 18, color: Colors.amber.shade700),
                           const SizedBox(width: 8),
                           Text(
-                            'SWITCH ACCOUNT',
-                            style: GoogleFonts.spaceGrotesk(
+                            'Switch account',
+                            style: KasaFont.sans(
                               fontSize: 14,
-                              fontWeight: FontWeight.w700,
+                              fontWeight: FontWeight.w600,
                               letterSpacing: -0.28,
                               color: Colors.amber.shade700,
                               height: 1,
@@ -580,7 +581,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
                   // Log out
                   KasaButton(
-                    label: 'LOG OUT',
+                    label: 'Log out',
                     variant: KasaButtonVariant.primary,
                     leading: Icon(Icons.logout,
                         size: 18, color: cs.onPrimary),
@@ -598,7 +599,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 padding: const EdgeInsets.only(bottom: 32),
                 child: Text(
                   'KASA v1.0.0',
-                  style: GoogleFonts.jetBrainsMono(
+                  style: KasaFont.mono(
                     fontSize: 10,
                     color: cs.kasaTextSub,
                   ),
@@ -636,7 +637,7 @@ class _DetailRow extends StatelessWidget {
           ? null
           : BoxDecoration(
               border: Border(
-                top: BorderSide(color: cs.kasaStroke, width: 2),
+                top: BorderSide(color: cs.kasaStroke, width: KasaBorders.card),
               ),
             ),
       padding:
@@ -645,9 +646,9 @@ class _DetailRow extends StatelessWidget {
         children: [
           Text(
             label,
-            style: GoogleFonts.spaceGrotesk(
+            style: KasaFont.sans(
               fontSize: 11,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w600,
               letterSpacing: 0.04,
               color: cs.kasaTextSub,
             ),
@@ -658,7 +659,7 @@ class _DetailRow extends StatelessWidget {
               value.isNotEmpty ? value : '—',
               textAlign: TextAlign.right,
               style: valueStyle ??
-                  GoogleFonts.inter(
+                  KasaFont.sans(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
                     color: cs.onSurface,

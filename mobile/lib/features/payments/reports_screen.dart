@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
 import '../../core/api/pagination.dart';
 import '../../core/utils/api_error.dart';
+import '../../core/widgets/kasa_skeleton.dart';
 
 // ─── Providers ────────────────────────────────────────────────────────────────
 
@@ -122,7 +123,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Financial Reports')),
       body: propsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => const KasaSkeletonSummary(),
         error: (e, _) => Center(child: Text(apiError(e))),
         data: (props) {
           if (props.isEmpty) {

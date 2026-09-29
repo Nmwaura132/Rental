@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../theme/kasa_fonts.dart';
 
 import '../theme/kasa_tokens.dart';
 
-/// Presses a hard-shadowed surface into its own offset while held.
+// Loading skeletons live beside the primitives so any screen importing the
+// primitives can use them without a second import.
+export 'kasa_skeleton.dart';
+
+/// Press feedback for tappable surfaces.
 ///
-/// WHY this and not a scale or ripple: the Kasa surfaces sit on a 4px hard-edge
-/// shadow with no blur, so the affordance that matches the language is the
-/// physical one — the surface travels the length of its shadow and the shadow
-/// disappears underneath it. Nothing responded to touch at all before this.
+/// WHY opacity and not a scale or offset: Kasa 2.0 is flat, so there is no
+/// shadow to travel along. Motion is opacity only, 150 ms, and skipped when the
+/// viewer asked for reduced motion (the dim still shows, it just does not fade).
 class _PressableSurface extends StatefulWidget {
   const _PressableSurface({required this.onTap, required this.builder});
 
@@ -28,26 +31,16 @@ class _PressableSurfaceState extends State<_PressableSurface> {
 
   @override
   Widget build(BuildContext context) {
-    // Respect the accessibility setting: the offset is feedback, not decoration,
-    // so it stays, but it stops being animated.
-    final duration = MediaQuery.of(context).disableAnimations
-        ? Duration.zero
-        : const Duration(milliseconds: 90);
-
     return GestureDetector(
       onTap: widget.onTap,
       onTapDown: (_) => _set(true),
       onTapUp: (_) => _set(false),
       onTapCancel: () => _set(false),
       behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: duration,
-        curve: Curves.easeOut,
-        transform: Matrix4.translationValues(
-          _pressed ? KasaBorders.shadow : 0,
-          _pressed ? KasaBorders.shadow : 0,
-          0,
-        ),
+      child: AnimatedOpacity(
+        duration: KasaMotion.of(context, KasaMotion.fast),
+        curve: KasaMotion.curve,
+        opacity: _pressed ? 0.7 : 1.0,
         child: widget.builder(context, _pressed),
       ),
     );
@@ -55,7 +48,8 @@ class _PressableSurfaceState extends State<_PressableSurface> {
 }
 
 // ─── KasaCard ─────────────────────────────────────────────────────────────────
-// 2px border + 4px hard-edge shadow (blurRadius 0). No soft shadow.
+// Flat surface, 1px hairline border. [showShadow] adds the soft raised shadow
+// and is off by default: shadows are for sheets and menus, not every card.
 
 enum KasaCardAccent { none, primary, secondary, tertiary, elevated }
 
@@ -66,7 +60,7 @@ class KasaCard extends StatelessWidget {
     this.accent = KasaCardAccent.none,
     this.padding = const EdgeInsets.all(16),
     this.radius = KasaRadius.md,
-    this.showShadow = true,
+    this.showShadow = false,
     this.onTap,
   });
 
@@ -82,34 +76,26 @@ class KasaCard extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
 
     final fill = switch (accent) {
-      KasaCardAccent.primary   => cs.primary,
+      KasaCardAccent.primary => cs.primary,
       KasaCardAccent.secondary => cs.secondary,
-      KasaCardAccent.tertiary  => cs.tertiary,
-      KasaCardAccent.elevated  => cs.surfaceContainerHighest,
-      KasaCardAccent.none      => cs.surface,
+      KasaCardAccent.tertiary => cs.tertiary,
+      KasaCardAccent.elevated => cs.surfaceContainerHighest,
+      KasaCardAccent.none => cs.surface,
     };
     final ink = switch (accent) {
-      KasaCardAccent.primary   => cs.onPrimary,
+      KasaCardAccent.primary => cs.onPrimary,
       KasaCardAccent.secondary => cs.onSecondary,
-      KasaCardAccent.tertiary  => cs.onTertiary,
-      _                        => cs.onSurface,
+      KasaCardAccent.tertiary => cs.onTertiary,
+      _ => cs.onSurface,
     };
 
-    // The shadow is dropped while pressed so the surface reads as having moved
-    // down onto it, rather than dragging the shadow along.
     Widget surface(bool isPressed) => Container(
           padding: padding,
           decoration: BoxDecoration(
             color: fill,
             borderRadius: BorderRadius.circular(radius),
             border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
-            boxShadow: showShadow && !isPressed
-                ? [BoxShadow(
-                    color: cs.kasaShadow,
-                    offset: const Offset(KasaBorders.shadow, KasaBorders.shadow),
-                    blurRadius: 0,
-                  )]
-                : null,
+            boxShadow: showShadow ? KasaElevation.raised(cs) : null,
           ),
           child:
               DefaultTextStyle.merge(style: TextStyle(color: ink), child: child),
@@ -125,6 +111,8 @@ class KasaCard extends StatelessWidget {
 }
 
 // ─── KasaChip ─────────────────────────────────────────────────────────────────
+// Generic label chip. For rent/repair STATE use [KasaStatusChip] instead: it
+// carries the dot + word pairing the status colours require.
 
 enum KasaChipVariant { neutral, primary, secondary, tertiary }
 
@@ -147,16 +135,14 @@ class KasaChip extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
 
     final bg = switch (variant) {
-      KasaChipVariant.primary   => cs.primary,
-      KasaChipVariant.secondary => cs.secondary,
-      KasaChipVariant.tertiary  => cs.tertiary,
-      KasaChipVariant.neutral   => Colors.transparent,
+      KasaChipVariant.primary => cs.primaryContainer,
+      KasaChipVariant.secondary => cs.surfaceContainerHighest,
+      KasaChipVariant.tertiary => cs.tertiary,
+      KasaChipVariant.neutral => Colors.transparent,
     };
     final ink = switch (variant) {
-      KasaChipVariant.primary   => cs.onPrimary,
-      KasaChipVariant.secondary => cs.onSecondary,
-      KasaChipVariant.tertiary  => cs.onTertiary,
-      KasaChipVariant.neutral   => cs.onSurface,
+      KasaChipVariant.tertiary => cs.onTertiary,
+      _ => cs.onSurface,
     };
 
     return Container(
@@ -174,12 +160,54 @@ class KasaChip extends StatelessWidget {
         children: [
           if (leading != null) ...[leading!, const SizedBox(width: 4)],
           Text(
-            label.toUpperCase(),
-            style: GoogleFonts.spaceGrotesk(
-              fontSize: small ? 10 : 11,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.04,
+            label,
+            style: KasaFont.sans(
+              fontSize: small ? 12 : 13,
+              fontWeight: FontWeight.w500,
               color: ink,
+              height: 1.1,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Paid / Due / Overdue / Vacant / Notice. Muted colour + a dot + a WORD, so
+/// colour is never the only signal (WCAG 1.4.1).
+class KasaStatusChip extends StatelessWidget {
+  const KasaStatusChip({super.key, required this.kind, required this.label});
+
+  final KasaStatusKind kind;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final pair = Theme.of(context).colorScheme.statusPair(kind);
+
+    return Container(
+      height: 26,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: pair.bg,
+        borderRadius: BorderRadius.circular(KasaRadius.pill),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(color: pair.fg, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: KasaFont.sans(
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              color: pair.fg,
               height: 1,
             ),
           ),
@@ -215,78 +243,92 @@ class KasaButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
+    // Primary is the accent fill; secondary is an outlined surface (it used to
+    // be a second loud colour); ghost is text only.
     final bg = switch (variant) {
-      KasaButtonVariant.primary   => cs.primary,
-      KasaButtonVariant.secondary => cs.secondary,
-      KasaButtonVariant.tertiary  => cs.tertiary,
-      KasaButtonVariant.ghost     => Colors.transparent,
+      KasaButtonVariant.primary => cs.primary,
+      KasaButtonVariant.secondary => cs.surface,
+      KasaButtonVariant.tertiary => cs.tertiary,
+      KasaButtonVariant.ghost => Colors.transparent,
     };
     final ink = switch (variant) {
-      KasaButtonVariant.primary   => cs.onPrimary,
-      KasaButtonVariant.secondary => cs.onSecondary,
-      KasaButtonVariant.tertiary  => cs.onTertiary,
-      KasaButtonVariant.ghost     => cs.onSurface,
+      KasaButtonVariant.primary => cs.onPrimary,
+      KasaButtonVariant.tertiary => cs.onTertiary,
+      _ => cs.onSurface,
+    };
+    final border = switch (variant) {
+      KasaButtonVariant.secondary => cs.kasaStrokeStrong,
+      _ => Colors.transparent,
     };
 
     final disabled = onTap == null || isLoading;
 
-    Widget face(bool isPressed) => Opacity(
-        opacity: disabled ? 0.5 : 1.0,
-        child: Container(
-          width: fullWidth ? double.infinity : null,
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-          decoration: BoxDecoration(
-            color: bg,
-            borderRadius: BorderRadius.circular(KasaRadius.xl),
-            border: Border.all(color: cs.kasaStroke, width: KasaBorders.button),
-            boxShadow: variant != KasaButtonVariant.ghost && !disabled && !isPressed
-                ? [BoxShadow(
-                    color: cs.kasaShadow,
-                    offset: const Offset(KasaBorders.shadow, KasaBorders.shadow),
-                    blurRadius: 0,
-                  )]
-                : null,
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: fullWidth ? MainAxisSize.max : MainAxisSize.min,
-            children: [
-              if (isLoading)
-                SizedBox(
-                  width: 18, height: 18,
-                  child: CircularProgressIndicator(color: ink, strokeWidth: 2.5),
-                )
-              else ...[
-                if (leading != null) ...[leading!, const SizedBox(width: 8)],
-                Text(
-                  label.toUpperCase(),
-                  style: GoogleFonts.spaceGrotesk(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: -0.28,
-                    color: ink,
-                    height: 1,
-                  ),
-                ),
-              ],
-            ],
-          ),
+    // WHY the busy state keeps the label's space: swapping the label for a
+    // spinner at a different size makes the button jump. The spinner sits over
+    // an invisible label so the width and height stay put.
+    Widget content() {
+      final text = Text(
+        label,
+        style: KasaFont.sans(
+          fontSize: 16,
+          fontWeight: FontWeight.w600,
+          color: ink,
+          height: 1.1,
         ),
       );
+      return Stack(
+        alignment: Alignment.center,
+        children: [
+          Opacity(
+            opacity: isLoading ? 0 : 1,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: fullWidth ? MainAxisSize.max : MainAxisSize.min,
+              children: [
+                if (leading != null) ...[leading!, const SizedBox(width: 8)],
+                text,
+              ],
+            ),
+          ),
+          if (isLoading)
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(color: ink, strokeWidth: 2.5),
+            ),
+        ],
+      );
+    }
 
-    // A disabled button already reads as inert through its opacity; giving it
-    // travel would suggest it did something.
-    if (disabled) return face(false);
+    Widget face() => Opacity(
+          opacity: onTap == null && !isLoading ? 0.5 : 1.0,
+          child: Container(
+            width: fullWidth ? double.infinity : null,
+            constraints: const BoxConstraints(minHeight: 52),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: bg,
+              borderRadius: BorderRadius.circular(KasaRadius.md),
+              border: Border.all(color: border, width: KasaBorders.button),
+            ),
+            child: content(),
+          ),
+        );
 
-    return _PressableSurface(
-      onTap: onTap!,
-      builder: (context, isPressed) => face(isPressed),
+    return Semantics(
+      button: true,
+      enabled: !disabled,
+      child: disabled
+          ? face()
+          : _PressableSurface(onTap: onTap!, builder: (context, _) => face()),
     );
   }
 }
 
 // ─── KpiCard ──────────────────────────────────────────────────────────────────
-// Large-number KPI tile used in Bento grid dashboards.
+// Large-number tile. Numbers are the hero: tabular figures, calm 34pt, sentence
+// case label (no uppercase eyebrow).
 
 class KpiCard extends StatelessWidget {
   const KpiCard({
@@ -312,10 +354,10 @@ class KpiCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final ink = switch (accent) {
-      KasaCardAccent.primary   => cs.onPrimary,
+      KasaCardAccent.primary => cs.onPrimary,
       KasaCardAccent.secondary => cs.onSecondary,
-      KasaCardAccent.tertiary  => cs.onTertiary,
-      _                        => cs.onSurface,
+      KasaCardAccent.tertiary => cs.onTertiary,
+      _ => cs.onSurface,
     };
 
     return KasaCard(
@@ -327,10 +369,11 @@ class KpiCard extends StatelessWidget {
           Row(children: [
             Expanded(
               child: Text(
-                label.toUpperCase(),
-                style: GoogleFonts.spaceGrotesk(
-                  fontSize: 11, fontWeight: FontWeight.w700,
-                  letterSpacing: 0.04, color: ink.withValues(alpha: 0.75),
+                label,
+                style: KasaFont.sans(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: ink.withValues(alpha: 0.75),
                 ),
               ),
             ),
@@ -339,17 +382,26 @@ class KpiCard extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             value,
-            style: GoogleFonts.spaceGrotesk(
-              fontSize: 48, fontWeight: FontWeight.w700,
-              letterSpacing: -0.96, color: ink, height: 1,
+            style: KasaFont.sans(
+              fontSize: 34,
+              fontWeight: FontWeight.w600,
+              letterSpacing: -0.68,
+              color: ink,
+              height: 1.1,
+              fontFeatures: KasaType.tabular,
             ),
           ),
           if (sub != null) ...[
             const SizedBox(height: 4),
-            Text(sub!, style: GoogleFonts.inter(
-              fontSize: 13, fontWeight: FontWeight.w500,
-              color: ink.withValues(alpha: 0.7),
-            )),
+            Text(
+              sub!,
+              style: KasaFont.sans(
+                fontSize: 14,
+                fontWeight: FontWeight.w400,
+                color: ink.withValues(alpha: 0.7),
+                fontFeatures: KasaType.tabular,
+              ),
+            ),
           ],
         ],
       ),
@@ -358,9 +410,17 @@ class KpiCard extends StatelessWidget {
 }
 
 // ─── KasaAvatar ───────────────────────────────────────────────────────────────
+// Neutral by default (grey tile, muted initials). Non-default accents still
+// fill, for the few places that mean something by it.
 
 class KasaAvatar extends StatelessWidget {
-  const KasaAvatar({super.key, required this.name, this.size = 40, this.accent = KasaCardAccent.primary});
+  const KasaAvatar({
+    super.key,
+    required this.name,
+    this.size = 40,
+    this.accent = KasaCardAccent.primary,
+  });
+
   final String name;
   final double size;
   final KasaCardAccent accent;
@@ -368,27 +428,29 @@ class KasaAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final initials = name.trim().split(' ')
-        .where((s) => s.isNotEmpty).take(2)
-        .map((s) => s[0].toUpperCase()).join();
+    final initials = name
+        .trim()
+        .split(' ')
+        .where((s) => s.isNotEmpty)
+        .take(2)
+        .map((s) => s[0].toUpperCase())
+        .join();
     final (bg, ink) = switch (accent) {
       KasaCardAccent.secondary => (cs.secondary, cs.onSecondary),
-      KasaCardAccent.tertiary  => (cs.tertiary, cs.onTertiary),
-      _                        => (cs.primary, cs.onPrimary),
+      KasaCardAccent.tertiary => (cs.tertiary, cs.onTertiary),
+      _ => (cs.surfaceContainerHighest, cs.onSurfaceVariant),
     };
     return Container(
-      width: size, height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: bg,
-        border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
-      ),
+      width: size,
+      height: size,
+      decoration: BoxDecoration(shape: BoxShape.circle, color: bg),
       alignment: Alignment.center,
       child: Text(
         initials,
-        style: GoogleFonts.spaceGrotesk(
-          fontSize: size * 0.38, fontWeight: FontWeight.w700,
-          color: ink, letterSpacing: -0.02,
+        style: KasaFont.sans(
+          fontSize: size * 0.36,
+          fontWeight: FontWeight.w600,
+          color: ink,
         ),
       ),
     );
@@ -397,12 +459,11 @@ class KasaAvatar extends StatelessWidget {
 
 // ─── KasaContentSwitcher ──────────────────────────────────────────────────────
 
-/// Crossfades between a list screen's loading, error and loaded states.
+/// Crossfades between a screen's loading, error and loaded states.
 ///
-/// WHY shared rather than inline at each screen: only one of the four list
-/// screens had a transition at all, and that one used AnimatedSwitcher's
-/// default curve, which is linear — a mechanical-looking fade. Keeping the
-/// duration and curve in one place stops the four drifting apart again.
+/// WHY shared rather than inline at each screen: the skeleton -> content swap
+/// should feel identical everywhere, so the duration and curve live in one
+/// place (KasaMotion) instead of drifting per screen.
 class KasaContentSwitcher extends StatelessWidget {
   const KasaContentSwitcher({super.key, required this.child});
 
@@ -415,8 +476,8 @@ class KasaContentSwitcher extends StatelessWidget {
     if (MediaQuery.of(context).disableAnimations) return child;
 
     return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 260),
-      switchInCurve: Curves.easeOutCubic,
+      duration: KasaMotion.slow,
+      switchInCurve: KasaMotion.curve,
       switchOutCurve: Curves.easeInCubic,
       child: child,
     );

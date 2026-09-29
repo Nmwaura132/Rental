@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../../core/theme/kasa_fonts.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api/api_client.dart';
@@ -15,7 +15,7 @@ final _apiDate = DateFormat('yyyy-MM-dd');
 /// Readings close a month and are billed on the next month's bill. Late in the
 /// month the reading being taken is this month's; early on, it is most likely
 /// last month's that was missed.
-DateTime _defaultPeriod() {
+DateTime defaultReadingPeriod() {
   final now = DateTime.now();
   return now.day >= 20
       ? DateTime(now.year, now.month)
@@ -47,7 +47,7 @@ class MeterReadingsScreen extends ConsumerStatefulWidget {
 }
 
 class _MeterReadingsScreenState extends ConsumerState<MeterReadingsScreen> {
-  DateTime _period = _defaultPeriod();
+  DateTime _period = defaultReadingPeriod();
   // Keyed "unitId:chargeId" so a property metering water and electricity keeps
   // both figures for a unit apart.
   final _controllers = <String, TextEditingController>{};
@@ -146,7 +146,7 @@ class _MeterReadingsScreenState extends ConsumerState<MeterReadingsScreen> {
                   GestureDetector(
                     onTap: () => _changePeriod(month),
                     child: KasaChip(
-                      label: DateFormat('MMMM').format(month).toUpperCase(),
+                      label: DateFormat('MMMM').format(month),
                       variant: month == _period
                           ? KasaChipVariant.secondary
                           : KasaChipVariant.neutral,
@@ -160,12 +160,12 @@ class _MeterReadingsScreenState extends ConsumerState<MeterReadingsScreen> {
             child: Text(
               'Readings for ${DateFormat('MMMM').format(_period)} are billed on the '
               '${DateFormat('MMMM').format(DateTime(_period.year, _period.month + 1))} bill.',
-              style: GoogleFonts.inter(fontSize: 12, color: cs.kasaTextSub),
+              style: KasaFont.sans(fontSize: 12, color: cs.kasaTextSub),
             ),
           ),
           Expanded(
             child: sheet.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
+              loading: () => const KasaSkeletonList(trailingWidth: 108),
               error: (e, _) => Center(child: Text(apiError(e))),
               data: (data) {
                 final rows = (data['rows'] as List).cast<Map<String, dynamic>>();
@@ -175,7 +175,7 @@ class _MeterReadingsScreenState extends ConsumerState<MeterReadingsScreen> {
                     child: Text(
                       'This property has no metered charges. Add a metered '
                       'charge such as water to the property first.',
-                      style: GoogleFonts.inter(color: cs.kasaTextSub),
+                      style: KasaFont.sans(color: cs.kasaTextSub),
                     ),
                   );
                 }
@@ -199,7 +199,7 @@ class _MeterReadingsScreenState extends ConsumerState<MeterReadingsScreen> {
                       child: Padding(
                         padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
                         child: KasaButton(
-                          label: 'SAVE READINGS',
+                          label: 'Save readings',
                           variant: KasaButtonVariant.primary,
                           isLoading: _saving,
                           onTap: _saving ? null : () => _save(rows),
@@ -250,9 +250,9 @@ class _ReadingRow extends StatelessWidget {
               children: [
                 Text(
                   'Unit ${row['unit_number']} · ${row['charge_name']}',
-                  style: GoogleFonts.spaceGrotesk(
+                  style: KasaFont.sans(
                     fontSize: 15,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w600,
                     color: occupied ? cs.onSurface : cs.kasaTextSub,
                   ),
                 ),
@@ -264,20 +264,20 @@ class _ReadingRow extends StatelessWidget {
                         : 'Last: ${NumberFormat('#,##0.##').format(previous)}',
                     if (!occupied) 'vacant',
                   ].join(' · '),
-                  style: GoogleFonts.inter(fontSize: 12, color: cs.kasaTextSub),
+                  style: KasaFont.sans(fontSize: 12, color: cs.kasaTextSub),
                 ),
                 if (used != null && used >= 0)
                   Text(
                     '${NumberFormat('#,##0.##').format(used)} units · ${formatCurrency(used * price)}',
-                    style: GoogleFonts.jetBrainsMono(fontSize: 11, color: cs.onSurface),
+                    style: KasaFont.mono(fontSize: 11, color: cs.onSurface),
                   ),
                 if (used != null && used < 0)
                   Text(
                     'Lower than last month — check the meter',
-                    style: GoogleFonts.inter(fontSize: 11, color: cs.error),
+                    style: KasaFont.sans(fontSize: 11, color: cs.error),
                   ),
                 if (error != null)
-                  Text(error!, style: GoogleFonts.inter(fontSize: 11, color: cs.error)),
+                  Text(error!, style: KasaFont.sans(fontSize: 11, color: cs.error)),
               ],
             ),
           ),

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../../core/theme/kasa_fonts.dart';
 
 import '../../core/api/api_client.dart';
 import '../../core/theme/kasa_tokens.dart';
@@ -147,7 +147,7 @@ class _RenumberUnitsScreenState extends ConsumerState<RenumberUnitsScreen> {
                     'Tenants pay using the new numbers from their next bill. '
                     'A payment made with an old number is not lost — it '
                     'appears under "payments to assign".',
-                    style: GoogleFonts.inter(fontSize: 12, color: cs.tertiaryInk),
+                    style: KasaFont.sans(fontSize: 12, color: cs.tertiaryInk),
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -169,7 +169,7 @@ class _RenumberUnitsScreenState extends ConsumerState<RenumberUnitsScreen> {
             child: Padding(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
               child: KasaButton(
-                label: 'SAVE NEW NUMBERS',
+                label: 'Save new numbers',
                 variant: KasaButtonVariant.primary,
                 isLoading: _saving,
                 onTap: (_saving || duplicates.isNotEmpty || hasBlank) ? null : _save,
@@ -205,7 +205,7 @@ class _RenameRow extends StatelessWidget {
           width: 90,
           child: Text(
             oldNumber,
-            style: GoogleFonts.jetBrainsMono(
+            style: KasaFont.mono(
               fontSize: 15,
               color: cs.kasaTextSub,
               decoration: unchanged ? null : TextDecoration.lineThrough,

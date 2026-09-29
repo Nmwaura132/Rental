@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../../core/theme/kasa_fonts.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api/api_client.dart';
@@ -10,6 +10,7 @@ import '../../core/utils/api_error.dart';
 import '../../core/utils/currency.dart';
 import '../../core/widgets/kasa_primitives.dart';
 import '../tenants/tenants_screen.dart';
+import '../../core/utils/text.dart';
 
 final unitOccupancyProvider = FutureProvider.autoDispose
     .family<Map<String, dynamic>, int>((ref, unitId) async {
@@ -39,18 +40,18 @@ class UnitDetailScreen extends ConsumerWidget {
         ),
         title: Text(
           occupancy.valueOrNull?['unit']?['unit_number'] != null
-              ? 'UNIT ${occupancy.value!['unit']['unit_number']}'
-              : 'UNIT',
-          style: GoogleFonts.spaceGrotesk(
+              ? 'Unit ${occupancy.value!['unit']['unit_number']}'
+              : 'Unit',
+          style: KasaFont.sans(
             fontSize: 15,
-            fontWeight: FontWeight.w700,
+            fontWeight: FontWeight.w600,
             letterSpacing: 0.04,
             color: cs.onSurface,
           ),
         ),
       ),
       body: occupancy.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => const KasaSkeletonDetail(),
         error: (e, _) => Center(
           child: Padding(
             padding: const EdgeInsets.all(32),
@@ -61,10 +62,10 @@ class UnitDetailScreen extends ConsumerWidget {
                 const SizedBox(height: 12),
                 Text(apiError(e),
                     textAlign: TextAlign.center,
-                    style: GoogleFonts.inter(color: cs.kasaTextSub)),
+                    style: KasaFont.sans(color: cs.kasaTextSub)),
                 const SizedBox(height: 16),
                 KasaButton(
-                  label: 'RETRY',
+                  label: 'Retry',
                   variant: KasaButtonVariant.secondary,
                   onTap: () => ref.invalidate(unitOccupancyProvider(unitId)),
                 ),
@@ -102,9 +103,9 @@ class _VacantUnit extends ConsumerWidget {
         Text(
           'This unit is vacant.',
           textAlign: TextAlign.center,
-          style: GoogleFonts.spaceGrotesk(
+          style: KasaFont.sans(
             fontSize: 16,
-            fontWeight: FontWeight.w700,
+            fontWeight: FontWeight.w600,
             color: cs.onSurface,
           ),
         ),
@@ -112,11 +113,11 @@ class _VacantUnit extends ConsumerWidget {
         Text(
           'Add a tenant and their tenancy starts here.',
           textAlign: TextAlign.center,
-          style: GoogleFonts.inter(fontSize: 13, color: cs.kasaTextSub),
+          style: KasaFont.sans(fontSize: 13, color: cs.kasaTextSub),
         ),
         const SizedBox(height: 20),
         KasaButton(
-          label: 'ADD TENANT',
+          label: 'Add tenant',
           variant: KasaButtonVariant.primary,
           // Runs both steps here rather than routing to the tenants tab: that
           // tab is a shell branch, and pushing it from inside the properties
@@ -165,7 +166,7 @@ class _OccupiedUnit extends StatelessWidget {
                 Expanded(
                   child: Text(
                     'Notice given — moving out ${_pretty(noticeDate)}',
-                    style: GoogleFonts.inter(
+                    style: KasaFont.sans(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
                       color: cs.onTertiary,
@@ -181,7 +182,7 @@ class _OccupiedUnit extends StatelessWidget {
         _UnitFacts(unit: unit, propertyName: data['property_name']?.toString()),
 
         const SizedBox(height: 20),
-        const _SectionHeader('PAYMENT HISTORY'),
+        const _SectionHeader('Payment history'),
         const SizedBox(height: 8),
         if (payments.isEmpty)
           const _Empty(text: 'No payments recorded yet.')
@@ -189,7 +190,7 @@ class _OccupiedUnit extends StatelessWidget {
           ...payments.map((p) => _PaymentRow(payment: p)),
 
         const SizedBox(height: 20),
-        const _SectionHeader('MAINTENANCE'),
+        const _SectionHeader('Maintenance'),
         const SizedBox(height: 8),
         if (maintenance.isEmpty)
           const _Empty(text: 'Nothing reported.')
@@ -239,13 +240,13 @@ class _TenantCard extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: cs.onSecondary.withValues(alpha: 0.18),
                   borderRadius: BorderRadius.circular(KasaRadius.md),
-                  border: Border.all(color: cs.kasaStroke, width: 2),
+                  border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
                 ),
                 child: Text(
                   initials.isEmpty ? '?' : initials,
-                  style: GoogleFonts.spaceGrotesk(
+                  style: KasaFont.sans(
                     fontSize: 18,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w600,
                     color: cs.onSecondary,
                   ),
                 ),
@@ -257,16 +258,16 @@ class _TenantCard extends StatelessWidget {
                   children: [
                     Text(
                       name,
-                      style: GoogleFonts.spaceGrotesk(
+                      style: KasaFont.sans(
                         fontSize: 17,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w600,
                         color: cs.onSecondary,
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       tenant['phone_number']?.toString() ?? '',
-                      style: GoogleFonts.jetBrainsMono(
+                      style: KasaFont.mono(
                         fontSize: 13,
                         color: cs.onSecondary.withValues(alpha: 0.85),
                       ),
@@ -277,10 +278,10 @@ class _TenantCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 14),
-          _Fact(label: 'RENT', value: formatCurrency(toDouble(tenancy['rent_amount'])), ink: cs.onSecondary),
-          _Fact(label: 'SINCE', value: _pretty(tenancy['start_date']?.toString()), ink: cs.onSecondary),
+          _Fact(label: 'Rent', value: formatCurrency(toDouble(tenancy['rent_amount'])), ink: cs.onSecondary),
+          _Fact(label: 'Since', value: _pretty(tenancy['start_date']?.toString()), ink: cs.onSecondary),
           if (tenant['occupation'] != null)
-            _Fact(label: 'WORK', value: tenant['occupation'].toString(), ink: cs.onSecondary),
+            _Fact(label: 'Work', value: tenant['occupation'].toString(), ink: cs.onSecondary),
           if (kra != null)
             _Fact(
               label: 'KRA PIN',
@@ -292,7 +293,7 @@ class _TenantCard extends StatelessWidget {
             _Fact(label: 'ID', value: nationalId, ink: cs.onSecondary),
           if (tenant['next_of_kin_name'] != null)
             _Fact(
-              label: 'NEXT OF KIN',
+              label: 'Next of kin',
               value:
                   '${tenant['next_of_kin_name']} · ${tenant['next_of_kin_phone'] ?? ''}',
               ink: cs.onSecondary,
@@ -333,9 +334,9 @@ class _Fact extends StatelessWidget {
             width: 96,
             child: Text(
               label,
-              style: GoogleFonts.spaceGrotesk(
+              style: KasaFont.sans(
                 fontSize: 10,
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w600,
                 letterSpacing: 0.04,
                 color: ink.withValues(alpha: 0.7),
               ),
@@ -344,7 +345,7 @@ class _Fact extends StatelessWidget {
           Expanded(
             child: Text(
               value,
-              style: GoogleFonts.inter(
+              style: KasaFont.sans(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
                 color: warn ? cs.error : ink,
@@ -372,18 +373,18 @@ class _UnitFacts extends StatelessWidget {
         children: [
           Text(
             propertyName ?? '',
-            style: GoogleFonts.spaceGrotesk(
+            style: KasaFont.sans(
               fontSize: 14,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w600,
               color: cs.onSurface,
             ),
           ),
-          _Fact(label: 'UNIT', value: unit['unit_number']?.toString() ?? '', ink: cs.onSurface),
+          _Fact(label: 'Unit', value: unit['unit_number']?.toString() ?? '', ink: cs.onSurface),
           // The code tenants actually type into M-Pesa, which is not always
           // the same as the unit number the landlord uses.
-          _Fact(label: 'PAY CODE', value: unit['payment_code']?.toString() ?? '', ink: cs.onSurface),
-          _Fact(label: 'RENT', value: formatCurrency(toDouble(unit['rent_amount'])), ink: cs.onSurface),
-          _Fact(label: 'STATUS', value: (unit['status']?.toString() ?? '').toUpperCase(), ink: cs.onSurface),
+          _Fact(label: 'Pay code', value: unit['payment_code']?.toString() ?? '', ink: cs.onSurface),
+          _Fact(label: 'Rent', value: formatCurrency(toDouble(unit['rent_amount'])), ink: cs.onSurface),
+          _Fact(label: 'Status', value: sentenceCase(unit['status']?.toString() ?? ''), ink: cs.onSurface),
         ],
       ),
     );
@@ -398,9 +399,9 @@ class _SectionHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(
       text,
-      style: GoogleFonts.spaceGrotesk(
+      style: KasaFont.sans(
         fontSize: 11,
-        fontWeight: FontWeight.w700,
+        fontWeight: FontWeight.w600,
         letterSpacing: 0.04,
         color: Theme.of(context).colorScheme.kasaTextSub,
       ),
@@ -418,7 +419,7 @@ class _Empty extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 16),
       child: Text(
         text,
-        style: GoogleFonts.inter(
+        style: KasaFont.sans(
           fontSize: 13,
           color: Theme.of(context).colorScheme.kasaTextSub,
         ),
@@ -451,9 +452,9 @@ class _PaymentRow extends StatelessWidget {
                 children: [
                   Text(
                     formatCurrency(toDouble(payment['amount'])),
-                    style: GoogleFonts.spaceGrotesk(
+                    style: KasaFont.sans(
                       fontSize: 14,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w600,
                       color: cs.onSurface,
                       fontFeatures: kTabularFigures,
                     ),
@@ -461,14 +462,14 @@ class _PaymentRow extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(
                     '$when · ${(payment['method']?.toString() ?? '').toUpperCase()}',
-                    style: GoogleFonts.inter(fontSize: 12, color: cs.kasaTextSub),
+                    style: KasaFont.sans(fontSize: 12, color: cs.kasaTextSub),
                   ),
                 ],
               ),
             ),
             Text(
               payment['invoice_number']?.toString() ?? '',
-              style: GoogleFonts.jetBrainsMono(
+              style: KasaFont.mono(
                 fontSize: 11,
                 color: cs.kasaTextSub,
               ),
@@ -499,7 +500,7 @@ class _MaintenanceRow extends StatelessWidget {
             Expanded(
               child: Text(
                 request['title']?.toString() ?? '',
-                style: GoogleFonts.inter(
+                style: KasaFont.sans(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
                   color: cs.onSurface,
@@ -507,7 +508,7 @@ class _MaintenanceRow extends StatelessWidget {
               ),
             ),
             KasaChip(
-              label: status.replaceAll('_', ' ').toUpperCase(),
+              label: sentenceCase(status),
               variant:
                   isOpen ? KasaChipVariant.tertiary : KasaChipVariant.neutral,
             ),

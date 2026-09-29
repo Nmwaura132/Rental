@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../../core/theme/kasa_fonts.dart';
 
 import '../../core/theme/kasa_tokens.dart';
 
@@ -52,9 +52,8 @@ class AppTheme {
       onInverseSurface: isDark ? KasaColors.darkText  : KasaColors.lightText,
 
       // Outline — the stroke color
-      outline:        isDark ? KasaColors.darkStroke         : KasaColors.lightStroke,
-      outlineVariant: isDark ? KasaColors.darkStroke.withValues(alpha: 0.4)
-                             : KasaColors.lightStroke.withValues(alpha: 0.3),
+      outline:        isDark ? KasaColors.darkStrokeStrong : KasaColors.lightStrokeStrong,
+      outlineVariant: isDark ? KasaColors.darkStroke : KasaColors.lightStroke,
 
       // Shadow
       shadow: isDark ? KasaColors.darkShadow : KasaColors.lightShadow,
@@ -74,22 +73,22 @@ class AppTheme {
     final base = brightness == Brightness.dark
         ? ThemeData.dark().textTheme
         : ThemeData.light().textTheme;
-    final displayFont = GoogleFonts.spaceGroteskTextTheme(base).copyWith(
-      displayLarge:  GoogleFonts.spaceGrotesk(fontSize: 56, fontWeight: FontWeight.w700, letterSpacing: -1.12),
-      displayMedium: GoogleFonts.spaceGrotesk(fontSize: 44, fontWeight: FontWeight.w700, letterSpacing: -0.88),
-      displaySmall:  GoogleFonts.spaceGrotesk(fontSize: 36, fontWeight: FontWeight.w700, letterSpacing: -0.72),
-      headlineLarge: GoogleFonts.spaceGrotesk(fontSize: 28, fontWeight: FontWeight.w700, letterSpacing: -0.56),
-      headlineMedium:GoogleFonts.spaceGrotesk(fontSize: 22, fontWeight: FontWeight.w700, letterSpacing: -0.44),
-      headlineSmall: GoogleFonts.spaceGrotesk(fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: -0.36),
-      titleLarge:    GoogleFonts.spaceGrotesk(fontSize: 16, fontWeight: FontWeight.w700, letterSpacing: -0.32),
-      titleMedium:   GoogleFonts.inter(fontSize: 14,        fontWeight: FontWeight.w600),
-      titleSmall:    GoogleFonts.inter(fontSize: 12,        fontWeight: FontWeight.w600),
-      bodyLarge:     GoogleFonts.inter(fontSize: 16,        fontWeight: FontWeight.w500),
-      bodyMedium:    GoogleFonts.inter(fontSize: 14,        fontWeight: FontWeight.w500),
-      bodySmall:     GoogleFonts.inter(fontSize: 12,        fontWeight: FontWeight.w500),
-      labelLarge:    GoogleFonts.spaceGrotesk(fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 0.48),
-      labelMedium:   GoogleFonts.spaceGrotesk(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.44),
-      labelSmall:    GoogleFonts.spaceGrotesk(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.4),
+    final displayFont = base.apply(fontFamily: KasaFont.sansFamily).copyWith(
+      displayLarge:  KasaFont.sans(fontSize: 56, fontWeight: FontWeight.w600, letterSpacing: -1.12),
+      displayMedium: KasaFont.sans(fontSize: 44, fontWeight: FontWeight.w600, letterSpacing: -0.88),
+      displaySmall:  KasaFont.sans(fontSize: 36, fontWeight: FontWeight.w600, letterSpacing: -0.72),
+      headlineLarge: KasaFont.sans(fontSize: 28, fontWeight: FontWeight.w600, letterSpacing: -0.56),
+      headlineMedium:KasaFont.sans(fontSize: 22, fontWeight: FontWeight.w600, letterSpacing: -0.44),
+      headlineSmall: KasaFont.sans(fontSize: 18, fontWeight: FontWeight.w600, letterSpacing: -0.36),
+      titleLarge:    KasaFont.sans(fontSize: 16, fontWeight: FontWeight.w600, letterSpacing: -0.32),
+      titleMedium:   KasaFont.sans(fontSize: 14,        fontWeight: FontWeight.w600),
+      titleSmall:    KasaFont.sans(fontSize: 12,        fontWeight: FontWeight.w600),
+      bodyLarge:     KasaFont.sans(fontSize: 16,        fontWeight: FontWeight.w500),
+      bodyMedium:    KasaFont.sans(fontSize: 14,        fontWeight: FontWeight.w500),
+      bodySmall:     KasaFont.sans(fontSize: 12,        fontWeight: FontWeight.w500),
+      labelLarge:    KasaFont.sans(fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 0.48),
+      labelMedium:   KasaFont.sans(fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 0.44),
+      labelSmall:    KasaFont.sans(fontSize: 10, fontWeight: FontWeight.w600, letterSpacing: 0.4),
     );
     final textTheme = displayFont.apply(
       bodyColor:    cs.onSurface,
@@ -112,9 +111,9 @@ class AppTheme {
         systemOverlayStyle: isDark
             ? SystemUiOverlayStyle.light.copyWith(statusBarColor: Colors.transparent)
             : SystemUiOverlayStyle.dark.copyWith(statusBarColor: Colors.transparent),
-        titleTextStyle: GoogleFonts.spaceGrotesk(
+        titleTextStyle: KasaFont.sans(
           color: cs.onSurface,
-          fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: -0.36,
+          fontSize: 18, fontWeight: FontWeight.w600, letterSpacing: -0.36,
         ),
       ),
 
@@ -126,7 +125,7 @@ class AppTheme {
         margin: EdgeInsets.zero,
       ),
 
-      // Input fields — neo-brutalist block style
+      // Input fields — flat, strong hairline; 2px ring on focus
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: cs.surface,
@@ -140,7 +139,7 @@ class AppTheme {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(KasaRadius.md),
-          borderSide: BorderSide(color: cs.secondary, width: KasaBorders.button),
+          borderSide: BorderSide(color: cs.onSurface, width: KasaBorders.focus),
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(KasaRadius.md),
@@ -148,10 +147,10 @@ class AppTheme {
         ),
         focusedErrorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(KasaRadius.md),
-          borderSide: BorderSide(color: cs.error, width: KasaBorders.button),
+          borderSide: BorderSide(color: cs.error, width: KasaBorders.focus),
         ),
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-        labelStyle: GoogleFonts.spaceGrotesk(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.44),
+        labelStyle: KasaFont.sans(fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 0.44),
       ),
 
       // Elevated buttons — salmon fill, 3px border, 24px radius, hard shadow via wrapper
@@ -159,20 +158,20 @@ class AppTheme {
         style: ElevatedButton.styleFrom(
           minimumSize: const Size(double.infinity, 52),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(KasaRadius.xl),
-            side: BorderSide(color: cs.outline, width: KasaBorders.button),
+            borderRadius: BorderRadius.circular(KasaRadius.md),
+            side: BorderSide.none,
           ),
           backgroundColor: cs.primary,
           foregroundColor: cs.onPrimary,
           elevation: 0,
-          textStyle: GoogleFonts.spaceGrotesk(fontSize: 14, fontWeight: FontWeight.w700, letterSpacing: -0.28),
+          textStyle: KasaFont.sans(fontSize: 14, fontWeight: FontWeight.w600, letterSpacing: -0.28),
         ),
       ),
 
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
           foregroundColor: cs.secondary,
-          textStyle: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600),
+          textStyle: KasaFont.sans(fontSize: 14, fontWeight: FontWeight.w600),
         ),
       ),
 
@@ -180,11 +179,11 @@ class AppTheme {
         style: OutlinedButton.styleFrom(
           minimumSize: const Size(double.infinity, 52),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(KasaRadius.xl),
+            borderRadius: BorderRadius.circular(KasaRadius.md),
           ),
           side: BorderSide(color: cs.outline, width: KasaBorders.card),
           foregroundColor: cs.onSurface,
-          textStyle: GoogleFonts.spaceGrotesk(fontSize: 14, fontWeight: FontWeight.w700),
+          textStyle: KasaFont.sans(fontSize: 14, fontWeight: FontWeight.w600),
         ),
       ),
 
@@ -193,7 +192,7 @@ class AppTheme {
         foregroundColor: cs.onPrimary,
         elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(KasaRadius.xl),
+          borderRadius: BorderRadius.circular(KasaRadius.md),
           side: BorderSide(color: cs.outline, width: KasaBorders.card),
         ),
       ),
@@ -203,7 +202,7 @@ class AppTheme {
           borderRadius: BorderRadius.circular(KasaRadius.pill),
           side: BorderSide(color: cs.outline, width: KasaBorders.card),
         ),
-        labelStyle: GoogleFonts.spaceGrotesk(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.04),
+        labelStyle: KasaFont.sans(fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 0.04),
       ),
 
       dividerTheme: const DividerThemeData(
@@ -212,23 +211,30 @@ class AppTheme {
         color: Colors.transparent,
       ),
 
-      // Bottom nav — handled by custom KasaBottomNav widget in router.dart
+      // Bottom nav — KasaNavBar (core/widgets/kasa_nav_bar.dart). Flat surface,
+      // accent pill behind the current tab, a word under every icon. The hairline
+      // top border is drawn by KasaNavBar itself.
       navigationBarTheme: NavigationBarThemeData(
-        height: 64,
+        height: 72,
         elevation: 0,
-        backgroundColor: Colors.transparent,
-        indicatorColor: cs.secondary,
+        backgroundColor: cs.surface,
+        surfaceTintColor: Colors.transparent,
+        indicatorColor: cs.primaryContainer,
+        indicatorShape: const StadiumBorder(),
         iconTheme: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.selected)) {
-            return IconThemeData(color: cs.onSecondary, size: 22);
-          }
-          return IconThemeData(color: cs.onSurfaceVariant, size: 22);
+          final selected = states.contains(WidgetState.selected);
+          return IconThemeData(
+            color: selected ? cs.primary : cs.onSurfaceVariant,
+            size: 24,
+          );
         }),
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.selected)) {
-            return GoogleFonts.spaceGrotesk(fontSize: 9, fontWeight: FontWeight.w700, color: cs.onSecondary);
-          }
-          return GoogleFonts.spaceGrotesk(fontSize: 9, fontWeight: FontWeight.w700, color: cs.onSurfaceVariant);
+          final selected = states.contains(WidgetState.selected);
+          return KasaFont.sans(
+            fontSize: 12,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+            color: selected ? cs.onSurface : cs.onSurfaceVariant,
+          );
         }),
       ),
     );

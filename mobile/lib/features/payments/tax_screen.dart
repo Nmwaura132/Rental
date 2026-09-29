@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../../core/theme/kasa_fonts.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api/api_client.dart';
@@ -47,10 +47,10 @@ class TaxScreen extends ConsumerWidget {
       appBar: AppBar(
         backgroundColor: cs.kasaBg,
         title: Text(
-          'RENTAL INCOME TAX',
-          style: GoogleFonts.spaceGrotesk(
+          'Rental income tax',
+          style: KasaFont.sans(
             fontSize: 15,
-            fontWeight: FontWeight.w700,
+            fontWeight: FontWeight.w600,
             letterSpacing: 0.04,
             color: cs.onSurface,
           ),
@@ -71,7 +71,7 @@ class TaxScreen extends ConsumerWidget {
             ),
             Expanded(
               child: statement.when(
-                loading: () => const Center(child: CircularProgressIndicator()),
+                loading: () => const KasaSkeletonSummary(),
                 error: (e, _) => Center(
                   child: Padding(
                     padding: const EdgeInsets.all(32),
@@ -83,10 +83,10 @@ class TaxScreen extends ConsumerWidget {
                         const SizedBox(height: 12),
                         Text(apiError(e),
                             textAlign: TextAlign.center,
-                            style: GoogleFonts.inter(color: cs.kasaTextSub)),
+                            style: KasaFont.sans(color: cs.kasaTextSub)),
                         const SizedBox(height: 16),
                         KasaButton(
-                          label: 'RETRY',
+                          label: 'Retry',
                           variant: KasaButtonVariant.secondary,
                           onTap: () => ref.invalidate(mriStatementProvider),
                         ),
@@ -129,11 +129,11 @@ class _MonthPicker extends StatelessWidget {
           ),
           Expanded(
             child: Text(
-              DateFormat('MMMM yyyy').format(period).toUpperCase(),
+              DateFormat('MMMM yyyy').format(period),
               textAlign: TextAlign.center,
-              style: GoogleFonts.spaceGrotesk(
+              style: KasaFont.sans(
                 fontSize: 16,
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w600,
                 color: cs.onSurface,
               ),
             ),
@@ -176,19 +176,19 @@ class _Statement extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('TAX DUE',
-                  style: GoogleFonts.spaceGrotesk(
+              Text('Tax due',
+                  style: KasaFont.sans(
                     fontSize: 11,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w600,
                     letterSpacing: 0.04,
                     color: cs.onPrimary.withValues(alpha: 0.75),
                   )),
               const SizedBox(height: 8),
               Text(
                 formatCurrency(taxDue),
-                style: GoogleFonts.spaceGrotesk(
+                style: KasaFont.sans(
                   fontSize: 48,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w600,
                   letterSpacing: -1.2,
                   color: cs.onPrimary,
                   height: 1,
@@ -198,14 +198,14 @@ class _Statement extends StatelessWidget {
               const SizedBox(height: 10),
               Text(
                 '${(rate * 100).toStringAsFixed(1)}% of ${formatCurrency(gross)} received',
-                style: GoogleFonts.inter(
+                style: KasaFont.sans(
                     fontSize: 13, color: cs.onPrimary.withValues(alpha: 0.9)),
               ),
               if (due != null) ...[
                 const SizedBox(height: 4),
                 Text(
                   'File and pay by ${_pretty(due)}',
-                  style: GoogleFonts.inter(
+                  style: KasaFont.sans(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
                     color: cs.onPrimary,
@@ -256,10 +256,10 @@ class _Statement extends StatelessWidget {
         ],
 
         const SizedBox(height: 20),
-        Text('RENT ROLL',
-            style: GoogleFonts.spaceGrotesk(
+        Text('Rent roll',
+            style: KasaFont.sans(
               fontSize: 11,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w600,
               letterSpacing: 0.04,
               color: cs.kasaTextSub,
             )),
@@ -271,7 +271,7 @@ class _Statement extends StatelessWidget {
             child: Text(
               'No rent received in this month.',
               textAlign: TextAlign.center,
-              style: GoogleFonts.inter(color: cs.kasaTextSub),
+              style: KasaFont.sans(color: cs.kasaTextSub),
             ),
           )
         else
@@ -305,7 +305,7 @@ class _Note extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(text,
-                style: GoogleFonts.inter(fontSize: 13, color: color)),
+                style: KasaFont.sans(fontSize: 13, color: color)),
           ),
         ],
       ),
@@ -334,18 +334,18 @@ class _RentRollRow extends StatelessWidget {
                 Expanded(
                   child: Text(
                     row['tenant']?.toString() ?? 'Unknown',
-                    style: GoogleFonts.spaceGrotesk(
+                    style: KasaFont.sans(
                       fontSize: 14,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w600,
                       color: cs.onSurface,
                     ),
                   ),
                 ),
                 Text(
                   formatCurrency(toDouble(row['rent_received'])),
-                  style: GoogleFonts.spaceGrotesk(
+                  style: KasaFont.sans(
                     fontSize: 14,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w600,
                     color: cs.onSurface,
                     fontFeatures: kTabularFigures,
                   ),
@@ -355,7 +355,7 @@ class _RentRollRow extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               '${row['property'] ?? ''} · Unit ${row['unit'] ?? ''}',
-              style: GoogleFonts.inter(fontSize: 12, color: cs.kasaTextSub),
+              style: KasaFont.sans(fontSize: 12, color: cs.kasaTextSub),
             ),
             const SizedBox(height: 6),
             Row(
@@ -368,7 +368,7 @@ class _RentRollRow extends StatelessWidget {
                 const SizedBox(width: 6),
                 Text(
                   pin.isEmpty ? 'KRA PIN missing' : pin,
-                  style: GoogleFonts.jetBrainsMono(
+                  style: KasaFont.mono(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                     color: pin.isEmpty ? cs.error : cs.kasaTextSub,

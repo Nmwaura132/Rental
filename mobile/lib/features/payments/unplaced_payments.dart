@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../../core/theme/kasa_fonts.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api/api_client.dart';
@@ -53,9 +53,9 @@ class UnplacedPaymentsBanner extends ConsumerWidget {
                 rows.length == 1
                     ? '1 payment to assign · ${formatCurrency(total)}'
                     : '${rows.length} payments to assign · ${formatCurrency(total)}',
-                style: GoogleFonts.spaceGrotesk(
+                style: KasaFont.sans(
                   fontSize: 14,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w600,
                   color: cs.tertiaryInk,
                 ),
               ),
@@ -79,13 +79,13 @@ class UnplacedPaymentsScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Payments to assign')),
       body: rows.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => const KasaSkeletonList(),
         error: (e, _) => Center(child: Text(apiError(e))),
         data: (list) => list.isEmpty
             ? Center(
                 child: Text(
                   'Every payment has been assigned.',
-                  style: GoogleFonts.inter(color: cs.kasaTextSub),
+                  style: KasaFont.sans(color: cs.kasaTextSub),
                 ),
               )
             : ListView.separated(
@@ -97,7 +97,7 @@ class UnplacedPaymentsScreen extends ConsumerWidget {
                     return Text(
                       'These arrived but could not be matched to a bill. '
                       'Assign each one to the bill it pays.',
-                      style: GoogleFonts.inter(
+                      style: KasaFont.sans(
                           fontSize: 13, color: cs.kasaTextSub),
                     );
                   }
@@ -131,9 +131,9 @@ class _UnplacedRow extends ConsumerWidget {
               children: [
                 Text(
                   formatCurrency(toDouble(row['amount'])),
-                  style: GoogleFonts.spaceGrotesk(
+                  style: KasaFont.sans(
                     fontSize: 18,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w600,
                     color: cs.onSurface,
                     fontFeatures: kTabularFigures,
                   ),
@@ -141,7 +141,7 @@ class _UnplacedRow extends ConsumerWidget {
                 const SizedBox(height: 4),
                 Text(
                   'Account: ${ref0.isEmpty ? '(none entered)' : ref0}',
-                  style: GoogleFonts.jetBrainsMono(
+                  style: KasaFont.mono(
                       fontSize: 11, color: cs.onSurface),
                 ),
                 Text(
@@ -153,21 +153,21 @@ class _UnplacedRow extends ConsumerWidget {
                     if (when != null)
                       DateFormat('d MMM, HH:mm').format(when.toLocal()),
                   ].join(' · '),
-                  style: GoogleFonts.inter(fontSize: 11, color: cs.kasaTextSub),
+                  style: KasaFont.sans(fontSize: 11, color: cs.kasaTextSub),
                 ),
                 Text(
                   '${row['bank_display'] ?? ''} ${row['transaction_ref'] ?? ''}',
-                  style: GoogleFonts.jetBrainsMono(
+                  style: KasaFont.mono(
                       fontSize: 10, color: cs.kasaTextSub),
                 ),
               ],
             ),
           ),
           Text(
-            'ASSIGN',
-            style: GoogleFonts.spaceGrotesk(
+            'Assign',
+            style: KasaFont.sans(
               fontSize: 12,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w600,
               color: cs.secondary,
             ),
           ),

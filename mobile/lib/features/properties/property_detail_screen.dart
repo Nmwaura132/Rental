@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../../core/theme/kasa_fonts.dart';
 import '../../core/api/api_client.dart';
 import '../../core/constants.dart';
 import '../../core/providers/user_role_provider.dart';
@@ -40,7 +40,8 @@ class PropertyDetailScreen extends ConsumerWidget {
     return prop.when(
       loading: () => Scaffold(
         backgroundColor: cs.kasaBg,
-        body: const Center(child: CircularProgressIndicator()),
+        appBar: AppBar(backgroundColor: cs.kasaBg, elevation: 0),
+        body: const KasaSkeletonDetail(),
       ),
       error: (e, _) => Scaffold(
         backgroundColor: cs.kasaBg,
@@ -51,10 +52,10 @@ class PropertyDetailScreen extends ConsumerWidget {
             children: [
               Icon(Icons.cloud_off_outlined, size: 56, color: cs.kasaTextSub),
               const SizedBox(height: 12),
-              Text(apiError(e), style: GoogleFonts.inter(color: cs.kasaTextSub)),
+              Text(apiError(e), style: KasaFont.sans(color: cs.kasaTextSub)),
               const SizedBox(height: 16),
               KasaButton(
-                label: 'RETRY',
+                label: 'Retry',
                 variant: KasaButtonVariant.ghost,
                 leading: Icon(Icons.refresh, size: 16, color: cs.secondary),
                 onTap: () => ref.invalidate(propertyDetailProvider(propertyId)),
@@ -113,9 +114,6 @@ class _PropertyDetailView extends ConsumerWidget {
                     color: cs.kasaCard,
                     borderRadius: BorderRadius.circular(KasaRadius.sm),
                     border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
-                    boxShadow: [
-                      BoxShadow(color: cs.kasaShadow, offset: const Offset(3, 3), blurRadius: 0),
-                    ],
                   ),
                   child: Icon(Icons.arrow_back, size: 18, color: cs.onSurface),
                 ),
@@ -125,7 +123,7 @@ class _PropertyDetailView extends ConsumerWidget {
                 Padding(
                   padding: const EdgeInsets.only(right: 16),
                   child: KasaButton(
-                    label: 'ADD UNIT',
+                    label: 'Add unit',
                     variant: KasaButtonVariant.primary,
                     fullWidth: false,
                     leading: Icon(Icons.add, size: 14, color: cs.onPrimary),
@@ -166,9 +164,9 @@ class _PropertyDetailView extends ConsumerWidget {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  (data['name'] as String? ?? 'Property').toUpperCase(),
-                                  style: GoogleFonts.spaceGrotesk(
-                                    fontSize: 20, fontWeight: FontWeight.w700,
+                                  data['name'] as String? ?? 'Property',
+                                  style: KasaFont.sans(
+                                    fontSize: 20, fontWeight: FontWeight.w600,
                                     letterSpacing: -0.4, color: cs.onSurface, height: 1,
                                   ),
                                 ),
@@ -176,7 +174,7 @@ class _PropertyDetailView extends ConsumerWidget {
                                   const SizedBox(height: 2),
                                   Text(
                                     data['address'] as String,
-                                    style: GoogleFonts.inter(fontSize: 12, color: cs.kasaTextSub),
+                                    style: KasaFont.sans(fontSize: 12, color: cs.kasaTextSub),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                   ),
@@ -190,11 +188,11 @@ class _PropertyDetailView extends ConsumerWidget {
                       // KPI row
                       Row(
                         children: [
-                          _KpiTile(label: 'TOTAL', value: '$unitCount', accent: KasaCardAccent.elevated),
+                          _KpiTile(label: 'Total', value: '$unitCount', accent: KasaCardAccent.elevated),
                           const SizedBox(width: 10),
-                          _KpiTile(label: 'OCCUPIED', value: '$occupiedCount', accent: KasaCardAccent.secondary),
+                          _KpiTile(label: 'Occupied', value: '$occupiedCount', accent: KasaCardAccent.secondary),
                           const SizedBox(width: 10),
-                          _KpiTile(label: 'VACANT', value: '$vacantCount',
+                          _KpiTile(label: 'Vacant', value: '$vacantCount',
                               accent: vacantCount > 0 ? KasaCardAccent.tertiary : KasaCardAccent.none),
                         ],
                       ),
@@ -209,7 +207,7 @@ class _PropertyDetailView extends ConsumerWidget {
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
                   child: KasaButton(
-                    label: 'METER READINGS',
+                    label: 'Meter readings',
                     variant: KasaButtonVariant.ghost,
                     leading: Icon(Icons.speed, size: 16, color: cs.onSurface),
                     onTap: () => Navigator.of(context, rootNavigator: true).push(
@@ -229,7 +227,7 @@ class _PropertyDetailView extends ConsumerWidget {
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
                   child: KasaButton(
-                    label: 'RENUMBER UNITS',
+                    label: 'Renumber units',
                     variant: KasaButtonVariant.ghost,
                     leading: Icon(Icons.format_list_numbered, size: 16, color: cs.onSurface),
                     onTap: () async {
@@ -252,9 +250,9 @@ class _PropertyDetailView extends ConsumerWidget {
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
                 child: Text(
-                  'UNITS',
-                  style: GoogleFonts.spaceGrotesk(
-                    fontSize: 13, fontWeight: FontWeight.w700,
+                  'Units',
+                  style: KasaFont.sans(
+                    fontSize: 13, fontWeight: FontWeight.w600,
                     letterSpacing: 0.04, color: cs.kasaTextSub,
                   ),
                 ),
@@ -271,11 +269,11 @@ class _PropertyDetailView extends ConsumerWidget {
                       Icon(Icons.meeting_room_outlined, size: 64, color: cs.kasaTextSub),
                       const SizedBox(height: 12),
                       Text('No units yet.',
-                          style: GoogleFonts.spaceGrotesk(
-                              fontWeight: FontWeight.w700, color: cs.kasaTextSub)),
+                          style: KasaFont.sans(
+                              fontWeight: FontWeight.w600, color: cs.kasaTextSub)),
                       const SizedBox(height: 4),
                       Text('Tap ADD UNIT to create one.',
-                          style: GoogleFonts.inter(fontSize: 12, color: cs.kasaTextSub)),
+                          style: KasaFont.sans(fontSize: 12, color: cs.kasaTextSub)),
                     ],
                   ),
                 ),
@@ -389,12 +387,12 @@ class _KpiTile extends StatelessWidget {
         child: Column(
           children: [
             Text(value,
-                style: GoogleFonts.spaceGrotesk(
+                style: KasaFont.sans(
                     fontSize: 28, fontWeight: FontWeight.w900, color: fg, height: 1)),
             const SizedBox(height: 2),
             Text(label,
-                style: GoogleFonts.spaceGrotesk(
-                    fontSize: 9, fontWeight: FontWeight.w700,
+                style: KasaFont.sans(
+                    fontSize: 9, fontWeight: FontWeight.w600,
                     letterSpacing: 0.04, color: fg.withValues(alpha: 0.7))),
           ],
         ),
@@ -429,9 +427,9 @@ class _UnitCard extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
 
     final (accentColor, chipVariant, chipLabel) = switch (status) {
-      'occupied'    => (cs.secondary,   KasaChipVariant.secondary, 'OCCUPIED'),
-      'maintenance' => (cs.tertiary,    KasaChipVariant.tertiary,  'MAINTENANCE'),
-      _             => (cs.kasaTextSub, KasaChipVariant.neutral,   'VACANT'),
+      'occupied'    => (cs.secondary,   KasaChipVariant.secondary, 'Occupied'),
+      'maintenance' => (cs.tertiary,    KasaChipVariant.tertiary,  'Maintenance'),
+      _             => (cs.kasaTextSub, KasaChipVariant.neutral,   'Vacant'),
     };
 
     return GestureDetector(
@@ -440,7 +438,6 @@ class _UnitCard extends StatelessWidget {
       child: Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(KasaRadius.md),
-        boxShadow: [BoxShadow(color: cs.kasaShadow, offset: const Offset(4, 4), blurRadius: 0)],
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(KasaRadius.md),
@@ -449,9 +446,9 @@ class _UnitCard extends StatelessWidget {
             color: cs.kasaCard,
             border: Border(
               left:   BorderSide(color: accentColor,   width: 6),
-              right:  BorderSide(color: cs.kasaStroke, width: 2),
-              top:    BorderSide(color: cs.kasaStroke, width: 2),
-              bottom: BorderSide(color: cs.kasaStroke, width: 2),
+              right:  BorderSide(color: cs.kasaStroke, width: KasaBorders.card),
+              top:    BorderSide(color: cs.kasaStroke, width: KasaBorders.card),
+              bottom: BorderSide(color: cs.kasaStroke, width: KasaBorders.card),
             ),
           ),
           child: Padding(
@@ -465,9 +462,9 @@ class _UnitCard extends StatelessWidget {
                       Row(
                         children: [
                           Text(
-                            'UNIT ${unit['unit_number']}'.toUpperCase(),
-                            style: GoogleFonts.spaceGrotesk(
-                              fontSize: 15, fontWeight: FontWeight.w700,
+                            'Unit ${unit['unit_number']}',
+                            style: KasaFont.sans(
+                              fontSize: 15, fontWeight: FontWeight.w600,
                               letterSpacing: -0.15, color: cs.onSurface,
                             ),
                           ),
@@ -478,13 +475,13 @@ class _UnitCard extends StatelessWidget {
                       const SizedBox(height: 4),
                       Text(
                         '${_unitTypeLabels[unit['unit_type']] ?? unit['unit_type']} · Floor ${unit['floor']}',
-                        style: GoogleFonts.inter(fontSize: 11, color: cs.kasaTextSub),
+                        style: KasaFont.sans(fontSize: 11, color: cs.kasaTextSub),
                       ),
                       const SizedBox(height: 4),
                       Text(
                         '${formatCurrency(toDouble(unit['rent_amount']))}/mo',
-                        style: GoogleFonts.spaceGrotesk(
-                          fontSize: 13, fontWeight: FontWeight.w700,
+                        style: KasaFont.sans(
+                          fontSize: 13, fontWeight: FontWeight.w600,
                           color: cs.secondary, letterSpacing: -0.1,
                         ),
                       ),

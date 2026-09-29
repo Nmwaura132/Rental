@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -11,6 +9,7 @@ import 'auth/biometric_service.dart';
 import '../features/dashboard/dashboard_screen.dart';
 import '../features/properties/properties_screen.dart';
 import '../features/properties/property_detail_screen.dart';
+import '../features/properties/readings_tab_screen.dart';
 import '../features/properties/unit_detail_screen.dart';
 import '../features/payments/invoices_screen.dart';
 import '../features/payments/reports_screen.dart';
@@ -18,9 +17,11 @@ import '../features/payments/tax_screen.dart';
 import '../features/notifications/notifications_screen.dart';
 import '../features/tenants/tenants_screen.dart';
 import '../features/maintenance/maintenance_screen.dart';
+import '../features/more/more_screen.dart';
 import '../features/profile/profile_screen.dart';
 import 'providers/user_role_provider.dart';
 import 'navigation_key.dart';
+import 'widgets/kasa_nav_bar.dart';
 
 const _storage = FlutterSecureStorage();
 
@@ -64,7 +65,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         final role = await ref.read(userRoleProvider.future);
         // /tax is the landlord's own KRA liability; the API refuses it for
         // anyone else, so routing a tenant there would only show them a 403.
-        const tenantRestricted = ['/properties', '/tenants', '/reports', '/tax'];
+        const tenantRestricted = ['/properties', '/tenants', '/reports', '/tax', '/readings'];
         if (role == 'tenant' &&
             tenantRestricted.any(
                 (p) => state.matchedLocation.startsWith(p))) {
@@ -123,8 +124,12 @@ final routerProvider = Provider<GoRouter>((ref) {
               ),
             ],
           ),
+          // More (landlord) / Me (tenant). /more is listed first so it is the
+          // branch's root: tapping the tab lands here, and /tenants stays a
+          // screen inside the branch so the tab bar remains visible on it.
           StatefulShellBranch(
             routes: [
+              GoRoute(path: '/more', builder: (_, __) => const MoreScreen()),
               GoRoute(path: '/tenants', builder: (_, __) => const TenantsScreen()),
             ],
           ),
@@ -136,6 +141,12 @@ final routerProvider = Provider<GoRouter>((ref) {
           StatefulShellBranch(
             routes: [
               GoRoute(path: '/maintenance', builder: (_, __) => const MaintenanceScreen()),
+            ],
+          ),
+          // Caretaker's Readings tab (branch index ShellBranch.readings).
+          StatefulShellBranch(
+            routes: [
+              GoRoute(path: '/readings', builder: (_, __) => const ReadingsTabScreen()),
             ],
           ),
         ],
@@ -153,7 +164,6 @@ class MainShell extends ConsumerStatefulWidget {
 }
 
 class _MainShellState extends ConsumerState<MainShell> {
-  bool _isVisible = true;
   // Mirrors whether the ACTIVE branch's own nested Navigator still has
   // something to pop, kept in sync by the NavigationNotification listener
   // below. Used to tell "deep inside a branch" apart from "at a branch root".
@@ -162,148 +172,69 @@ class _MainShellState extends ConsumerState<MainShell> {
   @override
   Widget build(BuildContext context) {
     final role = ref.watch(userRoleProvider).valueOrNull;
-    final isTenant = role == 'tenant';
+    final items = kasaNavItemsFor(role);
 
-    // Design bundle labels: HOME / PROPS / TENANTS / BILLS / FIX
-    final navItems = isTenant
-        ? [
-            (icon: Icons.grid_view_rounded,  label: 'HOME',    index: 0),
-            (icon: Icons.receipt_long,        label: 'BILLS',   index: 3),
-            (icon: Icons.construction,        label: 'FIX',     index: 4),
-          ]
-        : [
-            (icon: Icons.grid_view_rounded,  label: 'HOME',    index: 0),
-            (icon: Icons.home_work_outlined,  label: 'PROPS',   index: 1),
-            (icon: Icons.people_outline,      label: 'TENANTS', index: 2),
-            (icon: Icons.receipt_long,        label: 'BILLS',   index: 3),
-            (icon: Icons.construction,        label: 'FIX',     index: 4),
-          ];
-
-    int selectedUITab = navItems.indexWhere((e) => e.index == widget.navigationShell.currentIndex);
+    final currentBranch = widget.navigationShell.currentIndex;
+    var selectedUITab = items.indexWhere((e) => e.branch == currentBranch);
     if (selectedUITab < 0) selectedUITab = 0;
 
-    final cs = Theme.of(context).colorScheme;
-    final bottomInset = MediaQuery.of(context).padding.bottom;
-    final isOnHomeTab = widget.navigationShell.currentIndex == 0;
+    final isOnHomeTab = currentBranch == ShellBranch.home;
 
     final shell = Scaffold(
+      // The bar is opaque now, but screens still pad their lists for it, so the
+      // body keeps running under it rather than being cut short.
       extendBody: true,
-      body: NotificationListener<UserScrollNotification>(
+      body: NotificationListener<NavigationNotification>(
         onNotification: (notification) {
-          if (notification.direction == ScrollDirection.forward) {
-            if (!_isVisible) setState(() => _isVisible = true);
-          } else if (notification.direction == ScrollDirection.reverse) {
-            if (_isVisible) setState(() => _isVisible = false);
+          final nextBranchCanPop = notification.canHandlePop;
+          if (nextBranchCanPop != _branchCanPop) {
+            setState(() => _branchCanPop = nextBranchCanPop);
           }
+          // WHY stop propagation (true) rather than the `false` that
+          // NavigatorPopHandler uses: WidgetsApp's root handler forwards
+          // whatever canHandlePop it receives straight to the engine as
+          // setFrameworkHandlesBack(). At a branch root the branch Navigator
+          // correctly reports canHandlePop: false — nothing to pop *within*
+          // the branch — and letting that reach WidgetsApp unregisters
+          // Flutter's back callback, so Android's default finish() runs and
+          // the app exits without PopScope ever being consulted.
+          // NavigatorPopHandler can forward it because there the two agree;
+          // here they are inverted (the branch cannot pop, yet we still want
+          // the framework to handle Back so we can fall back to Home), so it
+          // must stop here and leave PopScope as the only voice the engine
+          // hears.
           return true;
         },
-        child: NotificationListener<NavigationNotification>(
-          onNotification: (notification) {
-            final nextBranchCanPop = notification.canHandlePop;
-            if (nextBranchCanPop != _branchCanPop) {
-              setState(() => _branchCanPop = nextBranchCanPop);
-            }
-            // WHY stop propagation (true) rather than the `false` that
-            // NavigatorPopHandler uses: WidgetsApp's root handler forwards
-            // whatever canHandlePop it receives straight to the engine as
-            // setFrameworkHandlesBack(). At a branch root the branch Navigator
-            // correctly reports canHandlePop: false — nothing to pop *within*
-            // the branch — and letting that reach WidgetsApp unregisters
-            // Flutter's back callback, so Android's default finish() runs and
-            // the app exits without PopScope ever being consulted.
-            // NavigatorPopHandler can forward it because there the two agree;
-            // here they are inverted (the branch cannot pop, yet we still want
-            // the framework to handle Back so we can fall back to Home), so it
-            // must stop here and leave PopScope as the only voice the engine
-            // hears.
-            return true;
-          },
-          child: widget.navigationShell,
-        ),
+        child: widget.navigationShell,
       ),
-      // Neo-brutalist pill nav — no glass blur, no soft shadow, hard-edge offset only.
-      bottomNavigationBar: AnimatedSlide(
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeInOut,
-        offset: _isVisible ? Offset.zero : const Offset(0, 1.2),
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + bottomInset),
-          child: Container(
-            height: 68,
-            decoration: BoxDecoration(
-              color: cs.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: cs.outline, width: 2),
-              boxShadow: [
-                BoxShadow(
-                  color: cs.shadow,
-                  offset: const Offset(4, 4),
-                  blurRadius: 0,
-                ),
-              ],
-            ),
-            padding: const EdgeInsets.all(6),
-            child: Row(
-              children: List.generate(navItems.length, (i) {
-                final item = navItems[i];
-                final isSelected = selectedUITab == i;
-                return Expanded(
-                  child: GestureDetector(
-                    onTap: () => widget.navigationShell.goBranch(
-                      item.index,
-                      initialLocation: item.index == widget.navigationShell.currentIndex,
-                    ),
-                    behavior: HitTestBehavior.opaque,
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      curve: Curves.easeOut,
-                      decoration: BoxDecoration(
-                        color: isSelected ? cs.secondary : Colors.transparent,
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            item.icon,
-                            size: 20,
-                            color: isSelected ? cs.onSecondary : cs.onSurfaceVariant,
-                          ),
-                          const SizedBox(height: 3),
-                          Text(
-                            item.label,
-                            style: GoogleFonts.spaceGrotesk(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 0.02,
-                              color: isSelected ? cs.onSecondary : cs.onSurfaceVariant,
-                              height: 1,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                );
-              }),
-            ),
-          ),
-        ),
+      // A fixed, flat bar. The old pill slid away on scroll; the redesign keeps
+      // the way home in view at all times.
+      bottomNavigationBar: KasaNavBar(
+        items: items,
+        selectedIndex: selectedUITab,
+        onSelected: (i) {
+          final branch = items[i].branch;
+          widget.navigationShell.goBranch(
+            branch,
+            // Re-tapping the current tab returns it to its root.
+            initialLocation: branch == currentBranch,
+          );
+        },
       ),
     );
 
     // WHY: StatefulShellRoute.indexedStack pops each branch's OWN stack on
     // Back, but never falls back to branch 0 first — once a branch is at its
     // root, Back exits the app outright. That left any single tab switch
-    // (Props, Tenants, Bills, Fix) one Back press from closing Kasa, with no
-    // way home. Intercept only the "branch is already at its own root" case:
+    // (Properties, Money, Repairs, More) one Back press from closing Kasa, with
+    // no way home. Intercept only the "branch is already at its own root" case:
     // Back there returns to Home, while Back on Home, or Back deeper inside a
     // branch's own stack, behaves normally.
     return PopScope(
       canPop: isOnHomeTab || _branchCanPop,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
-        widget.navigationShell.goBranch(0, initialLocation: true);
+        widget.navigationShell.goBranch(ShellBranch.home, initialLocation: true);
       },
       child: shell,
     );

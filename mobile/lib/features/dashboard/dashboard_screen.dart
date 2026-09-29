@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../../core/theme/kasa_fonts.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api/api_client.dart';
@@ -16,6 +16,7 @@ import '../../core/utils/currency.dart';
 import '../../core/utils/pluralize.dart';
 import '../../core/widgets/kasa_logo.dart';
 import '../../core/widgets/kasa_primitives.dart';
+import 'needs_attention.dart';
 
 const _storage = FlutterSecureStorage();
 
@@ -68,7 +69,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     return Scaffold(
       body: SafeArea(
         child: stats.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
+          loading: () => const KasaSkeletonSummary(),
           error: (e, _) => _ErrorState(onRetry: () => ref.invalidate(dashboardProvider)),
           data: (data) {
             // WHY the role and not the payload shape: the dashboard endpoint
@@ -142,7 +143,7 @@ class _DashHeader extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final cs = Theme.of(context).colorScheme;
-    final firstName = (userName ?? 'there').split(' ').first.toUpperCase();
+    final firstName = (userName ?? 'there').split(' ').first;
     final unread = ref.watch(unreadCountProvider).valueOrNull ?? 0;
 
     return Padding(
@@ -201,10 +202,10 @@ class _DashHeader extends ConsumerWidget {
           ),
           const SizedBox(height: 16),
           Text(
-            'HABARI, $firstName',
-            style: GoogleFonts.spaceGrotesk(
+            'Habari, $firstName',
+            style: KasaFont.sans(
               fontSize: 28,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w600,
               letterSpacing: -0.56,
               color: cs.onSurface,
               height: 1,
@@ -213,7 +214,7 @@ class _DashHeader extends ConsumerWidget {
           const SizedBox(height: 4),
           Text(
             subtitle,
-            style: GoogleFonts.inter(
+            style: KasaFont.sans(
               fontSize: 14,
               fontWeight: FontWeight.w500,
               color: cs.kasaTextSub,
@@ -249,7 +250,7 @@ class _LandlordBento extends StatelessWidget {
     final totalUnits = (data['total_units'] ?? 0) as int;
     final occupiedUnits = (data['occupied_units'] ?? 0) as int;
     final occupancyPct = totalUnits > 0 ? (occupiedUnits / totalUnits * 100).round() : 0;
-    final month = DateFormat('MMM yyyy').format(DateTime.now()).toUpperCase();
+    final month = DateFormat('MMM yyyy').format(DateTime.now());
 
     return Column(
       // Stretch so the hero card fills the width like every row below
@@ -264,13 +265,13 @@ class _LandlordBento extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _Label('TOTAL REVENUE · $month'),
+              _Label('Total revenue · $month'),
               const SizedBox(height: 10),
               Text(
                 formatCurrency(revenue),
-                style: GoogleFonts.spaceGrotesk(
+                style: KasaFont.sans(
                   fontSize: 60,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w600,
                   letterSpacing: -1.44,
                   color: cs.onPrimary,
                   height: 1,
@@ -278,13 +279,21 @@ class _LandlordBento extends StatelessWidget {
               ),
               const SizedBox(height: 14),
               _TrendChip(
-                label: '${data['properties'] ?? 0} ${pluralize(data['properties'] ?? 0, 'PROPERTY', 'PROPERTIES')} · '
-                    '$totalUnits ${pluralize(totalUnits, 'UNIT', 'UNITS')}',
+                label: '${data['properties'] ?? 0} ${pluralize(data['properties'] ?? 0, 'property', 'properties')} · '
+                    '$totalUnits ${pluralize(totalUnits, 'unit', 'units')}',
                 onPrimary: cs.onPrimary,
                 primary: cs.primary,
               ),
             ],
           ),
+        ),
+        const SizedBox(height: 14),
+
+        // ── Needs attention: everything waiting on the landlord ──
+        NeedsAttentionSection(
+          canSeeMoney: canManageProperties,
+          overdueCount: overdueCount,
+          overdueAmount: overdueAmt,
         ),
         const SizedBox(height: 14),
 
@@ -297,7 +306,7 @@ class _LandlordBento extends StatelessWidget {
                 padding: const EdgeInsets.all(18),
                 child: Column(
                   children: [
-                    _Label('OCCUPANCY', ink: cs.onSecondary.withValues(alpha: 0.75)),
+                    _Label('Occupancy', ink: cs.onSecondary.withValues(alpha: 0.75)),
                     const SizedBox(height: 8),
                     _OccupancyRing(
                       pct: occupancyPct.toDouble(),
@@ -310,9 +319,9 @@ class _LandlordBento extends StatelessWidget {
                     const SizedBox(height: 8),
                     Text(
                       '$occupiedUnits / $totalUnits UNITS',
-                      style: GoogleFonts.spaceGrotesk(
+                      style: KasaFont.sans(
                         fontSize: 11,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w600,
                         color: cs.onSecondary,
                       ),
                     ),
@@ -329,13 +338,13 @@ class _LandlordBento extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _Label('OVERDUE', ink: cs.tertiaryInk.withValues(alpha: 0.75)),
+                    _Label('Overdue', ink: cs.tertiaryInk.withValues(alpha: 0.75)),
                     const SizedBox(height: 8),
                     Text(
                       '$overdueCount',
-                      style: GoogleFonts.spaceGrotesk(
+                      style: KasaFont.sans(
                         fontSize: 54,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w600,
                         letterSpacing: -1.62,
                         color: cs.tertiaryInk,
                         height: 1,
@@ -344,9 +353,9 @@ class _LandlordBento extends StatelessWidget {
                     const SizedBox(height: 6),
                     Text(
                       formatCurrency(overdueAmt),
-                      style: GoogleFonts.spaceGrotesk(
+                      style: KasaFont.sans(
                         fontSize: 11,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w600,
                         color: cs.tertiaryInk,
                       ),
                     ),
@@ -354,8 +363,8 @@ class _LandlordBento extends StatelessWidget {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('VIEW',
-                            style: GoogleFonts.inter(
+                        Text('View',
+                            style: KasaFont.sans(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w600,
                                 color: cs.tertiaryInk)),
@@ -376,9 +385,9 @@ class _LandlordBento extends StatelessWidget {
             // Caretakers cannot create a property, so offering it would be a
             // button that only ever returns a permission error.
             if (canManageProperties)
-              _QuickAction(icon: Icons.home_work_outlined, label: 'VIEW\nPROPERTIES', accent: KasaCardAccent.primary, onTap: () => context.push('/properties')),
-            _QuickAction(icon: Icons.people_outline, label: 'VIEW\nTENANTS', accent: KasaCardAccent.secondary, onTap: () => context.push('/tenants')),
-            _QuickAction(icon: Icons.receipt_long_outlined, label: 'VIEW\nINVOICES', accent: KasaCardAccent.tertiary, onTap: () => context.push('/invoices')),
+              _QuickAction(icon: Icons.home_work_outlined, label: 'View\nproperties', accent: KasaCardAccent.primary, onTap: () => context.push('/properties')),
+            _QuickAction(icon: Icons.people_outline, label: 'View\ntenants', accent: KasaCardAccent.secondary, onTap: () => context.push('/tenants')),
+            _QuickAction(icon: Icons.receipt_long_outlined, label: 'View\ninvoices', accent: KasaCardAccent.tertiary, onTap: () => context.push('/invoices')),
           ],
         ),
         const SizedBox(height: 14),
@@ -415,8 +424,8 @@ class _TenantBento extends StatelessWidget {
           }()
         : 0.68;
     final dueDateLabel = dueDate != null
-        ? DateFormat('d MMM yyyy').format(dueDate).toUpperCase()
-        : 'NEXT DUE DATE';
+        ? DateFormat('d MMM yyyy').format(dueDate)
+        : 'Next due date';
 
     return Column(
       // Stretch so the hero card fills the width like every row below
@@ -431,13 +440,13 @@ class _TenantBento extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _Label('RENT DUE · $dueDateLabel'),
+              _Label('Rent due · $dueDateLabel'),
               const SizedBox(height: 10),
               Text(
                 outstanding > 0 ? formatCurrency(outstanding) : formatCurrency(dueAmt),
-                style: GoogleFonts.spaceGrotesk(
+                style: KasaFont.sans(
                   fontSize: 60,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w600,
                   letterSpacing: -1.44,
                   color: cs.onPrimary,
                   height: 1,
@@ -446,13 +455,13 @@ class _TenantBento extends StatelessWidget {
               const SizedBox(height: 14),
               if (daysUntilDue != null)
                 _TrendChip(
-                  label: daysUntilDue > 0 ? '$daysUntilDue DAYS LEFT' : 'OVERDUE',
+                  label: daysUntilDue > 0 ? '$daysUntilDue DAYS LEFT' : 'Overdue',
                   onPrimary: cs.onPrimary,
                   primary: cs.primary,
                 ),
               const SizedBox(height: 16),
               KasaButton(
-                label: 'PAY WITH MPESA',
+                label: 'Pay with M-Pesa',
                 onTap: () => context.go('/invoices'),
                 variant: KasaButtonVariant.ghost,
                 leading: Icon(Icons.phone_android, size: 16, color: cs.onPrimary),
@@ -477,15 +486,15 @@ class _TenantBento extends StatelessWidget {
                     // rendered as "TENANCY ENDS / — / DAYS", which reads as
                     // missing data rather than the normal state it is.
                     _Label(
-                      tenancyEnd != null ? 'TENANCY ENDS' : 'TENANCY',
+                      tenancyEnd != null ? 'Tenancy ends' : 'Tenancy',
                       ink: cs.onSecondary.withValues(alpha: 0.75),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       tenancyEnd != null ? '${daysUntilTenancy ?? 0}' : 'OPEN',
-                      style: GoogleFonts.spaceGrotesk(
+                      style: KasaFont.sans(
                         fontSize: tenancyEnd != null ? 52 : 34,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w600,
                         letterSpacing: -1.56,
                         color: cs.onSecondary,
                         height: 1,
@@ -493,11 +502,11 @@ class _TenantBento extends StatelessWidget {
                     ),
                     Text(
                       tenancyEnd != null
-                          ? 'DAYS · ${DateFormat('d MMM yyyy').format(tenancyEnd).toUpperCase()}'
-                          : 'NO END DATE AGREED',
-                      style: GoogleFonts.spaceGrotesk(
+                          ? 'days · ${DateFormat('d MMM yyyy').format(tenancyEnd)}'
+                          : 'No end date agreed',
+                      style: KasaFont.sans(
                         fontSize: 10,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w600,
                         color: cs.onSecondary,
                       ),
                     ),
@@ -540,23 +549,23 @@ class _TenantBento extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _Label('TICKETS', ink: cs.tertiaryInk.withValues(alpha: 0.75)),
+                    _Label('Tickets', ink: cs.tertiaryInk.withValues(alpha: 0.75)),
                     const SizedBox(height: 8),
                     Text(
                       '${data['open_tickets'] ?? 0}',
-                      style: GoogleFonts.spaceGrotesk(
+                      style: KasaFont.sans(
                         fontSize: 52,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w600,
                         letterSpacing: -1.56,
                         color: cs.tertiaryInk,
                         height: 1,
                       ),
                     ),
                     Text(
-                      'OPEN · ${data['in_progress_tickets'] ?? 0} IN PROGRESS',
-                      style: GoogleFonts.spaceGrotesk(
+                      'Open · ${data['in_progress_tickets'] ?? 0} in progress',
+                      style: KasaFont.sans(
                         fontSize: 10,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w600,
                         color: cs.tertiaryInk,
                       ),
                     ),
@@ -564,8 +573,8 @@ class _TenantBento extends StatelessWidget {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('TRACK',
-                            style: GoogleFonts.inter(
+                        Text('Track',
+                            style: KasaFont.sans(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w600,
                                 color: cs.tertiaryInk)),
@@ -583,8 +592,8 @@ class _TenantBento extends StatelessWidget {
         // ── Quick actions ──
         _ResponsiveTileGrid(
           children: [
-            _QuickAction(icon: Icons.payments_outlined, label: 'PAY\nRENT', accent: KasaCardAccent.primary, onTap: () => context.go('/invoices')),
-            _QuickAction(icon: Icons.construction_outlined, label: 'REPORT\nISSUE', accent: KasaCardAccent.tertiary, onTap: () => context.go('/maintenance')),
+            _QuickAction(icon: Icons.payments_outlined, label: 'Pay\nrent', accent: KasaCardAccent.primary, onTap: () => context.go('/invoices')),
+            _QuickAction(icon: Icons.construction_outlined, label: 'Report\nissue', accent: KasaCardAccent.tertiary, onTap: () => context.go('/maintenance')),
             // WHY no third tile: this was "VIEW TENANCY" with an empty onTap —
             // a button that looked live and did nothing. There is no tenancy
             // detail screen for tenants to open, and the card above already
@@ -613,9 +622,9 @@ class _Label extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     return Text(
       text,
-      style: GoogleFonts.spaceGrotesk(
+      style: KasaFont.sans(
         fontSize: 11,
-        fontWeight: FontWeight.w700,
+        fontWeight: FontWeight.w600,
         letterSpacing: 0.04,
         color: ink ?? cs.onSurface.withValues(alpha: 0.75),
         height: 1,
@@ -640,9 +649,9 @@ class _TrendChip extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: GoogleFonts.spaceGrotesk(
+        style: KasaFont.sans(
           fontSize: 11,
-          fontWeight: FontWeight.w700,
+          fontWeight: FontWeight.w600,
           letterSpacing: 0.04,
           color: primary,
         ),
@@ -756,9 +765,9 @@ class _QuickAction extends StatelessWidget {
           const SizedBox(height: 10),
           Text(
             label,
-            style: GoogleFonts.spaceGrotesk(
+            style: KasaFont.sans(
               fontSize: 11,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w600,
               letterSpacing: -0.11,
               color: ink,
               height: 1.2,
@@ -803,9 +812,9 @@ class _OccupancyRing extends StatelessWidget {
           ),
           Text(
             label,
-            style: GoogleFonts.spaceGrotesk(
+            style: KasaFont.sans(
               fontSize: 26,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w600,
               letterSpacing: -1.04,
               color: labelColor,
               height: 1,
@@ -864,19 +873,19 @@ class _ActivityCard extends StatelessWidget {
         accent: KasaCardAccent.secondary,
         text: '${data['properties'] ?? 0} ${pluralize(data['properties'] ?? 0, 'property', 'properties')} · '
             '${data['total_units'] ?? 0} ${pluralize(data['total_units'] ?? 0, 'unit', 'units')}',
-        time: 'PORTFOLIO',
+        time: 'Portfolio',
       ),
       _ActivityItem(
         icon: Icons.people_outline,
         accent: KasaCardAccent.primary,
         text: '${data['occupied_units'] ?? 0} occupied · ${data['vacant_units'] ?? 0} vacant',
-        time: 'OCCUPANCY',
+        time: 'Occupancy',
       ),
       _ActivityItem(
         icon: Icons.payments_outlined,
         accent: KasaCardAccent.tertiary,
         text: 'KES ${_fmt(data['overdue_amount_kes'])} outstanding',
-        time: 'OVERDUE',
+        time: 'Overdue',
       ),
     ];
 
@@ -889,7 +898,7 @@ class _ActivityCard extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const _Label('PORTFOLIO SUMMARY'),
+                const _Label('Portfolio summary'),
                 // Rental income tax sits beside reports because it is the other
                 // thing a landlord leaves this screen to go and do — and it has
                 // a deadline, unlike reports.
@@ -902,9 +911,9 @@ class _ActivityCard extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
                       child: Text(
                         'TAX',
-                        style: GoogleFonts.spaceGrotesk(
+                        style: KasaFont.sans(
                           fontSize: 11,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w600,
                           color: cs.kasaTextSub,
                         ),
                       ),
@@ -922,10 +931,10 @@ class _ActivityCard extends StatelessWidget {
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
                       child: Text(
-                        'REPORTS',
-                        style: GoogleFonts.spaceGrotesk(
+                        'Reports',
+                        style: KasaFont.sans(
                           fontSize: 11,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w600,
                           color: cs.kasaTextSub,
                         ),
                       ),
@@ -954,7 +963,7 @@ class _ActivityCard extends StatelessWidget {
               decoration: BoxDecoration(
                 border: Border(
                   top: i > 0
-                      ? BorderSide(color: cs.kasaStroke, width: 2)
+                      ? BorderSide(color: cs.kasaStroke, width: KasaBorders.card)
                       : BorderSide.none,
                 ),
               ),
@@ -967,7 +976,7 @@ class _ActivityCard extends StatelessWidget {
                     decoration: BoxDecoration(
                       color: fill,
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: cs.kasaStroke, width: 2),
+                      border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
                     ),
                     child: Icon(item.icon, size: 20, color: ink),
                   ),
@@ -978,7 +987,7 @@ class _ActivityCard extends StatelessWidget {
                       children: [
                         Text(
                           item.text,
-                          style: GoogleFonts.inter(
+                          style: KasaFont.sans(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
                               color: cs.onSurface),
@@ -986,9 +995,9 @@ class _ActivityCard extends StatelessWidget {
                         const SizedBox(height: 2),
                         Text(
                           item.time,
-                          style: GoogleFonts.spaceGrotesk(
+                          style: KasaFont.sans(
                               fontSize: 10,
-                              fontWeight: FontWeight.w700,
+                              fontWeight: FontWeight.w600,
                               letterSpacing: 0.04,
                               color: cs.kasaTextSub),
                         ),
@@ -1033,14 +1042,14 @@ class _PaymentHistoryCard extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const _Label('PAYMENT HISTORY'),
+                const _Label('Payment history'),
                 GestureDetector(
                   onTap: () => context.go('/invoices'),
                   child: Text(
                     'ALL',
-                    style: GoogleFonts.spaceGrotesk(
+                    style: KasaFont.sans(
                       fontSize: 11,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w600,
                       color: cs.kasaTextSub,
                     ),
                   ),
@@ -1053,7 +1062,7 @@ class _PaymentHistoryCard extends StatelessWidget {
               padding: const EdgeInsets.all(24),
               child: Text(
                 'No recent payments',
-                style: GoogleFonts.inter(fontSize: 14, color: cs.kasaTextSub),
+                style: KasaFont.sans(fontSize: 14, color: cs.kasaTextSub),
               ),
             )
           else
@@ -1064,7 +1073,7 @@ class _PaymentHistoryCard extends StatelessWidget {
                 decoration: BoxDecoration(
                   border: Border(
                     top: i > 0
-                        ? BorderSide(color: cs.kasaStroke, width: 2)
+                        ? BorderSide(color: cs.kasaStroke, width: KasaBorders.card)
                         : BorderSide.none,
                   ),
                 ),
@@ -1077,7 +1086,7 @@ class _PaymentHistoryCard extends StatelessWidget {
                       decoration: BoxDecoration(
                         color: cs.primary,
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: cs.kasaStroke, width: 2),
+                        border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
                       ),
                       child: Icon(Icons.check, size: 22, color: cs.onPrimary),
                     ),
@@ -1088,9 +1097,9 @@ class _PaymentHistoryCard extends StatelessWidget {
                         children: [
                           Text(
                             formatCurrency(toDouble(h['amount'])),
-                            style: GoogleFonts.spaceGrotesk(
+                            style: KasaFont.sans(
                               fontSize: 15,
-                              fontWeight: FontWeight.w700,
+                              fontWeight: FontWeight.w600,
                               letterSpacing: -0.15,
                               color: cs.onSurface,
                             ),
@@ -1098,7 +1107,7 @@ class _PaymentHistoryCard extends StatelessWidget {
                           const SizedBox(height: 2),
                           Text(
                             '${h['mpesa_code'] ?? ''} · ${h['date'] ?? ''}',
-                            style: GoogleFonts.jetBrainsMono(
+                            style: KasaFont.mono(
                               fontSize: 10,
                               fontWeight: FontWeight.w500,
                               color: cs.kasaTextSub,
@@ -1107,7 +1116,7 @@ class _PaymentHistoryCard extends StatelessWidget {
                         ],
                       ),
                     ),
-                    const KasaChip(label: 'PAID', variant: KasaChipVariant.primary, small: true),
+                    const KasaChip(label: 'Paid', variant: KasaChipVariant.primary, small: true),
                   ],
                 ),
               );
@@ -1137,19 +1146,19 @@ class _ErrorState extends StatelessWidget {
             const SizedBox(height: 16),
             Text(
               'Could not load dashboard',
-              style: GoogleFonts.spaceGrotesk(
+              style: KasaFont.sans(
                 fontSize: 16,
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w600,
                 color: cs.onSurface,
               ),
             ),
             const SizedBox(height: 4),
             Text(
               'Check your connection and try again.',
-              style: GoogleFonts.inter(fontSize: 13, color: cs.kasaTextSub),
+              style: KasaFont.sans(fontSize: 13, color: cs.kasaTextSub),
             ),
             const SizedBox(height: 24),
-            KasaButton(label: 'RETRY', onTap: onRetry, variant: KasaButtonVariant.secondary),
+            KasaButton(label: 'Retry', onTap: onRetry, variant: KasaButtonVariant.secondary),
           ],
         ),
       ),
@@ -1269,11 +1278,11 @@ class _NoticeActionState extends ConsumerState<_NoticeAction> {
       final on = DateTime.tryParse(effective.toString());
       return Text(
         on != null
-            ? 'NOTICE GIVEN · MOVING ${DateFormat('d MMM').format(on).toUpperCase()}'
-            : 'NOTICE GIVEN',
-        style: GoogleFonts.spaceGrotesk(
+            ? 'Notice given · moving ${DateFormat('d MMM').format(on)}'
+            : 'Notice given',
+        style: KasaFont.sans(
           fontSize: 10,
-          fontWeight: FontWeight.w700,
+          fontWeight: FontWeight.w600,
           color: cs.onSecondary,
         ),
       );
@@ -1301,9 +1310,9 @@ class _NoticeActionState extends ConsumerState<_NoticeAction> {
               )
             : Text(
                 'GIVE 30 DAYS NOTICE',
-                style: GoogleFonts.spaceGrotesk(
+                style: KasaFont.sans(
                   fontSize: 10,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w600,
                   color: cs.onSecondary,
                 ),
               ),

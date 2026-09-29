@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../../core/theme/kasa_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:dio/dio.dart';
@@ -15,8 +15,10 @@ import '../../core/utils/phone.dart';
 import '../../core/widgets/kasa_primitives.dart';
 import '../../shared/widgets/shimmer_loading.dart';
 import 'deposit_settlement_screen.dart';
+import '../../core/utils/text.dart';
 
-final tenanciesProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
+final tenanciesProvider =
+    FutureProvider.autoDispose<List<dynamic>>((ref) async {
   final dio = ref.read(dioProvider);
   return fetchAllPages(dio, '/api/v1/tenants/tenancies/');
 });
@@ -108,7 +110,6 @@ Future<void> giveNoticeAsLandlord(
   }
 }
 
-
 /// Runs add-tenant, then add-tenancy, for one specific unit.
 ///
 /// WHY this is a function rather than a route: /tenants is a branch of the
@@ -169,9 +170,9 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
 
   static const _filters = [
     ('all', 'ALL'),
-    ('active', 'ACTIVE'),
-    ('ending', 'ENDING'),
-    ('past', 'PAST'),
+    ('active', 'Active'),
+    ('ending', 'Ending'),
+    ('past', 'Past'),
   ];
 
   List<Map<String, dynamic>> _applyFilter(List<dynamic> all) {
@@ -198,10 +199,10 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                 children: [
                   Expanded(
                     child: Text(
-                      'TENANTS',
-                      style: GoogleFonts.spaceGrotesk(
+                      'Tenants',
+                      style: KasaFont.sans(
                         fontSize: 32,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w600,
                         letterSpacing: -0.96,
                         color: cs.onSurface,
                         height: 1,
@@ -233,7 +234,9 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                     onTap: () => setState(() => _filter = f.$1),
                     child: KasaChip(
                       label: f.$2,
-                      variant: isSelected ? KasaChipVariant.secondary : KasaChipVariant.neutral,
+                      variant: isSelected
+                          ? KasaChipVariant.secondary
+                          : KasaChipVariant.neutral,
                     ),
                   ),
                 );
@@ -249,15 +252,17 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.cloud_off_outlined, size: 56, color: cs.kasaTextSub),
+                      Icon(Icons.cloud_off_outlined,
+                          size: 56, color: cs.kasaTextSub),
                       const SizedBox(height: 12),
                       Text(apiError(e),
-                          style: GoogleFonts.inter(color: cs.kasaTextSub)),
+                          style: KasaFont.sans(color: cs.kasaTextSub)),
                       const SizedBox(height: 16),
                       KasaButton(
-                        label: 'RETRY',
+                        label: 'Retry',
                         variant: KasaButtonVariant.ghost,
-                        leading: Icon(Icons.refresh, size: 16, color: cs.secondary),
+                        leading:
+                            Icon(Icons.refresh, size: 16, color: cs.secondary),
                         onTap: () => ref.invalidate(tenanciesProvider),
                       ),
                     ],
@@ -270,39 +275,51 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.people_outline, size: 64, color: cs.kasaTextSub),
+                              Icon(Icons.people_outline,
+                                  size: 64, color: cs.kasaTextSub),
                               const SizedBox(height: 12),
                               Text(
-                                raw.isEmpty ? 'No tenants yet.' : 'No results.',
-                                style: GoogleFonts.spaceGrotesk(
-                                    fontWeight: FontWeight.w700,
-                                    color: cs.kasaTextSub)),
+                                  raw.isEmpty
+                                      ? 'No tenants yet.'
+                                      : 'No results.',
+                                  style: KasaFont.sans(
+                                      fontWeight: FontWeight.w600,
+                                      color: cs.kasaTextSub)),
                               const SizedBox(height: 4),
                               Text(
-                                raw.isEmpty ? 'Tap ADD to register a tenant.' : 'Try a different filter.',
-                                style: GoogleFonts.inter(
-                                    fontSize: 12, color: cs.kasaTextSub)),
+                                  raw.isEmpty
+                                      ? 'Tap ADD to register a tenant.'
+                                      : 'Try a different filter.',
+                                  style: KasaFont.sans(
+                                      fontSize: 12, color: cs.kasaTextSub)),
                             ],
                           ),
                         )
                       : RefreshIndicator(
-                          onRefresh: () => ref.refresh(tenanciesProvider.future),
+                          onRefresh: () =>
+                              ref.refresh(tenanciesProvider.future),
                           child: ListView.builder(
                             padding: const EdgeInsets.fromLTRB(20, 4, 20, 100),
                             itemCount: list.length,
                             itemBuilder: (_, i) {
                               final tenancy = list[i];
-                              final name =
-                                  tenancy['tenant_name'] as String? ?? 'Unknown';
-                              final apiStatus = tenancy['status'] as String? ?? 'unknown';
-                              final displayStatus = _tenancyDisplayStatus(tenancy);
-                              final property = tenancy['property_name'] as String? ?? '';
-                              final unit = tenancy['unit_number'] as String? ?? '';
+                              final name = tenancy['tenant_name'] as String? ??
+                                  'Unknown';
+                              final apiStatus =
+                                  tenancy['status'] as String? ?? 'unknown';
+                              final displayStatus =
+                                  _tenancyDisplayStatus(tenancy);
+                              final property =
+                                  tenancy['property_name'] as String? ?? '';
+                              final unit =
+                                  tenancy['unit_number'] as String? ?? '';
                               final phone = tenancy['tenant_phone'] as String?;
                               final rent = tenancy['rent_amount'];
                               final endDate = tenancy['end_date'] as String?;
                               final noticeDate = DateTime.tryParse(
-                                  tenancy['notice_effective_date']?.toString() ?? '');
+                                  tenancy['notice_effective_date']
+                                          ?.toString() ??
+                                      '');
 
                               // Design: overdue→primary, ending→tertiary, active→secondary
                               final chipVariant = displayStatus == 'ending'
@@ -311,10 +328,10 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                                       ? KasaChipVariant.neutral
                                       : KasaChipVariant.secondary;
                               final chipLabel = displayStatus == 'ending'
-                                  ? 'ENDING'
+                                  ? 'Ending'
                                   : displayStatus == 'past'
-                                      ? apiStatus.toUpperCase()
-                                      : 'ACTIVE';
+                                      ? sentenceCase(apiStatus)
+                                      : 'Active';
 
                               return Padding(
                                 padding: const EdgeInsets.only(bottom: 10),
@@ -339,15 +356,17 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                                               children: [
                                                 Expanded(
                                                   child: Text(
-                                                    name.toUpperCase(),
-                                                    style: GoogleFonts.spaceGrotesk(
+                                                    name,
+                                                    style: KasaFont.sans(
                                                       fontSize: 14,
-                                                      fontWeight: FontWeight.w700,
+                                                      fontWeight:
+                                                          FontWeight.w600,
                                                       color: cs.onSurface,
                                                       letterSpacing: -0.14,
                                                     ),
                                                     maxLines: 1,
-                                                    overflow: TextOverflow.ellipsis,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
                                                   ),
                                                 ),
                                                 const SizedBox(width: 6),
@@ -358,11 +377,12 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                                                 ),
                                               ],
                                             ),
-                                            if (property.isNotEmpty || unit.isNotEmpty) ...[
+                                            if (property.isNotEmpty ||
+                                                unit.isNotEmpty) ...[
                                               const SizedBox(height: 2),
                                               Text(
-                                                'UNIT $unit · $property'.toUpperCase(),
-                                                style: GoogleFonts.inter(
+                                                'Unit $unit · $property',
+                                                style: KasaFont.sans(
                                                   fontSize: 11,
                                                   color: cs.kasaTextSub,
                                                   fontWeight: FontWeight.w500,
@@ -371,30 +391,35 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                                                 overflow: TextOverflow.ellipsis,
                                               ),
                                             ],
-                                            if (rent != null || endDate != null) ...[
+                                            if (rent != null ||
+                                                endDate != null) ...[
                                               const SizedBox(height: 6),
                                               Row(
                                                 children: [
                                                   if (endDate != null) ...[
                                                     Text(
-                                                      'TENANCY: $endDate',
-                                                      style: GoogleFonts.spaceGrotesk(
+                                                      'Tenancy: $endDate',
+                                                      style: KasaFont.sans(
                                                         fontSize: 10,
-                                                        fontWeight: FontWeight.w700,
+                                                        fontWeight:
+                                                            FontWeight.w600,
                                                         color: cs.kasaTextSub,
                                                       ),
                                                     ),
                                                     Text(
                                                       '  |  ',
-                                                      style: TextStyle(color: cs.kasaTextSub, fontSize: 10),
+                                                      style: TextStyle(
+                                                          color: cs.kasaTextSub,
+                                                          fontSize: 10),
                                                     ),
                                                   ],
                                                   if (rent != null)
                                                     Text(
                                                       'KES ${rent.toString().replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')}',
-                                                      style: GoogleFonts.spaceGrotesk(
+                                                      style: KasaFont.sans(
                                                         fontSize: 10,
-                                                        fontWeight: FontWeight.w700,
+                                                        fontWeight:
+                                                            FontWeight.w600,
                                                         color: cs.kasaTextSub,
                                                       ),
                                                     ),
@@ -405,18 +430,21 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                                               const SizedBox(height: 2),
                                               Text(
                                                 phone,
-                                                style: GoogleFonts.jetBrainsMono(
+                                                style:
+                                                    KasaFont.mono(
                                                   fontSize: 11,
                                                   color: cs.kasaTextSub,
                                                 ),
                                               ),
                                             ],
-                                            if (noticeDate != null && apiStatus == 'active') ...[
+                                            if (noticeDate != null &&
+                                                apiStatus == 'active') ...[
                                               const SizedBox(height: 6),
                                               KasaChip(
                                                 label:
-                                                    'NOTICE · OUT BY ${DateFormat('d MMM').format(noticeDate).toUpperCase()}',
-                                                variant: KasaChipVariant.tertiary,
+                                                    'Notice · out by ${DateFormat('d MMM').format(noticeDate)}',
+                                                variant:
+                                                    KasaChipVariant.tertiary,
                                                 small: true,
                                               ),
                                             ],
@@ -425,17 +453,25 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                                       ),
                                       // Ended tenancies keep a menu for the
                                       // one thing left to do: settle the deposit.
-                                      if (apiStatus == 'active' || apiStatus == 'terminated')
+                                      if (apiStatus == 'active' ||
+                                          apiStatus == 'terminated')
                                         PopupMenuButton<String>(
                                           icon: Icon(Icons.more_vert,
                                               size: 20, color: cs.kasaTextSub),
                                           onSelected: (action) async {
                                             if (action == 'settle_deposit') {
-                                              await Navigator.of(context, rootNavigator: true).push(
+                                              await Navigator.of(context,
+                                                      rootNavigator: true)
+                                                  .push(
                                                 MaterialPageRoute(
-                                                  builder: (_) => DepositSettlementScreen(
-                                                    tenancyId: tenancy['id'] as int,
-                                                    tenantName: tenancy['tenant_name']?.toString() ?? 'Tenant',
+                                                  builder: (_) =>
+                                                      DepositSettlementScreen(
+                                                    tenancyId:
+                                                        tenancy['id'] as int,
+                                                    tenantName:
+                                                        tenancy['tenant_name']
+                                                                ?.toString() ??
+                                                            'Tenant',
                                                   ),
                                                 ),
                                               );
@@ -443,7 +479,8 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                                               return;
                                             }
                                             if (action == 'give_notice') {
-                                              await giveNoticeAsLandlord(context, ref, tenancy);
+                                              await giveNoticeAsLandlord(
+                                                  context, ref, tenancy);
                                               return;
                                             }
                                             if (action == 'send_tenancy') {
@@ -463,7 +500,8 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                                                     content: Text(
                                                         resp.data['message'] ??
                                                             'Done'),
-                                                    backgroundColor: Colors.green,
+                                                    backgroundColor:
+                                                        Colors.green,
                                                   ));
                                                 }
                                               } catch (e) {
@@ -519,17 +557,20 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                                                   await ref
                                                       .read(dioProvider)
                                                       .patch(
-                                                        '/api/v1/tenants/tenancies/${tenancy['id']}/',
-                                                        data: {
-                                                          'status': 'terminated'
-                                                        },
-                                                      );
-                                                  ref.invalidate(tenanciesProvider);
+                                                    '/api/v1/tenants/tenancies/${tenancy['id']}/',
+                                                    data: {
+                                                      'status': 'terminated'
+                                                    },
+                                                  );
+                                                  ref.invalidate(
+                                                      tenanciesProvider);
                                                 } catch (e) {
                                                   if (context.mounted) {
-                                                    ScaffoldMessenger.of(context)
+                                                    ScaffoldMessenger.of(
+                                                            context)
                                                         .showSnackBar(SnackBar(
-                                                      content: Text(apiError(e)),
+                                                      content:
+                                                          Text(apiError(e)),
                                                       backgroundColor: cs.error,
                                                     ));
                                                   }
@@ -538,49 +579,55 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                                             }
                                           },
                                           itemBuilder: (_) => [
-                                            if (apiStatus == 'terminated' || noticeDate != null)
+                                            if (apiStatus == 'terminated' ||
+                                                noticeDate != null)
                                               PopupMenuItem(
                                                 value: 'settle_deposit',
                                                 child: ListTile(
                                                   leading: Icon(
-                                                      Icons.account_balance_wallet_outlined,
+                                                      Icons
+                                                          .account_balance_wallet_outlined,
                                                       color: cs.primary),
-                                                  title: const Text('Settle deposit'),
+                                                  title: const Text(
+                                                      'Settle deposit'),
                                                 ),
                                               ),
                                             if (apiStatus == 'active')
                                               PopupMenuItem(
                                                 value: 'send_tenancy',
-                                              child: ListTile(
-                                                leading: Icon(
-                                                    Icons.picture_as_pdf_outlined,
-                                                    color: cs.secondary),
-                                                title: const Text(
-                                                    'Send Tenancy Agreement'),
+                                                child: ListTile(
+                                                  leading: Icon(
+                                                      Icons
+                                                          .picture_as_pdf_outlined,
+                                                      color: cs.secondary),
+                                                  title: const Text(
+                                                      'Send Tenancy Agreement'),
+                                                ),
                                               ),
-                                            ),
-                                            if (apiStatus == 'active' && noticeDate == null)
+                                            if (apiStatus == 'active' &&
+                                                noticeDate == null)
                                               PopupMenuItem(
                                                 value: 'give_notice',
                                                 child: ListTile(
                                                   leading: Icon(
                                                       Icons.event_busy_outlined,
                                                       color: cs.tertiary),
-                                                  title: const Text('Give notice'),
+                                                  title:
+                                                      const Text('Give notice'),
                                                 ),
                                               ),
                                             if (apiStatus == 'active')
                                               PopupMenuItem(
                                                 value: 'terminate',
-                                              child: ListTile(
-                                                leading: Icon(
-                                                    Icons.cancel_outlined,
-                                                    color: cs.error),
-                                                title: Text('Terminate',
-                                                    style: TextStyle(
-                                                        color: cs.error)),
+                                                child: ListTile(
+                                                  leading: Icon(
+                                                      Icons.cancel_outlined,
+                                                      color: cs.error),
+                                                  title: Text('Terminate',
+                                                      style: TextStyle(
+                                                          color: cs.error)),
+                                                ),
                                               ),
-                                            ),
                                           ],
                                         ),
                                     ],
@@ -626,10 +673,10 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Text(
-                  'ADD TENANT',
-                  style: GoogleFonts.spaceGrotesk(
+                  'Add tenant',
+                  style: KasaFont.sans(
                     fontSize: 22,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w600,
                     letterSpacing: -0.5,
                     color: scs.onSurface,
                   ),
@@ -649,19 +696,20 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                           decoration: BoxDecoration(
                             color: scs.secondaryContainer,
                             borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: scs.kasaStroke, width: 2),
+                            border: Border.all(
+                                color: scs.kasaStroke, width: KasaBorders.card),
                           ),
                           child: Icon(Icons.person_add,
                               size: 20, color: scs.onSecondaryContainer),
                         ),
                         title: Text('Add Tenant',
-                            style: GoogleFonts.spaceGrotesk(
-                                fontWeight: FontWeight.w700)),
+                            style:
+                                KasaFont.sans(fontWeight: FontWeight.w600)),
                         subtitle: Text('Register a new tenant account',
-                            style: GoogleFonts.inter(
+                            style: KasaFont.sans(
                                 fontSize: 12, color: scs.kasaTextSub)),
-                        trailing: Icon(Icons.chevron_right,
-                            color: scs.kasaTextSub),
+                        trailing:
+                            Icon(Icons.chevron_right, color: scs.kasaTextSub),
                         onTap: () => Navigator.pop(sheetCtx, 'addTenant'),
                       ),
                       Divider(height: 1, color: scs.kasaStroke, thickness: 2),
@@ -672,19 +720,20 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                           decoration: BoxDecoration(
                             color: scs.tertiaryContainer,
                             borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: scs.kasaStroke, width: 2),
+                            border: Border.all(
+                                color: scs.kasaStroke, width: KasaBorders.card),
                           ),
                           child: Icon(Icons.assignment,
                               size: 20, color: scs.onTertiaryContainer),
                         ),
                         title: Text('New Tenancy',
-                            style: GoogleFonts.spaceGrotesk(
-                                fontWeight: FontWeight.w700)),
+                            style:
+                                KasaFont.sans(fontWeight: FontWeight.w600)),
                         subtitle: Text('Assign a unit to an existing tenant',
-                            style: GoogleFonts.inter(
+                            style: KasaFont.sans(
                                 fontSize: 12, color: scs.kasaTextSub)),
-                        trailing: Icon(Icons.chevron_right,
-                            color: scs.kasaTextSub),
+                        trailing:
+                            Icon(Icons.chevron_right, color: scs.kasaTextSub),
                         onTap: () => Navigator.pop(sheetCtx, 'newTenancy'),
                       ),
                     ],
@@ -996,10 +1045,10 @@ class _AddTenantFormState extends ConsumerState<_AddTenantForm> {
     return Padding(
       padding: const EdgeInsets.only(top: 16, bottom: 6),
       child: Text(
-        text.toUpperCase(),
-        style: GoogleFonts.spaceGrotesk(
+        text,
+        style: KasaFont.sans(
           fontSize: 11,
-          fontWeight: FontWeight.w700,
+          fontWeight: FontWeight.w600,
           letterSpacing: 0.04,
           color: cs.kasaTextSub,
         ),
@@ -1012,269 +1061,265 @@ class _AddTenantFormState extends ConsumerState<_AddTenantForm> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-          // Scrollable form
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // ── Personal Info ──────────────────────────────
-                    _sectionLabel('Personal Information'),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextFormField(
-                            controller: _firstCtrl,
-                            decoration: const InputDecoration(
-                                labelText: 'First Name *', isDense: true),
-                            textCapitalization: TextCapitalization.words,
-                            validator: (v) => v!.isEmpty ? 'Required' : null,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: TextFormField(
-                              controller: _lastCtrl,
-                              decoration: const InputDecoration(
-                                  labelText: 'Last Name *', isDense: true),
-                              textCapitalization: TextCapitalization.words,
-                              validator: (v) => v!.isEmpty ? 'Required' : null,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      TextFormField(
-                        controller: _phoneCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Phone Number *',
-                          hintText: '712 345 678',
-                          prefixIcon: Icon(Icons.phone),
-                          prefixText: '+254 ',
-                          isDense: true,
+        // Scrollable form
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ── Personal Info ──────────────────────────────
+                  _sectionLabel('Personal Information'),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          controller: _firstCtrl,
+                          decoration: const InputDecoration(
+                              labelText: 'First Name *', isDense: true),
+                          textCapitalization: TextCapitalization.words,
+                          validator: (v) => v!.isEmpty ? 'Required' : null,
                         ),
-                        keyboardType: TextInputType.phone,
-                        inputFormatters: [
-                          FilteringTextInputFormatter.digitsOnly,
-                          LengthLimitingTextInputFormatter(12),
-                        ],
-                        validator: validateKenyanPhone,
                       ),
-
-                      // ── Identity ───────────────────────────────────
-                      _sectionLabel('Identity'),
-                      TextFormField(
-                        controller: _idCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'National ID Number',
-                          hintText: 'e.g. 12345678',
-                          prefixIcon: Icon(Icons.badge_outlined),
-                          isDense: true,
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextFormField(
+                          controller: _lastCtrl,
+                          decoration: const InputDecoration(
+                              labelText: 'Last Name *', isDense: true),
+                          textCapitalization: TextCapitalization.words,
+                          validator: (v) => v!.isEmpty ? 'Required' : null,
                         ),
-                        keyboardType: TextInputType.number,
                       ),
-                      const SizedBox(height: 12),
-
-                      // WHY collected here: eRITS ties each registered property
-                      // to the PIN of whoever occupies it, and a monthly filing
-                      // missing tenant PINs is the thing KRA rejects. Asking at
-                      // move-in is far easier than chasing it on the 19th.
-                      TextFormField(
-                        controller: _kraCtrl,
-                        textCapitalization: TextCapitalization.characters,
-                        inputFormatters: const [UpperCaseTextFormatter()],
-                        decoration: const InputDecoration(
-                          labelText: 'KRA PIN',
-                          hintText: 'e.g. A012345678Z',
-                          helperText: 'Needed for your monthly rental tax filing',
-                          prefixIcon: Icon(Icons.receipt_long_outlined),
-                          isDense: true,
-                        ),
-                        validator: validateKraPin,
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(child: _IdPhotoTile(
-                            label: 'ID Front',
-                            file: _idFrontPhoto,
-                            onTap: () => _pickId('front'),
-                          )),
-                          const SizedBox(width: 10),
-                          Expanded(child: _IdPhotoTile(
-                            label: 'ID Back',
-                            file: _idBackPhoto,
-                            onTap: () => _pickId('back'),
-                          )),
-                        ],
-                      ),
-
-                      // ── Occupation ─────────────────────────────────
-                      _sectionLabel('Occupation'),
-                      DropdownButtonFormField<String>(
-                        decoration: const InputDecoration(
-                            labelText: 'Type', isDense: true),
-                        initialValue: _occupationType,
-                        hint: const Text('Select…'),
-                        isExpanded: true,
-                        items: _occupationTypes
-                            .map((o) =>
-                                DropdownMenuItem(value: o, child: Text(o)))
-                            .toList(),
-                        onChanged: (v) =>
-                            setState(() => _occupationType = v),
-                      ),
-                      const SizedBox(height: 10),
-                      TextFormField(
-                        controller: _occupationCtrl,
-                        decoration: InputDecoration(
-                          labelText: _occupationType == 'Student'
-                              ? 'School / Institution'
-                              : 'Employer / Business Name',
-                          isDense: true,
-                        ),
-                        textCapitalization: TextCapitalization.words,
-                      ),
-
-                      // ── Next of Kin ────────────────────────────────
-                      _sectionLabel('Next of Kin'),
-                      TextFormField(
-                        controller: _kinNameCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Full Name',
-                          prefixIcon: Icon(Icons.person_outline),
-                          isDense: true,
-                        ),
-                        textCapitalization: TextCapitalization.words,
-                      ),
-                      const SizedBox(height: 10),
-                      TextFormField(
-                        controller: _kinPhoneCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Phone Number',
-                          hintText: '712 345 678',
-                          prefixIcon: Icon(Icons.phone_outlined),
-                          prefixText: '+254 ',
-                          isDense: true,
-                        ),
-                        keyboardType: TextInputType.phone,
-                        inputFormatters: [
-                          FilteringTextInputFormatter.digitsOnly,
-                          LengthLimitingTextInputFormatter(12),
-                        ],
-                      ),
-
-                      // ── Account ────────────────────────────────────
-                      _sectionLabel('Account Access'),
-                      TextFormField(
-                        controller: _passCtrl,
-                        obscureText: _obscure,
-                        decoration: InputDecoration(
-                          labelText: 'Temporary Password *',
-                          hintText: 'Min 8 characters',
-                          prefixIcon: const Icon(Icons.lock_outline),
-                          isDense: true,
-                          suffixIcon: IconButton(
-                            icon: Icon(_obscure
-                                ? Icons.visibility
-                                : Icons.visibility_off),
-                            onPressed: () =>
-                                setState(() => _obscure = !_obscure),
-                          ),
-                        ),
-                        validator: (v) {
-                          if (v!.isEmpty) return 'Required';
-                          if (v.length < 8) return 'Minimum 8 characters';
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 6),
-                      const Text(
-                        'Share this password with the tenant so they can log in.',
-                        style: TextStyle(fontSize: 11, color: Colors.grey),
-                      ),
-                      const SizedBox(height: 4),
-                      if (widget.forUnitId != null) ...[
-                        _sectionLabel('Tenancy'),
-                        if (_unit != null)
-                          _MoveInSummary(
-                            unit: _unit!,
-                            depositPaid: _depositPaid,
-                          ),
-                        const SizedBox(height: 8),
-                        InkWell(
-                          onTap: () async {
-                            final picked = await showDatePicker(
-                              context: context,
-                              initialDate: _startDate,
-                              firstDate: DateTime(2020),
-                              lastDate: DateTime.now()
-                                  .add(const Duration(days: 365)),
-                            );
-                            if (picked != null) {
-                              setState(() => _startDate = picked);
-                            }
-                          },
-                          child: InputDecorator(
-                            decoration: const InputDecoration(
-                              labelText: 'Move-in date',
-                              prefixIcon: Icon(Icons.event),
-                              isDense: true,
-                            ),
-                            child: Text(_uiDate.format(_startDate)),
-                          ),
-                        ),
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          value: _depositPaid,
-                          onChanged: (v) => setState(() => _depositPaid = v),
-                          title: const Text('Deposit already paid'),
-                          subtitle: const Text(
-                            'Leave off to bill it with the first rent',
-                            style: TextStyle(fontSize: 11),
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                      ],
                     ],
                   ),
-                ),
-              ),
-            ),
-
-            // Actions
-            const Divider(height: 1),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed:
-                        _loading ? null : () => Navigator.pop(context),
-                    child: const Text('Cancel'),
-                  ),
-                  const SizedBox(width: 8),
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      minimumSize: const Size(120, 48),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _phoneCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Phone Number *',
+                      hintText: '712 345 678',
+                      prefixIcon: Icon(Icons.phone),
+                      prefixText: '+254 ',
+                      isDense: true,
                     ),
-                    onPressed: _loading ? null : _submit,
-                    child: _loading
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child:
-                                CircularProgressIndicator(strokeWidth: 2))
-                        : const Text('Register Tenant'),
+                    keyboardType: TextInputType.phone,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      LengthLimitingTextInputFormatter(12),
+                    ],
+                    validator: validateKenyanPhone,
                   ),
+
+                  // ── Identity ───────────────────────────────────
+                  _sectionLabel('Identity'),
+                  TextFormField(
+                    controller: _idCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'National ID Number',
+                      hintText: 'e.g. 12345678',
+                      prefixIcon: Icon(Icons.badge_outlined),
+                      isDense: true,
+                    ),
+                    keyboardType: TextInputType.number,
+                  ),
+                  const SizedBox(height: 12),
+
+                  // WHY collected here: eRITS ties each registered property
+                  // to the PIN of whoever occupies it, and a monthly filing
+                  // missing tenant PINs is the thing KRA rejects. Asking at
+                  // move-in is far easier than chasing it on the 19th.
+                  TextFormField(
+                    controller: _kraCtrl,
+                    textCapitalization: TextCapitalization.characters,
+                    inputFormatters: const [UpperCaseTextFormatter()],
+                    decoration: const InputDecoration(
+                      labelText: 'KRA PIN',
+                      hintText: 'e.g. A012345678Z',
+                      helperText: 'Needed for your monthly rental tax filing',
+                      prefixIcon: Icon(Icons.receipt_long_outlined),
+                      isDense: true,
+                    ),
+                    validator: validateKraPin,
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                          child: _IdPhotoTile(
+                        label: 'ID Front',
+                        file: _idFrontPhoto,
+                        onTap: () => _pickId('front'),
+                      )),
+                      const SizedBox(width: 10),
+                      Expanded(
+                          child: _IdPhotoTile(
+                        label: 'ID Back',
+                        file: _idBackPhoto,
+                        onTap: () => _pickId('back'),
+                      )),
+                    ],
+                  ),
+
+                  // ── Occupation ─────────────────────────────────
+                  _sectionLabel('Occupation'),
+                  DropdownButtonFormField<String>(
+                    decoration:
+                        const InputDecoration(labelText: 'Type', isDense: true),
+                    initialValue: _occupationType,
+                    hint: const Text('Select…'),
+                    isExpanded: true,
+                    items: _occupationTypes
+                        .map((o) => DropdownMenuItem(value: o, child: Text(o)))
+                        .toList(),
+                    onChanged: (v) => setState(() => _occupationType = v),
+                  ),
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    controller: _occupationCtrl,
+                    decoration: InputDecoration(
+                      labelText: _occupationType == 'Student'
+                          ? 'School / Institution'
+                          : 'Employer / Business Name',
+                      isDense: true,
+                    ),
+                    textCapitalization: TextCapitalization.words,
+                  ),
+
+                  // ── Next of Kin ────────────────────────────────
+                  _sectionLabel('Next of Kin'),
+                  TextFormField(
+                    controller: _kinNameCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Full Name',
+                      prefixIcon: Icon(Icons.person_outline),
+                      isDense: true,
+                    ),
+                    textCapitalization: TextCapitalization.words,
+                  ),
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    controller: _kinPhoneCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Phone Number',
+                      hintText: '712 345 678',
+                      prefixIcon: Icon(Icons.phone_outlined),
+                      prefixText: '+254 ',
+                      isDense: true,
+                    ),
+                    keyboardType: TextInputType.phone,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      LengthLimitingTextInputFormatter(12),
+                    ],
+                  ),
+
+                  // ── Account ────────────────────────────────────
+                  _sectionLabel('Account Access'),
+                  TextFormField(
+                    controller: _passCtrl,
+                    obscureText: _obscure,
+                    decoration: InputDecoration(
+                      labelText: 'Temporary Password *',
+                      hintText: 'Min 8 characters',
+                      prefixIcon: const Icon(Icons.lock_outline),
+                      isDense: true,
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                            _obscure ? Icons.visibility : Icons.visibility_off),
+                        onPressed: () => setState(() => _obscure = !_obscure),
+                      ),
+                    ),
+                    validator: (v) {
+                      if (v!.isEmpty) return 'Required';
+                      if (v.length < 8) return 'Minimum 8 characters';
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Share this password with the tenant so they can log in.',
+                    style: TextStyle(fontSize: 11, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 4),
+                  if (widget.forUnitId != null) ...[
+                    _sectionLabel('Tenancy'),
+                    if (_unit != null)
+                      _MoveInSummary(
+                        unit: _unit!,
+                        depositPaid: _depositPaid,
+                      ),
+                    const SizedBox(height: 8),
+                    InkWell(
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: context,
+                          initialDate: _startDate,
+                          firstDate: DateTime(2020),
+                          lastDate:
+                              DateTime.now().add(const Duration(days: 365)),
+                        );
+                        if (picked != null) {
+                          setState(() => _startDate = picked);
+                        }
+                      },
+                      child: InputDecorator(
+                        decoration: const InputDecoration(
+                          labelText: 'Move-in date',
+                          prefixIcon: Icon(Icons.event),
+                          isDense: true,
+                        ),
+                        child: Text(_uiDate.format(_startDate)),
+                      ),
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: _depositPaid,
+                      onChanged: (v) => setState(() => _depositPaid = v),
+                      title: const Text('Deposit already paid'),
+                      subtitle: const Text(
+                        'Leave off to bill it with the first rent',
+                        style: TextStyle(fontSize: 11),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                  ],
                 ],
               ),
             ),
-          ],
+          ),
+        ),
+
+        // Actions
+        const Divider(height: 1),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: _loading ? null : () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  minimumSize: const Size(120, 48),
+                ),
+                onPressed: _loading ? null : _submit,
+                child: _loading
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Text('Register Tenant'),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1343,7 +1388,8 @@ class _AddTenancyDialogState extends ConsumerState<_AddTenancyDialog> {
     final unitId = widget.initialUnitId;
     if (unitId == null) return;
     for (final property in _properties) {
-      final units = (property['units'] as List? ?? []).cast<Map<String, dynamic>>();
+      final units =
+          (property['units'] as List? ?? []).cast<Map<String, dynamic>>();
       if (units.any((u) => u['id'] == unitId)) {
         _onPropertyChanged(property['id'] as int);
         _onUnitChanged(unitId);
@@ -1383,9 +1429,9 @@ class _AddTenancyDialogState extends ConsumerState<_AddTenancyDialog> {
     } catch (e) {
       if (mounted) {
         setState(() {
-        _loadError = e.toString();
-        _initialLoading = false;
-      });
+          _loadError = e.toString();
+          _initialLoading = false;
+        });
       }
     }
   }
@@ -1505,132 +1551,148 @@ class _AddTenancyDialogState extends ConsumerState<_AddTenancyDialog> {
               : SizedBox(
                   width: double.maxFinite,
                   child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Tenant picker
-                      DropdownButtonFormField<int>(
-                        isExpanded: true,
-                        decoration: const InputDecoration(labelText: 'Tenant *'),
-                        initialValue: _selectedTenantId,
-                        hint: _tenants.isEmpty
-                            ? const Text('No tenants — add one first', overflow: TextOverflow.ellipsis)
-                            : const Text('Select tenant', overflow: TextOverflow.ellipsis),
-                        items: _tenants
-                            .map((t) => DropdownMenuItem<int>(
-                                  value: t['id'] as int,
-                                  child: Text(
-                                      '${t['first_name']} ${t['last_name']}',
-                                      overflow: TextOverflow.ellipsis),
-                                ))
-                            .toList(),
-                        onChanged: (v) => setState(() => _selectedTenantId = v),
-                      ),
-                      const SizedBox(height: 12),
-
-                      // Property picker
-                      DropdownButtonFormField<int>(
-                        isExpanded: true,
-                        decoration: const InputDecoration(labelText: 'Property *'),
-                        initialValue: _selectedPropertyId,
-                        hint: _properties.isEmpty
-                            ? const Text('No properties — add one first', overflow: TextOverflow.ellipsis)
-                            : const Text('Select property', overflow: TextOverflow.ellipsis),
-                        items: _properties
-                            .map((p) => DropdownMenuItem<int>(
-                                  value: p['id'] as int,
-                                  child: Text(p['name'] as String,
-                                      overflow: TextOverflow.ellipsis),
-                                ))
-                            .toList(),
-                        onChanged: _onPropertyChanged,
-                      ),
-                      const SizedBox(height: 12),
-
-                      // Unit picker (only shown after property selected)
-                      if (_selectedPropertyId != null)
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Tenant picker
                         DropdownButtonFormField<int>(
                           isExpanded: true,
                           decoration:
-                              const InputDecoration(labelText: 'Vacant Unit *'),
-                          initialValue: _selectedUnitId,
-                          hint: _vacantUnits.isEmpty
-                              ? const Text('No vacant units', overflow: TextOverflow.ellipsis)
-                              : const Text('Select unit', overflow: TextOverflow.ellipsis),
-                          items: _vacantUnits
-                              .map((u) => DropdownMenuItem<int>(
-                                    value: u['id'] as int,
+                              const InputDecoration(labelText: 'Tenant *'),
+                          initialValue: _selectedTenantId,
+                          hint: _tenants.isEmpty
+                              ? const Text('No tenants — add one first',
+                                  overflow: TextOverflow.ellipsis)
+                              : const Text('Select tenant',
+                                  overflow: TextOverflow.ellipsis),
+                          items: _tenants
+                              .map((t) => DropdownMenuItem<int>(
+                                    value: t['id'] as int,
                                     child: Text(
-                                        'Unit ${u['unit_number']} — ${_unitTypeLabel(u['unit_type'])}',
+                                        '${t['first_name']} ${t['last_name']}',
                                         overflow: TextOverflow.ellipsis),
                                   ))
                               .toList(),
-                          onChanged: _vacantUnits.isEmpty ? null : _onUnitChanged,
+                          onChanged: (v) =>
+                              setState(() => _selectedTenantId = v),
                         ),
-                      const SizedBox(height: 12),
+                        const SizedBox(height: 12),
 
-                      // Rent & Deposit
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextFormField(
-                              controller: _rentCtrl,
-                              decoration: const InputDecoration(
-                                  labelText: 'Rent (${AppConstants.currency})', prefixText: '${AppConstants.currency} '),
-                              keyboardType: TextInputType.number,
-                            ),
+                        // Property picker
+                        DropdownButtonFormField<int>(
+                          isExpanded: true,
+                          decoration:
+                              const InputDecoration(labelText: 'Property *'),
+                          initialValue: _selectedPropertyId,
+                          hint: _properties.isEmpty
+                              ? const Text('No properties — add one first',
+                                  overflow: TextOverflow.ellipsis)
+                              : const Text('Select property',
+                                  overflow: TextOverflow.ellipsis),
+                          items: _properties
+                              .map((p) => DropdownMenuItem<int>(
+                                    value: p['id'] as int,
+                                    child: Text(p['name'] as String,
+                                        overflow: TextOverflow.ellipsis),
+                                  ))
+                              .toList(),
+                          onChanged: _onPropertyChanged,
+                        ),
+                        const SizedBox(height: 12),
+
+                        // Unit picker (only shown after property selected)
+                        if (_selectedPropertyId != null)
+                          DropdownButtonFormField<int>(
+                            isExpanded: true,
+                            decoration: const InputDecoration(
+                                labelText: 'Vacant Unit *'),
+                            initialValue: _selectedUnitId,
+                            hint: _vacantUnits.isEmpty
+                                ? const Text('No vacant units',
+                                    overflow: TextOverflow.ellipsis)
+                                : const Text('Select unit',
+                                    overflow: TextOverflow.ellipsis),
+                            items: _vacantUnits
+                                .map((u) => DropdownMenuItem<int>(
+                                      value: u['id'] as int,
+                                      child: Text(
+                                          'Unit ${u['unit_number']} — ${_unitTypeLabel(u['unit_type'])}',
+                                          overflow: TextOverflow.ellipsis),
+                                    ))
+                                .toList(),
+                            onChanged:
+                                _vacantUnits.isEmpty ? null : _onUnitChanged,
                           ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: TextFormField(
-                              controller: _depositCtrl,
-                              decoration: const InputDecoration(
-                                  labelText: 'Deposit (${AppConstants.currency})', prefixText: '${AppConstants.currency} '),
-                              keyboardType: TextInputType.number,
+                        const SizedBox(height: 12),
+
+                        // Rent & Deposit
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextFormField(
+                                controller: _rentCtrl,
+                                decoration: const InputDecoration(
+                                    labelText:
+                                        'Rent (${AppConstants.currency})',
+                                    prefixText: '${AppConstants.currency} '),
+                                keyboardType: TextInputType.number,
+                              ),
                             ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: TextFormField(
+                                controller: _depositCtrl,
+                                decoration: const InputDecoration(
+                                    labelText:
+                                        'Deposit (${AppConstants.currency})',
+                                    prefixText: '${AppConstants.currency} '),
+                                keyboardType: TextInputType.number,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+
+                        // Start date
+                        InkWell(
+                          onTap: () => _pickDate(isStart: true),
+                          child: InputDecorator(
+                            decoration: const InputDecoration(
+                                labelText: 'Start Date *',
+                                suffixIcon: Icon(Icons.calendar_today)),
+                            child: Text(_fmt.format(_startDate)),
                           ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-
-                      // Start date
-                      InkWell(
-                        onTap: () => _pickDate(isStart: true),
-                        child: InputDecorator(
-                          decoration: const InputDecoration(
-                              labelText: 'Start Date *',
-                              suffixIcon: Icon(Icons.calendar_today)),
-                          child: Text(_fmt.format(_startDate)),
                         ),
-                      ),
-                      const SizedBox(height: 12),
+                        const SizedBox(height: 12),
 
-                      // End date (optional)
-                      InkWell(
-                        onTap: () => _pickDate(isStart: false),
-                        child: InputDecorator(
-                          decoration: const InputDecoration(
-                              labelText: 'End Date (optional)',
-                              suffixIcon: Icon(Icons.calendar_today)),
-                          child: Text(
-                              _endDate != null ? _fmt.format(_endDate!) : 'Open-ended'),
+                        // End date (optional)
+                        InkWell(
+                          onTap: () => _pickDate(isStart: false),
+                          child: InputDecorator(
+                            decoration: const InputDecoration(
+                                labelText: 'End Date (optional)',
+                                suffixIcon: Icon(Icons.calendar_today)),
+                            child: Text(_endDate != null
+                                ? _fmt.format(_endDate!)
+                                : 'Open-ended'),
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 4),
+                        const SizedBox(height: 4),
 
-                      // Deposit paid
-                      CheckboxListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Deposit already paid'),
-                        value: _depositPaid,
-                        onChanged: (v) => setState(() => _depositPaid = v ?? false),
-                        controlAffinity: ListTileControlAffinity.leading,
-                      ),
-                    ],
+                        // Deposit paid
+                        CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Deposit already paid'),
+                          value: _depositPaid,
+                          onChanged: (v) =>
+                              setState(() => _depositPaid = v ?? false),
+                          controlAffinity: ListTileControlAffinity.leading,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
       actions: [
         TextButton(
           onPressed: _submitting ? null : () => Navigator.pop(context),
@@ -1700,7 +1762,8 @@ class _IdPhotoTile extends StatelessWidget {
                 child: Image.network(
                   file!.path,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => _placeholder(theme, label, true),
+                  errorBuilder: (_, __, ___) =>
+                      _placeholder(theme, label, true),
                 ),
               )
             : _placeholder(theme, label, false),
@@ -1714,7 +1777,8 @@ class _IdPhotoTile extends StatelessWidget {
       children: [
         Icon(
           captured ? Icons.check_circle_outline : Icons.add_a_photo_outlined,
-          color: captured ? theme.colorScheme.primary : theme.colorScheme.outline,
+          color:
+              captured ? theme.colorScheme.primary : theme.colorScheme.outline,
           size: 28,
         ),
         const SizedBox(height: 4),
@@ -1722,7 +1786,9 @@ class _IdPhotoTile extends StatelessWidget {
           captured ? 'Captured' : label,
           style: TextStyle(
             fontSize: 11,
-            color: captured ? theme.colorScheme.primary : theme.colorScheme.outline,
+            color: captured
+                ? theme.colorScheme.primary
+                : theme.colorScheme.outline,
           ),
         ),
       ],
@@ -1761,9 +1827,9 @@ class _MoveInSummary extends StatelessWidget {
               ),
               Text(
                 value,
-                style: GoogleFonts.spaceGrotesk(
+                style: KasaFont.sans(
                   fontSize: strong ? 14 : 12,
-                  fontWeight: strong ? FontWeight.w700 : FontWeight.w500,
+                  fontWeight: strong ? FontWeight.w600 : FontWeight.w500,
                   color: cs.onSurface,
                 ),
               ),

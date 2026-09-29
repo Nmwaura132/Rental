@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../../core/theme/kasa_fonts.dart';
 import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
 import '../../core/api/pagination.dart';
@@ -12,6 +12,7 @@ import '../../core/utils/currency.dart';
 import '../../core/widgets/kasa_primitives.dart';
 import '../../shared/widgets/shimmer_loading.dart';
 import 'unplaced_payments.dart';
+import '../../core/utils/text.dart';
 
 final _apiDate = DateFormat('yyyy-MM-dd');
 final _displayDate = DateFormat('dd MMM yyyy');
@@ -114,10 +115,10 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
               child: Row(
                 children: [
                   Text(
-                    'INVOICES',
-                    style: GoogleFonts.spaceGrotesk(
+                    'Invoices',
+                    style: KasaFont.sans(
                       fontSize: 32,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w600,
                       letterSpacing: -0.96,
                       color: cs.onSurface,
                       height: 1,
@@ -162,9 +163,9 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
                 children: [
                   for (final (value, label) in const [
                     ('all', 'ALL'),
-                    ('pending', 'PENDING'),
-                    ('paid', 'PAID'),
-                    ('overdue', 'OVERDUE'),
+                    ('pending', 'Pending'),
+                    ('paid', 'Paid'),
+                    ('overdue', 'Overdue'),
                   ]) ...[
                     GestureDetector(
                       onTap: () => setState(() => _filter = value),
@@ -234,7 +235,7 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
                             Text(
                               _filter == 'all'
                                   ? 'No invoices yet.'
-                                  : 'No ${_filter.toUpperCase()} invoices.',
+                                  : 'No $_filter invoices.',
                               textAlign: TextAlign.center,
                               style: const TextStyle(color: Colors.grey),
                             ),
@@ -304,12 +305,12 @@ class _InvoiceCard extends ConsumerWidget {
       _                => KasaChipVariant.neutral,
     };
     final chipLabel = switch (status) {
-      'paid'           => 'PAID',
-      'overdue'        => 'OVERDUE',
-      'pending'        => 'PENDING',
-      'partially_paid' => 'PARTIAL',
-      'cancelled'      => 'VOID',
-      _                => status.replaceAll('_', ' ').toUpperCase(),
+      'paid'           => 'Paid',
+      'overdue'        => 'Overdue',
+      'pending'        => 'Pending',
+      'partially_paid' => 'Partial',
+      'cancelled'      => 'Void',
+      _                => sentenceCase(status),
     };
 
     return Padding(
@@ -325,7 +326,7 @@ class _InvoiceCard extends ConsumerWidget {
               children: [
                 Text(
                   invoice['invoice_number'] ?? '',
-                  style: GoogleFonts.jetBrainsMono(
+                  style: KasaFont.mono(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
                     color: cs.kasaTextSub,
@@ -385,9 +386,9 @@ class _InvoiceCard extends ConsumerWidget {
             // Row: tenant · unit
             Text(
               '${invoice['tenant_name'] ?? ''} · Unit ${invoice['unit_number'] ?? ''}',
-              style: GoogleFonts.spaceGrotesk(
+              style: KasaFont.sans(
                 fontSize: 13,
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w600,
                 color: cs.onSurface,
               ),
             ),
@@ -402,19 +403,19 @@ class _InvoiceCard extends ConsumerWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'BALANCE DUE',
-                        style: GoogleFonts.spaceGrotesk(
+                        'Balance due',
+                        style: KasaFont.sans(
                           fontSize: 11,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w600,
                           color: cs.kasaTextSub,
                           letterSpacing: 0.04,
                         ),
                       ),
                       Text(
                         formatCurrency(balance),
-                        style: GoogleFonts.spaceGrotesk(
+                        style: KasaFont.sans(
                           fontSize: 22,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w600,
                           color: cs.onSurface,
                           height: 1.1,
                         ),
@@ -434,14 +435,6 @@ class _InvoiceCard extends ConsumerWidget {
                         border: Border.all(
                             color: cs.kasaStroke,
                             width: KasaBorders.card),
-                        boxShadow: [
-                          BoxShadow(
-                            color: cs.kasaShadow,
-                            offset: const Offset(KasaBorders.shadow,
-                                KasaBorders.shadow),
-                            blurRadius: 0,
-                          ),
-                        ],
                       ),
                       child: Icon(Icons.arrow_forward,
                           size: 18, color: cs.onSecondary),
@@ -454,10 +447,10 @@ class _InvoiceCard extends ConsumerWidget {
             if (invoice['due_date'] != null) ...[
               const SizedBox(height: 6),
               Text(
-                'DUE ${_tryFormatDate(invoice['due_date'])}',
-                style: GoogleFonts.spaceGrotesk(
+                'Due ${_tryFormatDate(invoice['due_date'])}',
+                style: KasaFont.sans(
                   fontSize: 10,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w600,
                   color: cs.kasaTextSub,
                   letterSpacing: 0.04,
                 ),
@@ -725,12 +718,12 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
       _                => KasaChipVariant.neutral,
     };
     final chipLabel = switch (status) {
-      'paid'           => 'PAID',
-      'overdue'        => 'OVERDUE',
-      'pending'        => 'PENDING',
-      'partially_paid' => 'PARTIAL',
-      'cancelled'      => 'VOID',
-      _                => status.replaceAll('_', ' ').toUpperCase(),
+      'paid'           => 'Paid',
+      'overdue'        => 'Overdue',
+      'pending'        => 'Pending',
+      'partially_paid' => 'Partial',
+      'cancelled'      => 'Void',
+      _                => sentenceCase(status),
     };
 
     return DraggableScrollableSheet(
@@ -765,7 +758,7 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
               children: [
                 Text(
                   invoice['invoice_number'] ?? '',
-                  style: GoogleFonts.jetBrainsMono(
+                  style: KasaFont.mono(
                     fontSize: 13, fontWeight: FontWeight.w700, color: cs.kasaTextSub,
                   ),
                 ),
@@ -778,15 +771,15 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
             // Hero amount
             Text(
               formatCurrency(toDouble(invoice['amount_due'])),
-              style: GoogleFonts.spaceGrotesk(
-                fontSize: 40, fontWeight: FontWeight.w700,
+              style: KasaFont.sans(
+                fontSize: 40, fontWeight: FontWeight.w600,
                 letterSpacing: -1.2, color: cs.onSurface, height: 1,
               ),
             ),
             const SizedBox(height: 4),
             Text(
               '${invoice['tenant_name'] ?? ''} · Unit ${invoice['unit_number'] ?? ''}',
-              style: GoogleFonts.inter(
+              style: KasaFont.sans(
                 fontSize: 13, fontWeight: FontWeight.w500, color: cs.kasaTextSub,
               ),
             ),
@@ -797,21 +790,21 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
               padding: EdgeInsets.zero,
               child: Column(
                 children: [
-                  _DetailRow('AMOUNT DUE', formatCurrency(toDouble(invoice['amount_due'])), isFirst: true),
-                  _DetailRow('AMOUNT PAID', formatCurrency(toDouble(invoice['amount_paid']))),
-                  _DetailRow('BALANCE', formatCurrency(toDouble(invoice['balance'])),
+                  _DetailRow('Amount due', formatCurrency(toDouble(invoice['amount_due'])), isFirst: true),
+                  _DetailRow('Amount paid', formatCurrency(toDouble(invoice['amount_paid']))),
+                  _DetailRow('Balance', formatCurrency(toDouble(invoice['balance'])),
                       bold: true,
                       valueColor: isPaid ? cs.statusPaid : cs.error),
                   if (invoice['due_date'] != null)
-                    _DetailRow('DUE DATE', _tryFormatDate(invoice['due_date'] as String)),
+                    _DetailRow('Due date', _tryFormatDate(invoice['due_date'] as String)),
                   if (invoice['period_start'] != null)
                     _DetailRow(
-                      'PERIOD',
+                      'Period',
                       '${_tryFormatDate(invoice['period_start'] as String)} – '
                           '${_tryFormatDate(invoice['period_end'] as String? ?? '')}',
                     ),
                   if (invoice['notes']?.isNotEmpty == true)
-                    _DetailRow('NOTES', invoice['notes'] as String),
+                    _DetailRow('Notes', invoice['notes'] as String),
                 ],
               ),
             ),
@@ -825,9 +818,9 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
                 children: [
                   const SizedBox(height: 16),
                   Text(
-                    'BREAKDOWN',
-                    style: GoogleFonts.spaceGrotesk(
-                      fontSize: 11, fontWeight: FontWeight.w700,
+                    'Breakdown',
+                    style: KasaFont.sans(
+                      fontSize: 11, fontWeight: FontWeight.w600,
                       letterSpacing: 0.04, color: cs.kasaTextSub,
                     ),
                   ),
@@ -843,7 +836,7 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
                           decoration: BoxDecoration(
                             border: Border(
                               top: i > 0
-                                  ? BorderSide(color: cs.kasaStroke, width: 2)
+                                  ? BorderSide(color: cs.kasaStroke, width: KasaBorders.card)
                                   : BorderSide.none,
                             ),
                           ),
@@ -856,7 +849,7 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
                                   children: [
                                     Text(
                                       li['description'] as String? ?? '',
-                                      style: GoogleFonts.inter(
+                                      style: KasaFont.sans(
                                         fontSize: 13, fontWeight: FontWeight.w600,
                                         color: cs.onSurface,
                                       ),
@@ -869,7 +862,7 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
                                         '${toDouble(li['units_consumed']).toStringAsFixed(0)} units '
                                         '× ${AppConstants.currency} '
                                         '${toDouble(li['unit_price']).toStringAsFixed(2)}',
-                                        style: GoogleFonts.jetBrainsMono(
+                                        style: KasaFont.mono(
                                           fontSize: 10, color: cs.kasaTextSub,
                                         ),
                                       ),
@@ -879,8 +872,8 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
                               ),
                               Text(
                                 formatCurrency(toDouble(li['amount'])),
-                                style: GoogleFonts.spaceGrotesk(
-                                  fontSize: 13, fontWeight: FontWeight.w700,
+                                style: KasaFont.sans(
+                                  fontSize: 13, fontWeight: FontWeight.w600,
                                   color: cs.onSurface,
                                 ),
                               ),
@@ -898,9 +891,9 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
 
             // Payments
             Text(
-              'PAYMENTS (${payments.length})',
-              style: GoogleFonts.spaceGrotesk(
-                fontSize: 11, fontWeight: FontWeight.w700,
+              'Payments (${payments.length})',
+              style: KasaFont.sans(
+                fontSize: 11, fontWeight: FontWeight.w600,
                 letterSpacing: 0.04, color: cs.kasaTextSub,
               ),
             ),
@@ -910,7 +903,7 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
                 padding: const EdgeInsets.all(16),
                 child: Text(
                   'No payments recorded yet.',
-                  style: GoogleFonts.inter(fontSize: 13, color: cs.kasaTextSub),
+                  style: KasaFont.sans(fontSize: 13, color: cs.kasaTextSub),
                 ),
               )
             else
@@ -924,7 +917,7 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
                       decoration: BoxDecoration(
                         border: Border(
                           top: i > 0
-                              ? BorderSide(color: cs.kasaStroke, width: 2)
+                              ? BorderSide(color: cs.kasaStroke, width: KasaBorders.card)
                               : BorderSide.none,
                         ),
                       ),
@@ -936,7 +929,7 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
                             decoration: BoxDecoration(
                               color: cs.primary,
                               borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: cs.kasaStroke, width: 2),
+                              border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
                             ),
                             child: Icon(Icons.check, size: 18, color: cs.onPrimary),
                           ),
@@ -947,14 +940,14 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
                               children: [
                                 Text(
                                   formatCurrency(toDouble(pm['amount'])),
-                                  style: GoogleFonts.spaceGrotesk(
-                                    fontSize: 14, fontWeight: FontWeight.w700,
+                                  style: KasaFont.sans(
+                                    fontSize: 14, fontWeight: FontWeight.w600,
                                     color: cs.onSurface,
                                   ),
                                 ),
                                 Text(
                                   '${(pm['method_display'] as String? ?? (pm['method'] as String? ?? '')).toUpperCase()} · ${_tryFormatDate(pm['paid_at'] as String? ?? '')}',
-                                  style: GoogleFonts.jetBrainsMono(
+                                  style: KasaFont.mono(
                                     fontSize: 10, color: cs.kasaTextSub,
                                   ),
                                 ),
@@ -963,28 +956,28 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
                                   if (pm['bank_name'] != null)
                                     Text(
                                       pm['bank_name'] as String,
-                                      style: GoogleFonts.inter(
+                                      style: KasaFont.sans(
                                         fontSize: 11, color: cs.kasaTextSub,
                                       ),
                                     ),
                                   if (pm['bank_reference'] != null)
                                     Text(
                                       'Ref: ${pm['bank_reference']}',
-                                      style: GoogleFonts.jetBrainsMono(
+                                      style: KasaFont.mono(
                                         fontSize: 10, color: cs.kasaTextSub,
                                       ),
                                     ),
                                   if (pm['bank_account'] != null)
                                     Text(
                                       'From: ${pm['bank_account']}',
-                                      style: GoogleFonts.jetBrainsMono(
+                                      style: KasaFont.mono(
                                         fontSize: 10, color: cs.kasaTextSub,
                                       ),
                                     ),
                                   if (pm['bank_branch'] != null)
                                     Text(
                                       'Branch: ${pm['bank_branch']}',
-                                      style: GoogleFonts.inter(
+                                      style: KasaFont.sans(
                                         fontSize: 10, color: cs.kasaTextSub,
                                       ),
                                     ),
@@ -997,7 +990,7 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
                                   if (pm['etims_receipt_number'] != null)
                                     Text(
                                       'eTIMS: ${pm['etims_receipt_number']}',
-                                      style: GoogleFonts.jetBrainsMono(
+                                      style: KasaFont.mono(
                                         fontSize: 10, color: cs.kasaTextSub,
                                       ),
                                     )
@@ -1010,7 +1003,7 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
                                             vertical: 2),
                                         child: Text(
                                           '+ Add eTIMS receipt',
-                                          style: GoogleFonts.inter(
+                                          style: KasaFont.sans(
                                             fontSize: 11,
                                             fontWeight: FontWeight.w600,
                                             color: cs.secondary,
@@ -1022,7 +1015,7 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
                               ],
                             ),
                           ),
-                          const KasaChip(label: 'PAID', variant: KasaChipVariant.primary, small: true),
+                          const KasaChip(label: 'Paid', variant: KasaChipVariant.primary, small: true),
                         ],
                       ),
                     );
@@ -1035,7 +1028,7 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
             // Actions
             if (!isPaid)
               KasaButton(
-                label: 'PAY WITH MPESA',
+                label: 'Pay with M-Pesa',
                 variant: KasaButtonVariant.primary,
                 leading: Icon(Icons.phone_android, size: 16, color: cs.onPrimary),
                 isLoading: _stkLoading,
@@ -1045,7 +1038,7 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
               if (canEdit) ...[
                 const SizedBox(height: 8),
                 KasaButton(
-                  label: 'EDIT INVOICE',
+                  label: 'Edit invoice',
                   variant: KasaButtonVariant.ghost,
                   leading: Icon(Icons.edit_outlined, size: 16, color: cs.onSurface),
                   onTap: () async {
@@ -1067,7 +1060,7 @@ class _InvoiceDetailSheetState extends ConsumerState<_InvoiceDetailSheet> {
               if (canVoid) ...[
                 const SizedBox(height: 8),
                 KasaButton(
-                  label: 'VOID INVOICE',
+                  label: 'Void invoice',
                   variant: KasaButtonVariant.ghost,
                   leading: Icon(Icons.cancel_outlined, size: 16, color: cs.tertiary),
                   onTap: () async {
@@ -1293,16 +1286,16 @@ class _DetailRow extends StatelessWidget {
       decoration: isFirst
           ? null
           : BoxDecoration(
-              border: Border(top: BorderSide(color: cs.kasaStroke, width: 2))),
+              border: Border(top: BorderSide(color: cs.kasaStroke, width: KasaBorders.card))),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             label,
-            style: GoogleFonts.spaceGrotesk(
+            style: KasaFont.sans(
               fontSize: 11,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w600,
               letterSpacing: 0.04,
               color: cs.kasaTextSub,
             ),
@@ -1312,7 +1305,7 @@ class _DetailRow extends StatelessWidget {
             child: Text(
               value,
               textAlign: TextAlign.right,
-              style: GoogleFonts.inter(
+              style: KasaFont.sans(
                 fontSize: 13,
                 fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
                 color: valueColor ?? cs.onSurface,
@@ -1366,16 +1359,16 @@ class _PaymentMethodSheet extends StatelessWidget {
             ),
           ),
           Text(
-            'PAY INVOICE',
-            style: GoogleFonts.spaceGrotesk(
-              fontSize: 22, fontWeight: FontWeight.w700,
+            'Pay invoice',
+            style: KasaFont.sans(
+              fontSize: 22, fontWeight: FontWeight.w600,
               letterSpacing: -0.44, color: cs.onSurface,
             ),
           ),
           const SizedBox(height: 4),
           Text(
             'Invoice $invoiceNo · Balance ${formatCurrency(balance)}',
-            style: GoogleFonts.inter(fontSize: 13, color: cs.kasaTextSub),
+            style: KasaFont.sans(fontSize: 13, color: cs.kasaTextSub),
           ),
           const SizedBox(height: 20),
 
@@ -1472,9 +1465,9 @@ class _PaymentMethodSheet extends StatelessWidget {
                   color: Theme.of(ctx).colorScheme.secondary, size: 22),
               const SizedBox(width: 10),
               Text(
-                'LIPA NA M-PESA',
-                style: GoogleFonts.spaceGrotesk(
-                  fontSize: 18, fontWeight: FontWeight.w700,
+                'Lipa na M-Pesa',
+                style: KasaFont.sans(
+                  fontSize: 18, fontWeight: FontWeight.w600,
                   letterSpacing: -0.36,
                   color: Theme.of(ctx).colorScheme.onSurface,
                 ),
@@ -1513,7 +1506,7 @@ class _PaymentMethodSheet extends StatelessWidget {
                 Expanded(
                   child: Text(
                     'Your invoice will update automatically once payment is confirmed.',
-                    style: GoogleFonts.inter(
+                    style: KasaFont.sans(
                       fontSize: 12,
                       color: Theme.of(ctx).colorScheme.onSecondary,
                     ),
@@ -1554,9 +1547,9 @@ class _PaymentMethodSheet extends StatelessWidget {
                 Icon(Icons.payments_outlined, color: cs.tertiary, size: 22),
                 const SizedBox(width: 10),
                 Text(
-                  'CASH PAYMENT',
-                  style: GoogleFonts.spaceGrotesk(
-                    fontSize: 18, fontWeight: FontWeight.w700,
+                  'Cash payment',
+                  style: KasaFont.sans(
+                    fontSize: 18, fontWeight: FontWeight.w600,
                     letterSpacing: -0.36, color: cs.onSurface,
                   ),
                 ),
@@ -1582,7 +1575,7 @@ class _PaymentMethodSheet extends StatelessWidget {
                   Expanded(
                     child: Text(
                       'Cash payments must be confirmed by your landlord. If your invoice is not updated within 24 hours, contact them directly.',
-                      style: GoogleFonts.inter(fontSize: 12, color: cs.tertiaryInk),
+                      style: KasaFont.sans(fontSize: 12, color: cs.tertiaryInk),
                     ),
                   ),
                 ]),
@@ -1623,7 +1616,7 @@ class _MethodTile extends StatelessWidget {
             decoration: BoxDecoration(
               color: color.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: cs.kasaStroke, width: 2),
+              border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
             ),
             child: Icon(icon, color: color, size: 22),
           ),
@@ -1634,15 +1627,15 @@ class _MethodTile extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: GoogleFonts.spaceGrotesk(
-                    fontSize: 14, fontWeight: FontWeight.w700,
+                  style: KasaFont.sans(
+                    fontSize: 14, fontWeight: FontWeight.w600,
                     letterSpacing: -0.14, color: cs.onSurface,
                   ),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   subtitle,
-                  style: GoogleFonts.inter(fontSize: 12, color: cs.kasaTextSub),
+                  style: KasaFont.sans(fontSize: 12, color: cs.kasaTextSub),
                 ),
               ],
             ),
@@ -1674,13 +1667,13 @@ class _InstructionStep extends StatelessWidget {
             decoration: BoxDecoration(
               color: cs.secondary,
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: cs.kasaStroke, width: 2),
+              border: Border.all(color: cs.kasaStroke, width: KasaBorders.card),
             ),
             alignment: Alignment.center,
             child: Text(
               '$n',
-              style: GoogleFonts.spaceGrotesk(
-                fontSize: 11, fontWeight: FontWeight.w700,
+              style: KasaFont.sans(
+                fontSize: 11, fontWeight: FontWeight.w600,
                 color: cs.onSecondary,
               ),
             ),
@@ -1690,7 +1683,7 @@ class _InstructionStep extends StatelessWidget {
             child: text != null
                 ? Text(
                     text!,
-                    style: GoogleFonts.inter(
+                    style: KasaFont.sans(
                       fontSize: 14, fontWeight: FontWeight.w500,
                       color: cs.onSurface,
                     ),
@@ -1701,15 +1694,15 @@ class _InstructionStep extends StatelessWidget {
                     children: [
                       Text(
                         '$label  ',
-                        style: GoogleFonts.spaceGrotesk(
-                          fontSize: 11, fontWeight: FontWeight.w700,
+                        style: KasaFont.sans(
+                          fontSize: 11, fontWeight: FontWeight.w600,
                           letterSpacing: 0.04, color: cs.kasaTextSub,
                         ),
                       ),
                       Flexible(
                         child: Text(
                           value ?? '—',
-                          style: GoogleFonts.jetBrainsMono(
+                          style: KasaFont.mono(
                             fontSize: 14, fontWeight: FontWeight.w700,
                             color: cs.onSurface,
                           ),
@@ -1836,7 +1829,7 @@ class _RecordPaymentDialogState extends ConsumerState<_RecordPaymentDialog> {
     return AlertDialog(
       title: Text(
         _isBank ? 'Record Bank Transfer' : 'Record Cash Payment',
-        style: GoogleFonts.spaceGrotesk(fontWeight: FontWeight.w700),
+        style: KasaFont.sans(fontWeight: FontWeight.w600),
       ),
       content: SingleChildScrollView(
         child: Column(
@@ -1870,10 +1863,10 @@ class _RecordPaymentDialogState extends ConsumerState<_RecordPaymentDialog> {
               Divider(color: cs.outlineVariant, thickness: 1),
               const SizedBox(height: 8),
               Text(
-                'BANK DETAILS',
-                style: GoogleFonts.spaceGrotesk(
+                'Bank details',
+                style: KasaFont.sans(
                   fontSize: 11,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w600,
                   letterSpacing: 0.04,
                   color: cs.kasaTextSub,
                 ),
