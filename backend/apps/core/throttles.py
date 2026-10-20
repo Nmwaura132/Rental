@@ -24,3 +24,10 @@ class RegisterThrottle(AnonRateThrottle):
     """Limit account creation per IP to slow bulk-account-creation abuse."""
     rate = "5/minute"
     scope = "register"
+
+
+class SignupCodeThrottle(AnonRateThrottle):
+    """Each sign-up code is a paid SMS to any number typed in, so it is held to
+    the same rate as password-reset codes."""
+    rate = "3/minute"
+    scope = "signup_code"

@@ -53,15 +53,21 @@ def _send_via_mobilesasa(phone: str, message: str) -> tuple[bool, str]:
 
 @shared_task(bind=True, max_retries=4)
 def send_sms(self, recipient_id, message, phone_number=None):
-    """Send an SMS via MobileSasa. Logs result to Notification model."""
+    """Send an SMS via MobileSasa. Logs result to Notification model.
+
+    recipient_id may be None with a phone_number, for someone who has no
+    account yet (a sign-up code); nothing is recorded against a user then.
+    """
     from .models import Notification
     from django.contrib.auth import get_user_model
 
     User = get_user_model()
-    user = User.objects.get(id=recipient_id)
+    user = User.objects.get(id=recipient_id) if recipient_id is not None else None
     phone = phone_number or user.phone_number
 
     def record(success, error=""):
+        if user is None:
+            return
         Notification.objects.create(
             recipient=user,
             channel=Notification.Channel.SMS,

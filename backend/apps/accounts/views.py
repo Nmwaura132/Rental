@@ -30,6 +30,12 @@ def _password_reset_otp_digest(phone_number, otp):
     ).hexdigest()
 
 
+def _signup_otp_digest(phone_number, otp):
+    # A different salt from password reset, so a reset code can never be
+    # replayed as a sign-up code for the same number.
+    return salted_hmac("kasa.signup", f"{phone_number}:{otp}").hexdigest()
+
+
 def _tenant_qs_for_manager(user):
     tenants = User.objects.filter(role=User.Role.TENANT, is_active=True)
     if user.is_landlord:
@@ -328,3 +334,131 @@ class ChangePasswordView(APIView):
         user.set_password(new_password)
         user.save(update_fields=["password"])
         return Response({"message": "Password updated successfully."})
+
+
+SIGNUP_CODE_SENT = "If this number can sign up, a code has been sent to it."
+
+
+@extend_schema(exclude=True)  # WHY: ad-hoc body, no serializer
+class SignupCodeView(APIView):
+    """
+    Step 1 of a landlord signing themselves up.
+    POST { phone_number } → texts a 6-digit code, valid 5 minutes.
+
+    A number that already has an account is told so by SMS instead. The
+    response is the same either way, so the endpoint cannot be used to find
+    out who has an account.
+    """
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = [__import__('apps.core.throttles', fromlist=['SignupCodeThrottle']).SignupCodeThrottle]
+
+    def post(self, request):
+        import secrets
+        from django.core.cache import cache
+
+        from apps.core.utils.phone import normalize_phone
+        from apps.notifications.tasks import send_sms
+
+        try:
+            phone_number = normalize_phone(request.data.get("phone_number", "").strip())
+        except Exception:
+            return Response({"error": "Enter a valid Kenyan phone number."}, status=400)
+
+        existing = User.objects.filter(phone_number=phone_number).first()
+        if existing:
+            send_sms.delay(
+                existing.id,
+                "This number already has a Kasa account. Sign in, or use Forgot password to set a new one.",
+            )
+            return Response({"message": SIGNUP_CODE_SENT})
+
+        otp = f"{secrets.randbelow(900000) + 100000}"
+        cache.set(f"signup_otp:{phone_number}", _signup_otp_digest(phone_number, otp), timeout=300)
+        cache.delete(f"signup_attempts:{phone_number}")
+        send_sms.delay(
+            None,
+            f"Your Kasa sign-up code is {otp}. Valid for 5 minutes. Do not share it.",
+            phone_number=phone_number,
+        )
+        return Response({"message": SIGNUP_CODE_SENT})
+
+
+@extend_schema(exclude=True)
+class SignupView(APIView):
+    """
+    Step 2: POST { phone_number, code, first_name, last_name, password }.
+    Creates a landlord account and signs them in, returning the same tokens as
+    login. Tenants and caretakers are still added by their landlord.
+    """
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = [__import__('apps.core.throttles', fromlist=['RegisterThrottle']).RegisterThrottle]
+
+    def post(self, request):
+        from django.contrib.auth.password_validation import validate_password
+        from django.core.cache import cache
+        from django.core.exceptions import ValidationError
+        from django.db import IntegrityError
+        from rest_framework_simplejwt.tokens import RefreshToken
+
+        from apps.core.utils.phone import normalize_phone
+
+        data = request.data
+        code = str(data.get("code", "")).strip()
+        first_name = str(data.get("first_name", "")).strip()[:150]
+        last_name = str(data.get("last_name", "")).strip()[:150]
+        password = data.get("password", "")
+        try:
+            phone_number = normalize_phone(str(data.get("phone_number", "")).strip())
+        except Exception:
+            return Response({"error": "Enter a valid Kenyan phone number."}, status=400)
+        if not (code and first_name and last_name and password):
+            return Response({"error": "Code, first name, last name and password are all needed."}, status=400)
+
+        otp_key = f"signup_otp:{phone_number}"
+        stored = cache.get(otp_key)
+        if not stored or not constant_time_compare(stored, _signup_otp_digest(phone_number, code)):
+            attempts_key = f"signup_attempts:{phone_number}"
+            try:
+                attempts = cache.incr(attempts_key)
+            except ValueError:
+                cache.set(attempts_key, 1, timeout=300)
+                attempts = 1
+            # Five wrong guesses burn the code, so it cannot be brute-forced.
+            if attempts >= 5:
+                cache.delete(otp_key)
+            return Response({"error": "That code is wrong or has expired."}, status=400)
+
+        candidate = User(phone_number=phone_number, first_name=first_name, last_name=last_name)
+        try:
+            validate_password(password, candidate)
+        except ValidationError as exc:
+            return Response({"error": " ".join(exc.messages)}, status=400)
+
+        # A code is good for one account, even if two requests race with it.
+        if not cache.add(f"signup_consumed:{phone_number}:{stored}", True, timeout=300):
+            return Response({"error": "That code is wrong or has expired."}, status=400)
+        cache.delete(otp_key)
+        cache.delete(f"signup_attempts:{phone_number}")
+
+        try:
+            user = User.objects.create_user(
+                phone_number=phone_number,
+                password=password,
+                first_name=first_name,
+                last_name=last_name,
+                role=User.Role.LANDLORD,
+            )
+        except IntegrityError:
+            return Response({"error": "This number already has an account. Sign in instead."}, status=409)
+
+        refresh = RefreshToken.for_user(user)
+        return Response(
+            {
+                "access": str(refresh.access_token),
+                "refresh": str(refresh),
+                "role": user.role,
+                "name": user.get_full_name(),
+                "phone_number": user.phone_number,
+            },
+            status=status.HTTP_201_CREATED,
+        )

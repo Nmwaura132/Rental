@@ -9,12 +9,17 @@ from .views import (
     PasswordResetView,
     ProfileView,
     RegisterView,
+    SignupCodeView,
+    SignupView,
     TenantListView,
     UploadIdPhotoView,
 )
 
 urlpatterns = [
     path("register/", RegisterView.as_view(), name="register"),
+    # A landlord signing themselves up; tenants are still added by landlords.
+    path("signup/request-code/", SignupCodeView.as_view(), name="signup-request-code"),
+    path("signup/", SignupView.as_view(), name="signup"),
     path("login/", LoginView.as_view(), name="login"),
     path("token/refresh/", TokenRefreshView.as_view(), name="token-refresh"),
     path("profile/", ProfileView.as_view(), name="profile"),
