@@ -111,9 +111,23 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  minio-permissions:
+    # WHY: Chainguard's MinIO runs as uid 65532, but the data was written by
+    # the old root-run image and a new volume is root-owned. This hands the
+    # volume over before MinIO starts; it is a no-op once done.
+    image: alpine:3.22
+    restart: "no"
+    volumes:
+      - minio_data:/data
+    command: ["chown", "-R", "65532:65532", "/data"]
+
   minio:
-    image: minio/minio:latest
+    # WHY Chainguard's build: MinIO removed minio/minio from Docker Hub.
+    image: cgr.dev/chainguard/minio:latest
     restart: unless-stopped
+    depends_on:
+      minio-permissions:
+        condition: service_completed_successfully
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -125,7 +139,9 @@ services:
       - minio_data:/data
     command: server /data --console-address ":9001"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      # The Chainguard image has no curl; mc ships with it. A down server makes
+      # mc wait, which the healthcheck timeout turns into "unhealthy".
+      test: ["CMD-SHELL", "MC_HOST_local=http://127.0.0.1:9000 mc ready local"]
       interval: 10s
       timeout: 5s
       retries: 5

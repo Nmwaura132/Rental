@@ -102,17 +102,24 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  minio-permissions:
+    # WHY: Chainguard's MinIO runs as uid 65532, but the data was written by
+    # the old root-run image and a new volume is root-owned. This hands the
+    # volume over before MinIO starts; it is a no-op once done.
+    image: alpine:3.22
+    restart: "no"
+    volumes:
+      - minio_data:/data
+    command: ["chown", "-R", "65532:65532", "/data"]
+
   minio:
-    image: minio/minio:latest
-    # HACK(Nmwaura132): MinIO removed minio/minio (and quay.io/minio/minio)
-    # from public registries, so every deploy failed pulling it. "never" makes
-    # the deploy use the copy already on the server (RELEASE.2025-09-07).
-    # A new server, or `docker image prune -a` on this one, has no copy and
-    # MinIO will not start. Proper fix: move to cgr.dev/chainguard/minio, which
-    # runs as uid 65532 and has no curl, so the data volume needs a chown and
-    # the healthcheck a rewrite, tested on a copy of the volume first.
-    pull_policy: never
+    # WHY Chainguard's build: MinIO removed minio/minio from Docker Hub and
+    # Quay. This is built from the same open-source code and still published.
+    image: cgr.dev/chainguard/minio:latest
     restart: unless-stopped
+    depends_on:
+      minio-permissions:
+        condition: service_completed_successfully
     env_file: ${ENV_FILE:-.env.production}
     # WHY expose rather than publish: signed URLs for national ID photos and lease
     # PDFs must not be served over plain HTTP. Publishing 9000 put MinIO on the
@@ -146,7 +153,9 @@ services:
       - minio_data:/data
     command: server /data --console-address ":9001"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      # The Chainguard image has no curl; mc ships with it. A down server makes
+      # mc wait, which the healthcheck timeout turns into "unhealthy".
+      test: ["CMD-SHELL", "MC_HOST_local=http://127.0.0.1:9000 mc ready local"]
       interval: 10s
       timeout: 5s
       retries: 5
