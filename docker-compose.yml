@@ -133,17 +133,20 @@ services:
       - no-new-privileges:true
 
   create-buckets:
-    image: minio/mc
+    # WHY the backup image and not minio/mc: MinIO took the mc image off
+    # Docker Hub. backup/store.py does the same over the S3 API.
+    build:
+      context: ./backup
     depends_on:
       minio:
         condition: service_healthy
     env_file: .env
+    environment:
+      MINIO_ENDPOINT: http://minio:9000
     entrypoint: >
       /bin/sh -c "
-      /usr/bin/mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
-      /usr/bin/mc mb local/${MINIO_BUCKET_NAME} 2>/dev/null || true;
-      /usr/bin/mc anonymous set none local/${MINIO_BUCKET_NAME} || true;
-      exit 0;
+      BACKUP_BUCKET=${MINIO_BUCKET_NAME} python /store.py ensure-bucket &&
+      BACKUP_BUCKET=${MINIO_BUCKET_NAME} python /store.py make-private
       "
 
 volumes:

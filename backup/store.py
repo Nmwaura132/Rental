@@ -6,8 +6,12 @@ longer be built. boto3 speaks the same S3 API and installs from PyPI.
 
 Usage:
     store.py ensure-bucket
+    store.py make-private
     store.py upload FILE
     store.py prune DAYS
+
+The bucket is BACKUP_BUCKET (default kasa-backups). The stack's bucket-setup
+job runs this with the media bucket's name too.
 """
 import os
 import sys
@@ -34,6 +38,16 @@ def ensure_bucket(s3, bucket):
         s3.create_bucket(Bucket=bucket)
 
 
+def make_private(s3, bucket):
+    """No anonymous access: identity documents and leases are served only
+    through signed URLs (apps.core.private_files)."""
+    try:
+        s3.delete_bucket_policy(Bucket=bucket)
+    except ClientError as exc:
+        if exc.response["Error"]["Code"] != "NoSuchBucketPolicy":
+            raise
+
+
 def upload(s3, bucket, path):
     s3.upload_file(path, bucket, os.path.basename(path))
 
@@ -52,6 +66,8 @@ def main(argv):
     command = argv[1] if len(argv) > 1 else ""
     if command == "ensure-bucket":
         ensure_bucket(s3, bucket)
+    elif command == "make-private":
+        make_private(s3, bucket)
     elif command == "upload" and len(argv) == 3:
         upload(s3, bucket, argv[2])
     elif command == "prune" and len(argv) == 3:

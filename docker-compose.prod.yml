@@ -146,19 +146,23 @@ services:
       - no-new-privileges:true
 
   create-buckets:
-    image: minio/mc
+    # WHY the backup image and not minio/mc: MinIO took the mc image off
+    # Docker Hub, so pulling it failed every deploy. backup/store.py does the
+    # same three things over the S3 API.
+    build:
+      context: ./backup
     restart: "no"
     env_file: ${ENV_FILE:-.env.production}
+    environment:
+      MINIO_ENDPOINT: http://minio:9000
     depends_on:
       minio:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c "
-      /usr/bin/mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
-      /usr/bin/mc mb local/${MINIO_BUCKET_NAME} 2>/dev/null || true;
-      /usr/bin/mc anonymous set none local/${MINIO_BUCKET_NAME} || true;
-      /usr/bin/mc mb local/kasa-backups 2>/dev/null || true;
-      exit 0;
+      BACKUP_BUCKET=${MINIO_BUCKET_NAME} python /store.py ensure-bucket &&
+      BACKUP_BUCKET=${MINIO_BUCKET_NAME} python /store.py make-private &&
+      BACKUP_BUCKET=kasa-backups python /store.py ensure-bucket
       "
 
   db-backup:
