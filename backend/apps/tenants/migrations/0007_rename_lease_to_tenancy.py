@@ -16,6 +16,11 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ("tenants", "0006_alter_maintenancerequest_photo"),
+        # WHY: payments 0001-0009 still refer to tenants.Lease, so on a fresh
+        # database they must run before it is renamed. Without this, a new
+        # install and CI failed at migrate. Existing databases have both
+        # applied, so the added ordering changes nothing for them.
+        ("payments", "0009_drop_invoice_lease_constraints"),
     ]
 
     operations = [
