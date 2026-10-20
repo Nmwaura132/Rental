@@ -104,6 +104,14 @@ services:
 
   minio:
     image: minio/minio:latest
+    # HACK(Nmwaura132): MinIO removed minio/minio (and quay.io/minio/minio)
+    # from public registries, so every deploy failed pulling it. "never" makes
+    # the deploy use the copy already on the server (RELEASE.2025-09-07).
+    # A new server, or `docker image prune -a` on this one, has no copy and
+    # MinIO will not start. Proper fix: move to cgr.dev/chainguard/minio, which
+    # runs as uid 65532 and has no curl, so the data volume needs a chown and
+    # the healthcheck a rewrite, tested on a copy of the volume first.
+    pull_policy: never
     restart: unless-stopped
     env_file: ${ENV_FILE:-.env.production}
     # WHY expose rather than publish: signed URLs for national ID photos and lease
