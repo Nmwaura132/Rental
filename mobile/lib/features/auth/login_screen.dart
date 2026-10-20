@@ -477,6 +477,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   ),
                                   child: const Text('Forgot password?'),
                                 ),
+                                TextButton(
+                                  onPressed: () => context.push('/signup'),
+                                  child: const Text('New landlord? Create an account'),
+                                ),
 
                                 // The way back. Without it, "Use password
                                 // instead" is a one-way door for anyone who

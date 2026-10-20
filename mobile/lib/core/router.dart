@@ -5,6 +5,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 
 import '../features/auth/login_screen.dart';
+import '../features/auth/signup_screen.dart';
 import 'auth/biometric_service.dart';
 import '../features/dashboard/dashboard_screen.dart';
 import '../features/properties/properties_screen.dart';
@@ -12,6 +13,7 @@ import '../features/properties/property_detail_screen.dart';
 import '../features/properties/readings_tab_screen.dart';
 import '../features/properties/unit_detail_screen.dart';
 import '../features/payments/invoices_screen.dart';
+import '../features/payments/payment_methods_screen.dart';
 import '../features/payments/reports_screen.dart';
 import '../features/payments/tax_screen.dart';
 import '../features/notifications/notifications_screen.dart';
@@ -33,6 +35,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       final token = await _storage.read(key: 'access_token');
       final isLoggedIn = token != null;
       final isGoingToLogin = state.matchedLocation == '/login';
+      // A landlord signing up has no session yet, and must be let through.
+      final isGoingToSignup = state.matchedLocation == '/signup';
 
       // WHY this runs before the signed-out check, and keys off the refresh
       // token rather than the access token: after signing out there is no
@@ -57,15 +61,17 @@ final routerProvider = Provider<GoRouter>((ref) {
         }
       }
 
-      if (!isLoggedIn && !isGoingToLogin) return '/login';
-      if (isLoggedIn && isGoingToLogin) return '/dashboard';
+      if (!isLoggedIn && !isGoingToLogin && !isGoingToSignup) return '/login';
+      if (isLoggedIn && (isGoingToLogin || isGoingToSignup)) return '/dashboard';
       // Block tenant-restricted routes
       if (isLoggedIn) {
         // Use cached Riverpod future so we bypass platform channel overhead on every navigation hop
         final role = await ref.read(userRoleProvider.future);
         // /tax is the landlord's own KRA liability; the API refuses it for
         // anyone else, so routing a tenant there would only show them a 403.
-        const tenantRestricted = ['/properties', '/tenants', '/reports', '/tax', '/readings'];
+        const tenantRestricted = [
+          '/properties', '/tenants', '/reports', '/tax', '/readings', '/payment-methods',
+        ];
         if (role == 'tenant' &&
             tenantRestricted.any(
                 (p) => state.matchedLocation.startsWith(p))) {
@@ -87,6 +93,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
       GoRoute(path: '/reports', builder: (_, __) => const ReportsScreen()),
       GoRoute(path: '/tax', builder: (_, __) => const TaxScreen()),
+      GoRoute(path: '/signup', builder: (_, __) => const SignupScreen()),
+      GoRoute(path: '/payment-methods', builder: (_, __) => const PaymentMethodsScreen()),
         
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) => MainShell(navigationShell: navigationShell),
