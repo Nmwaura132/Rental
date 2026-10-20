@@ -30,6 +30,33 @@ Production secrets are supplied at runtime and must never be committed.
 The startup command applies database migrations before starting Gunicorn. The
 MinIO initialization job creates a private bucket and removes anonymous access.
 
+## Deploying with Coolify
+
+Production runs on Coolify. A push to `main` deploys on its own: GitHub calls
+Coolify's webhook (repo Settings → Webhooks) and the app's Auto deploy is set to
+"Deploy on push". Environment variables are set in Coolify, not in a file; their
+names are case-sensitive.
+
+## SMS
+
+SMS goes out through MobileSasa:
+
+```dotenv
+MOBILESASA_API_KEY=mbs_...       # API token, scope "Send messages"
+MOBILESASA_SENDER_ID=MOBILESASA  # a sender ID registered on the account
+```
+
+Each SMS is recorded as a Notification, sent or failed with MobileSasa's
+response code (for example `0402` no credit, `0404` unknown sender ID).
+
+## File storage
+
+MinIO runs from Chainguard's build (`cgr.dev/chainguard/minio`): MinIO no
+longer publishes `minio/minio` or `minio/mc`. It runs as uid 65532; the
+`minio-permissions` step hands the data volume to that user before MinIO
+starts. Nightly database backups land in the `kasa-backups` bucket, 30 days
+kept. They are on the same server, so copy them off it as well.
+
 ## Where tenants pay rent
 
 Tenants are shown a paybill and account number to pay to. Behind a bank's shared
