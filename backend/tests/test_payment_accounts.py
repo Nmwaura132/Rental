@@ -130,6 +130,15 @@ class TestWhatAMethodNeeds:
         _kcb(other_landlord)
         assert "number" in _add(landlord, kind="kcb_paybill", number="522522").data
 
+    def test_the_database_refuses_a_second_claim_on_a_kcb_paybill(self, landlord, other_landlord):
+        # Not just the API: admin or a race between two sign-ups must not get
+        # past it either.
+        from django.db import IntegrityError, transaction
+
+        _kcb(other_landlord)
+        with pytest.raises(IntegrityError), transaction.atomic():
+            _kcb(landlord)
+
     def test_two_landlords_can_share_a_bank_paybill(self, landlord, other_landlord):
         _add(other_landlord, kind="paybill", number="899790", account_prefix="111#")
         response = _add(landlord, kind="paybill", number="899790", account_prefix="623943#")

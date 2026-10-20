@@ -377,21 +377,25 @@ class PaymentAccount(models.Model):
     # Signs KCB's notifications for this paybill. Set by staff in admin when
     # the connection is made; never sent to the app.
     ipn_secret = models.CharField(max_length=255, blank=True, default="")
+    # A KCB notification is routed by the paybill number in it, so two
+    # landlords cannot both claim one. A shared bank paybill (Caritas) is
+    # different: there the account prefix tells landlords apart.
+    # WHY a separate column: MySQL ignores a unique constraint with a
+    # condition, but allows any number of NULLs in a unique column, so this
+    # holds the number for KCB paybills only and NULL for everything else.
+    kcb_number = models.CharField(max_length=12, null=True, blank=True, unique=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = "payment_accounts"
         ordering = ["created_at", "id"]
-        constraints = [
-            # A KCB notification is routed by the paybill number in it, so two
-            # landlords cannot both claim one. A shared bank paybill (Caritas)
-            # is different: there the account prefix tells landlords apart.
-            models.UniqueConstraint(
-                fields=["number"],
-                condition=models.Q(kind="kcb_paybill"),
-                name="kcb_paybill_number_unique",
-            ),
-        ]
+
+    def save(self, *args, **kwargs):
+        self.kcb_number = self.number if self.kind == self.Kind.KCB_PAYBILL else None
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None and "number" in update_fields:
+            kwargs["update_fields"] = {*update_fields, "kcb_number"}
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.get_kind_display()} {self.number or self.account_number} ({self.owner_id})"
