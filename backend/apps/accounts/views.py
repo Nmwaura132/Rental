@@ -30,10 +30,94 @@ def _password_reset_otp_digest(phone_number, otp):
     ).hexdigest()
 
 
-def _signup_otp_digest(phone_number, otp):
-    # A different salt from password reset, so a reset code can never be
-    # replayed as a sign-up code for the same number.
-    return salted_hmac("kasa.signup", f"{phone_number}:{otp}").hexdigest()
+def _code_digest(purpose, phone_number, code):
+    # Salted by purpose, so a code sent to sign up cannot be used to sign in
+    # (or the reverse), nor a password-reset code for either.
+    return salted_hmac(f"kasa.{purpose}", f"{phone_number}:{code}").hexdigest()
+
+
+CODE_COOLDOWN_SECONDS = 60
+CODES_PER_HOUR = 5
+
+
+def _may_text(purpose, phone_number):
+    """Whether another code may be texted to this number for this purpose.
+
+    WHY per number and not only per IP: the IP limit stops one device, but
+    someone rotating IPs could still flood a stranger's phone with codes and
+    run up the SMS bill. One a minute and five an hour per number also caps
+    guessing at 25 tries an hour against a million combinations.
+    """
+    from django.core.cache import cache
+
+    if not cache.add(f"{purpose}_cooldown:{phone_number}", True, timeout=CODE_COOLDOWN_SECONDS):
+        return False
+    hourly = f"{purpose}_hourly:{phone_number}"
+    cache.add(hourly, 0, timeout=3600)
+    try:
+        return cache.incr(hourly) <= CODES_PER_HOUR
+    except ValueError:
+        cache.set(hourly, 1, timeout=3600)
+        return True
+
+
+def _issue_code(purpose, phone_number):
+    """A fresh 6-digit code for [phone_number], valid 5 minutes. Only its
+    salted hash is kept."""
+    import secrets
+    from django.core.cache import cache
+
+    code = f"{secrets.randbelow(900000) + 100000}"
+    cache.set(f"{purpose}_otp:{phone_number}", _code_digest(purpose, phone_number, code), timeout=300)
+    cache.delete(f"{purpose}_attempts:{phone_number}")
+    return code
+
+
+def _code_matches(purpose, phone_number, code):
+    """Whether [code] is the one last sent, without using it up. Five wrong
+    tries burn it, so it cannot be guessed."""
+    from django.core.cache import cache
+
+    stored = cache.get(f"{purpose}_otp:{phone_number}")
+    if stored and constant_time_compare(stored, _code_digest(purpose, phone_number, code)):
+        return True
+    attempts_key = f"{purpose}_attempts:{phone_number}"
+    try:
+        attempts = cache.incr(attempts_key)
+    except ValueError:
+        cache.set(attempts_key, 1, timeout=300)
+        attempts = 1
+    if attempts >= 5:
+        cache.delete(f"{purpose}_otp:{phone_number}")
+    return False
+
+
+def _use_code(purpose, phone_number):
+    """Spend the code. False if another request spent it first."""
+    from django.core.cache import cache
+
+    stored = cache.get(f"{purpose}_otp:{phone_number}")
+    if not stored or not cache.add(f"{purpose}_consumed:{phone_number}:{stored}", True, timeout=300):
+        return False
+    cache.delete(f"{purpose}_otp:{phone_number}")
+    cache.delete(f"{purpose}_attempts:{phone_number}")
+    return True
+
+
+def _session_for(user):
+    """What a successful sign-in returns, by password or by code."""
+    from django.contrib.auth.models import update_last_login
+    from rest_framework_simplejwt.tokens import RefreshToken
+
+    update_last_login(None, user)
+    refresh = RefreshToken.for_user(user)
+    return {
+        "access": str(refresh.access_token),
+        "refresh": str(refresh),
+        "role": user.role,
+        "name": user.get_full_name(),
+        "phone_number": user.phone_number,
+    }
 
 
 def _tenant_qs_for_manager(user):
@@ -353,9 +437,6 @@ class SignupCodeView(APIView):
     throttle_classes = [__import__('apps.core.throttles', fromlist=['SignupCodeThrottle']).SignupCodeThrottle]
 
     def post(self, request):
-        import secrets
-        from django.core.cache import cache
-
         from apps.core.utils.phone import normalize_phone
         from apps.notifications.tasks import send_sms
 
@@ -364,17 +445,23 @@ class SignupCodeView(APIView):
         except Exception:
             return Response({"error": "Enter a valid Kenyan phone number."}, status=400)
 
+        if request.user.is_authenticated:
+            return Response({"error": "You are already signed in. Sign out to create another account."}, status=403)
+
+        # The same answer when the number is rate-limited, so the limit cannot
+        # be used to tell which numbers have accounts.
+        if not _may_text("signup", phone_number):
+            return Response({"message": SIGNUP_CODE_SENT})
+
         existing = User.objects.filter(phone_number=phone_number).first()
         if existing:
             send_sms.delay(
                 existing.id,
-                "This number already has a Kasa account. Sign in, or use Forgot password to set a new one.",
+                "This number already has a Kasa account. Open Kasa and sign in with a code instead.",
             )
             return Response({"message": SIGNUP_CODE_SENT})
 
-        otp = f"{secrets.randbelow(900000) + 100000}"
-        cache.set(f"signup_otp:{phone_number}", _signup_otp_digest(phone_number, otp), timeout=300)
-        cache.delete(f"signup_attempts:{phone_number}")
+        otp = _issue_code("signup", phone_number)
         send_sms.delay(
             None,
             f"Your Kasa sign-up code is {otp}. Valid for 5 minutes. Do not share it.",
@@ -386,21 +473,25 @@ class SignupCodeView(APIView):
 @extend_schema(exclude=True)
 class SignupView(APIView):
     """
-    Step 2: POST { phone_number, code, first_name, last_name, password }.
+    Step 2: POST { phone_number, code, first_name, last_name[, password] }.
     Creates a landlord account and signs them in, returning the same tokens as
-    login. Tenants and caretakers are still added by their landlord.
+    login. Without a password they sign in with a code from then on.
+    Tenants and caretakers are still added by their landlord.
     """
     permission_classes = [permissions.AllowAny]
     throttle_classes = [__import__('apps.core.throttles', fromlist=['RegisterThrottle']).RegisterThrottle]
 
     def post(self, request):
         from django.contrib.auth.password_validation import validate_password
-        from django.core.cache import cache
         from django.core.exceptions import ValidationError
         from django.db import IntegrityError
-        from rest_framework_simplejwt.tokens import RefreshToken
 
         from apps.core.utils.phone import normalize_phone
+
+        # One person, one account: someone already signed in cannot mint a
+        # second one, even by calling this directly with another number.
+        if request.user.is_authenticated:
+            return Response({"error": "You are already signed in. Sign out to create another account."}, status=403)
 
         data = request.data
         code = str(data.get("code", "")).strip()
@@ -411,39 +502,28 @@ class SignupView(APIView):
             phone_number = normalize_phone(str(data.get("phone_number", "")).strip())
         except Exception:
             return Response({"error": "Enter a valid Kenyan phone number."}, status=400)
-        if not (code and first_name and last_name and password):
-            return Response({"error": "Code, first name, last name and password are all needed."}, status=400)
+        if not (code and first_name and last_name):
+            return Response({"error": "Code, first name and last name are all needed."}, status=400)
 
-        otp_key = f"signup_otp:{phone_number}"
-        stored = cache.get(otp_key)
-        if not stored or not constant_time_compare(stored, _signup_otp_digest(phone_number, code)):
-            attempts_key = f"signup_attempts:{phone_number}"
-            try:
-                attempts = cache.incr(attempts_key)
-            except ValueError:
-                cache.set(attempts_key, 1, timeout=300)
-                attempts = 1
-            # Five wrong guesses burn the code, so it cannot be brute-forced.
-            if attempts >= 5:
-                cache.delete(otp_key)
+        if not _code_matches("signup", phone_number, code):
             return Response({"error": "That code is wrong or has expired."}, status=400)
 
-        candidate = User(phone_number=phone_number, first_name=first_name, last_name=last_name)
-        try:
-            validate_password(password, candidate)
-        except ValidationError as exc:
-            return Response({"error": " ".join(exc.messages)}, status=400)
+        if password:
+            candidate = User(phone_number=phone_number, first_name=first_name, last_name=last_name)
+            try:
+                validate_password(password, candidate)
+            except ValidationError as exc:
+                return Response({"error": " ".join(exc.messages)}, status=400)
 
         # A code is good for one account, even if two requests race with it.
-        if not cache.add(f"signup_consumed:{phone_number}:{stored}", True, timeout=300):
+        if not _use_code("signup", phone_number):
             return Response({"error": "That code is wrong or has expired."}, status=400)
-        cache.delete(otp_key)
-        cache.delete(f"signup_attempts:{phone_number}")
 
         try:
             user = User.objects.create_user(
                 phone_number=phone_number,
-                password=password,
+                # None leaves the account with no usable password: code only.
+                password=password or None,
                 first_name=first_name,
                 last_name=last_name,
                 role=User.Role.LANDLORD,
@@ -451,14 +531,58 @@ class SignupView(APIView):
         except IntegrityError:
             return Response({"error": "This number already has an account. Sign in instead."}, status=409)
 
-        refresh = RefreshToken.for_user(user)
-        return Response(
-            {
-                "access": str(refresh.access_token),
-                "refresh": str(refresh),
-                "role": user.role,
-                "name": user.get_full_name(),
-                "phone_number": user.phone_number,
-            },
-            status=status.HTTP_201_CREATED,
-        )
+        return Response(_session_for(user), status=status.HTTP_201_CREATED)
+
+
+LOGIN_CODE_SENT = "If this number has a Kasa account, a code has been sent to it."
+
+
+@extend_schema(exclude=True)  # WHY: ad-hoc body, no serializer
+class LoginCodeView(APIView):
+    """
+    Sign in with a code, step 1: POST { phone_number } texts a 6-digit code to
+    an active account's number. Nothing is sent to a number with no account,
+    and the response is the same either way.
+    """
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = [__import__('apps.core.throttles', fromlist=['SignupCodeThrottle']).SignupCodeThrottle]
+
+    def post(self, request):
+        from apps.core.utils.phone import normalize_phone
+        from apps.notifications.tasks import send_sms
+
+        try:
+            phone_number = normalize_phone(request.data.get("phone_number", "").strip())
+        except Exception:
+            return Response({"error": "Enter a valid Kenyan phone number."}, status=400)
+
+        user = User.objects.filter(phone_number=phone_number, is_active=True).first()
+        if user and _may_text("login", phone_number):
+            code = _issue_code("login", phone_number)
+            send_sms.delay(user.id, f"Your Kasa sign-in code is {code}. Valid for 5 minutes. Do not share it.")
+        return Response({"message": LOGIN_CODE_SENT})
+
+
+@extend_schema(exclude=True)
+class CodeLoginView(APIView):
+    """Step 2: POST { phone_number, code } returns the same session as a
+    password sign-in."""
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = [__import__('apps.core.throttles', fromlist=['RegisterThrottle']).RegisterThrottle]
+
+    def post(self, request):
+        from apps.core.utils.phone import normalize_phone
+
+        code = str(request.data.get("code", "")).strip()
+        try:
+            phone_number = normalize_phone(str(request.data.get("phone_number", "")).strip())
+        except Exception:
+            return Response({"error": "Enter a valid Kenyan phone number."}, status=400)
+
+        wrong = Response({"error": "That code is wrong or has expired."}, status=400)
+        if not code or not _code_matches("login", phone_number, code):
+            return wrong
+        user = User.objects.filter(phone_number=phone_number, is_active=True).first()
+        if user is None or not _use_code("login", phone_number):
+            return wrong
+        return Response(_session_for(user))

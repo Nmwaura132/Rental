@@ -7,8 +7,12 @@ User = get_user_model()
 
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, validators=[validate_password])
-    password_confirm = serializers.CharField(write_only=True)
+    # Optional: without one, the person signs in with a code sent to their
+    # phone, and the landlord has no password to pass on.
+    password = serializers.CharField(
+        write_only=True, required=False, allow_blank=True, validators=[validate_password]
+    )
+    password_confirm = serializers.CharField(write_only=True, required=False, allow_blank=True)
 
     class Meta:
         model = User
@@ -20,7 +24,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, attrs):
-        if attrs.get("password") != attrs.get("password_confirm"):
+        if attrs.get("password") and attrs.get("password") != attrs.get("password_confirm"):
             raise serializers.ValidationError({"password": "Passwords do not match."})
 
         # WHY keyed on the creator's role: this endpoint is not self-service —
@@ -43,6 +47,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
+        validated_data["password"] = validated_data.get("password") or None
         return User.objects.create_user(**validated_data)
 
 
