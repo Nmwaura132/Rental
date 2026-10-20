@@ -37,6 +37,9 @@ void main() {
       ),
     );
 
+    // The password, and its reset, sit behind the code sign-in.
+    await tester.tap(find.text('Use password instead'));
+    await tester.pumpAndSettle();
     final forgotButton = find.widgetWithText(TextButton, 'Forgot password?');
     await tester.ensureVisible(forgotButton);
     await tester.tap(forgotButton);

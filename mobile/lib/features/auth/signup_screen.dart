@@ -17,7 +17,7 @@ import '../../core/widgets/kasa_primitives.dart';
 const _storage = FlutterSecureStorage();
 
 /// A landlord creating their own account: their number, a code texted to it,
-/// then their name and a password. Tenants never come here — their landlord
+/// then their name. Tenants never come here — their landlord
 /// adds them.
 class SignupScreen extends ConsumerStatefulWidget {
   const SignupScreen({super.key});
@@ -33,15 +33,13 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   final _codeCtrl = TextEditingController();
   final _firstCtrl = TextEditingController();
   final _lastCtrl = TextEditingController();
-  final _passCtrl = TextEditingController();
 
   bool _codeSent = false;
   bool _busy = false;
-  bool _obscure = true;
 
   @override
   void dispose() {
-    for (final c in [_phoneCtrl, _codeCtrl, _firstCtrl, _lastCtrl, _passCtrl]) {
+    for (final c in [_phoneCtrl, _codeCtrl, _firstCtrl, _lastCtrl]) {
       c.dispose();
     }
     super.dispose();
@@ -80,7 +78,6 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
         'code': _codeCtrl.text.trim(),
         'first_name': _firstCtrl.text.trim(),
         'last_name': _lastCtrl.text.trim(),
-        'password': _passCtrl.text,
       });
 
       // The same session a sign-in leaves behind, so the app treats them as
@@ -196,20 +193,10 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                     decoration: const InputDecoration(labelText: 'Last name'),
                     validator: (v) => (v ?? '').trim().isEmpty ? 'Enter your last name' : null,
                   ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _passCtrl,
-                    obscureText: _obscure,
-                    autofillHints: const [AutofillHints.newPassword],
-                    decoration: InputDecoration(
-                      labelText: 'Password',
-                      helperText: 'At least 8 characters, not just numbers.',
-                      suffixIcon: TextButton(
-                        onPressed: () => setState(() => _obscure = !_obscure),
-                        child: Text(_obscure ? 'Show' : 'Hide'),
-                      ),
-                    ),
-                    validator: (v) => (v ?? '').length < 8 ? 'At least 8 characters' : null,
+                  const SizedBox(height: 12),
+                  Text(
+                    'No password needed. Next time, sign in with a code sent to this number.',
+                    style: KasaFont.sans(fontSize: 14, color: Theme.of(context).colorScheme.kasaTextSub),
                   ),
                 ],
               ),

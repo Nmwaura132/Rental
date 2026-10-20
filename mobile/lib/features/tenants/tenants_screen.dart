@@ -812,9 +812,7 @@ class _AddTenantFormState extends ConsumerState<_AddTenantForm> {
   final _occupationCtrl = TextEditingController();
   final _kinNameCtrl = TextEditingController();
   final _kinPhoneCtrl = TextEditingController();
-  final _passCtrl = TextEditingController();
   bool _loading = false;
-  bool _obscure = true;
   String? _occupationType;
   XFile? _idFrontPhoto;
   XFile? _idBackPhoto;
@@ -864,7 +862,6 @@ class _AddTenantFormState extends ConsumerState<_AddTenantForm> {
     _occupationCtrl.dispose();
     _kinNameCtrl.dispose();
     _kinPhoneCtrl.dispose();
-    _passCtrl.dispose();
     super.dispose();
   }
 
@@ -940,8 +937,6 @@ class _AddTenantFormState extends ConsumerState<_AddTenantForm> {
           'next_of_kin_name': _kinNameCtrl.text.trim(),
         if (_kinPhoneCtrl.text.trim().isNotEmpty)
           'next_of_kin_phone': _normalizePhone(_kinPhoneCtrl.text.trim()),
-        'password': _passCtrl.text,
-        'password_confirm': _passCtrl.text,
       });
 
       // Upload ID photos if captured
@@ -1216,32 +1211,10 @@ class _AddTenantFormState extends ConsumerState<_AddTenantForm> {
                     ],
                   ),
 
-                  // ── Account ────────────────────────────────────
-                  _sectionLabel('Account Access'),
-                  TextFormField(
-                    controller: _passCtrl,
-                    obscureText: _obscure,
-                    decoration: InputDecoration(
-                      labelText: 'Temporary Password *',
-                      hintText: 'Min 8 characters',
-                      prefixIcon: const Icon(Icons.lock_outline),
-                      isDense: true,
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                            _obscure ? Icons.visibility : Icons.visibility_off),
-                        onPressed: () => setState(() => _obscure = !_obscure),
-                      ),
-                    ),
-                    validator: (v) {
-                      if (v!.isEmpty) return 'Required';
-                      if (v.length < 8) return 'Minimum 8 characters';
-                      return null;
-                    },
-                  ),
                   const SizedBox(height: 6),
                   const Text(
-                    'Share this password with the tenant so they can log in.',
-                    style: TextStyle(fontSize: 11, color: Colors.grey),
+                    'They sign in with a code sent to this number. No password to share.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                   const SizedBox(height: 4),
                   if (widget.forUnitId != null) ...[

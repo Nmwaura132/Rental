@@ -58,7 +58,7 @@ void main() {
       (tester) async {
     await _pumpLocked(tester, succeeds: false);
 
-    await tester.tap(find.text('Use password instead'));
+    await tester.tap(find.text('Sign in instead'));
     await tester.pumpAndSettle();
 
     expect(find.text('Phone Number'), findsOneWidget);
@@ -75,7 +75,7 @@ void main() {
       (tester) async {
     await _pumpLocked(tester, succeeds: false);
 
-    await tester.tap(find.text('Use password instead'));
+    await tester.tap(find.text('Sign in instead'));
     await tester.pumpAndSettle();
 
     expect(
@@ -88,7 +88,7 @@ void main() {
       (tester) async {
     await _pumpLocked(tester, succeeds: false);
 
-    await tester.tap(find.text('Use password instead'));
+    await tester.tap(find.text('Sign in instead'));
     await tester.pumpAndSettle();
 
     expect(find.text('Use biometrics'), findsOneWidget);
@@ -98,7 +98,7 @@ void main() {
       (tester) async {
     await _pumpLocked(tester, succeeds: false);
 
-    await tester.tap(find.text('Use password instead'));
+    await tester.tap(find.text('Sign in instead'));
     await tester.pumpAndSettle();
 
     expect(

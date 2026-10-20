@@ -17,7 +17,7 @@ void main() {
 
     expect(find.text('Sign In'), findsAtLeastNWidgets(1));
     expect(find.text('Phone Number'), findsOneWidget);
-    expect(find.text('Password'), findsOneWidget);
-    expect(find.text('Forgot password?'), findsOneWidget);
+    expect(find.text('Send code'), findsOneWidget);
+    expect(find.text('Use password instead'), findsOneWidget);
   });
 }

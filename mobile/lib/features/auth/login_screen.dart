@@ -10,6 +10,7 @@ import '../../core/auth/biometric_pulse.dart';
 import '../../core/auth/biometric_service.dart';
 import '../../core/theme/kasa_tokens.dart';
 import '../../core/widgets/kasa_primitives.dart';
+import '../../core/utils/api_error.dart';
 import '../../core/utils/phone.dart';
 import '../../core/widgets/kasa_logo.dart';
 
@@ -38,8 +39,16 @@ class LoginScreen extends ConsumerStatefulWidget {
 class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _phoneCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
+  final _codeCtrl = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _loading = false;
+
+  // WHY a code by default: everyone has their phone, nobody has to remember
+  // a password, and a landlord no longer has to invent one for each tenant.
+  // The password stays one tap away for accounts that have one, so an SMS
+  // outage never locks everybody out.
+  bool _usePassword = false;
+  bool _codeSent = false;
   bool _obscure = true;
   bool _rememberMe = true; // default: stay logged in for 30 days
 
@@ -86,7 +95,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           await _forgetBiometrics();
           if (mounted) {
             setState(() => _unlockError =
-                'Session expired. Sign in with your password.');
+                'Session expired. Sign in again.');
           }
           return;
         }
@@ -111,7 +120,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         _pulse = BiometricPulseState.error;
         _unlockError = switch (e.failure) {
           BiometricFailure.lockedOut =>
-            'Too many attempts. Sign in with your password.',
+            'Too many attempts. Sign in again.',
           _ => 'Not recognised. Tap to try again.',
         };
       });
@@ -196,7 +205,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         title: const Text('Unlock with biometrics?'),
         content: const Text(
           'Use your fingerprint or face to open Kasa next time, instead of '
-          'typing your password.',
+          'signing in again.',
         ),
         actions: [
           TextButton(
@@ -238,7 +247,76 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   void dispose() {
     _phoneCtrl.dispose();
     _passCtrl.dispose();
+    _codeCtrl.dispose();
     super.dispose();
+  }
+
+  void _showError(Object e) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(apiError(e)),
+      backgroundColor: Theme.of(context).colorScheme.error,
+    ));
+  }
+
+  Future<void> _sendCode() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _loading = true);
+    try {
+      await ref.read(publicDioProvider).post('/api/v1/auth/login/request-code/', data: {
+        'phone_number': normalizeKenyanPhone(_phoneCtrl.text),
+      });
+      if (mounted) setState(() => _codeSent = true);
+    } catch (e) {
+      _showError(e);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _signInWithCode() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _loading = true);
+    try {
+      final phone = normalizeKenyanPhone(_phoneCtrl.text);
+      final resp = await ref.read(publicDioProvider).post('/api/v1/auth/login/code/', data: {
+        'phone_number': phone,
+        'code': _codeCtrl.text.trim(),
+      });
+      await _finishSignIn(resp.data as Map, phone, remember: true);
+    } catch (e) {
+      _showError(e);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  /// What every way of signing in ends with: keep the session, then open Home.
+  Future<void> _finishSignIn(Map data, String phone, {required bool remember}) async {
+    await _storage.write(key: 'access_token', value: data['access']);
+    await _storage.write(key: 'refresh_token', value: data['refresh']);
+    final prefs = await SharedPreferences.getInstance();
+    if (remember) {
+      await prefs.setString('saved_phone', phone);
+    } else {
+      await prefs.remove('saved_phone');
+    }
+    await _storage.write(key: 'user_role', value: data['role']);
+    await _storage.write(key: 'user_name', value: data['name']);
+    await _storage.write(key: 'user_phone', value: data['phone_number'] ?? '');
+
+    // Signing in IS the check, so this session is already open: don't make
+    // them prove themselves twice on the way to /dashboard.
+    ref.read(sessionUnlockedProvider.notifier).state = true;
+
+    // A full sign-in is what the fingerprint stands in for, so it restarts the
+    // 60-day window for anyone already enrolled.
+    final service = ref.read(biometricServiceProvider);
+    if (await service.isEnabled()) await service.stampPasswordAuth();
+
+    await _maybeOfferBiometrics();
+
+    if (mounted) context.go('/dashboard');
   }
 
   Future<void> _login() async {
@@ -253,37 +331,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         'password': _passCtrl.text,
       });
 
-      if (_rememberMe) {
-        // Store tokens — refresh token lasts 30 days on the server
-        await _storage.write(key: 'access_token', value: resp.data['access']);
-        await _storage.write(key: 'refresh_token', value: resp.data['refresh']);
-        // Remember the phone number for next time
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('saved_phone', phone);
-      } else {
-        // Session-only: store tokens but clear saved phone
-        await _storage.write(key: 'access_token', value: resp.data['access']);
-        await _storage.write(key: 'refresh_token', value: resp.data['refresh']);
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.remove('saved_phone');
-      }
-
-      await _storage.write(key: 'user_role', value: resp.data['role']);
-      await _storage.write(key: 'user_name', value: resp.data['name']);
-      await _storage.write(key: 'user_phone', value: resp.data['phone_number'] ?? '');
-
-      // Signing in with a password IS the check, so this session is already
-      // open — don't make them prove themselves twice on the way to /dashboard.
-      ref.read(sessionUnlockedProvider.notifier).state = true;
-
-      // The password is what the fingerprint stands in for, so entering it
-      // restarts the 60-day window for anyone already enrolled.
-      final service = ref.read(biometricServiceProvider);
-      if (await service.isEnabled()) await service.stampPasswordAuth();
-
-      await _maybeOfferBiometrics();
-
-      if (mounted) context.go('/dashboard');
+      await _finishSignIn(resp.data as Map, phone, remember: _rememberMe);
     } on DioException catch (e) {
       if (mounted) {
         final msg = e.response?.data is Map
@@ -378,8 +426,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                       Expanded(
                                         child: Text(
                                           'It has been 60 days since you last '
-                                          'used your password. Enter it once to '
-                                          'turn your fingerprint back on.',
+                                          'signed in. Sign in once to turn your '
+                                          'fingerprint back on.',
                                           style: theme.textTheme.bodySmall
                                               ?.copyWith(
                                             color: cs.onSurfaceVariant,
@@ -405,9 +453,50 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                     hintText: '712 345 678',
                                   ),
                                   validator: validateKenyanPhone,
+                                  onChanged: (_) {
+                                    if (_codeSent) setState(() => _codeSent = false);
+                                  },
                                 ),
                                 const SizedBox(height: 16),
 
+                                if (!_usePassword) ...[
+                                  if (_codeSent) ...[
+                                    TextFormField(
+                                      controller: _codeCtrl,
+                                      keyboardType: TextInputType.number,
+                                      autofillHints: const [AutofillHints.oneTimeCode],
+                                      inputFormatters: [
+                                        FilteringTextInputFormatter.digitsOnly,
+                                        LengthLimitingTextInputFormatter(6),
+                                      ],
+                                      decoration: const InputDecoration(
+                                        labelText: 'Code',
+                                        helperText: 'The 6 digits we just texted you.',
+                                        prefixIcon: Icon(Icons.sms_outlined),
+                                      ),
+                                      validator: (v) => (v ?? '').length == 6
+                                          ? null
+                                          : 'Enter the 6-digit code',
+                                    ),
+                                    const SizedBox(height: 20),
+                                  ],
+                                  KasaButton(
+                                    label: _codeSent ? 'Sign in' : 'Send code',
+                                    isLoading: _loading,
+                                    onTap: _loading
+                                        ? null
+                                        : (_codeSent ? _signInWithCode : _sendCode),
+                                  ),
+                                  if (_codeSent)
+                                    TextButton(
+                                      onPressed: _loading ? null : _sendCode,
+                                      child: const Text('Send a new code'),
+                                    ),
+                                  TextButton(
+                                    onPressed: () => setState(() => _usePassword = true),
+                                    child: const Text('Use password instead'),
+                                  ),
+                                ] else ...[
                                 TextFormField(
                                   controller: _passCtrl,
                                   obscureText: _obscure,
@@ -477,6 +566,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   ),
                                   child: const Text('Forgot password?'),
                                 ),
+                                TextButton(
+                                  onPressed: () => setState(() => _usePassword = false),
+                                  child: const Text('Sign in with a code instead'),
+                                ),
+                                ],
                                 TextButton(
                                   onPressed: () => context.push('/signup'),
                                   child: const Text('New landlord? Create an account'),
@@ -559,7 +653,7 @@ class _UnlockPanel extends StatelessWidget {
           const SizedBox(height: 8),
           TextButton(
             onPressed: onUsePassword,
-            child: const Text('Use password instead'),
+            child: const Text('Sign in instead'),
           ),
         ],
       ),

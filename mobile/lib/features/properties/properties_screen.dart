@@ -1001,16 +1001,13 @@ class _AddCaretakerDialogState extends ConsumerState<_AddCaretakerDialog> {
   final _firstCtrl = TextEditingController();
   final _lastCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
-  final _passCtrl = TextEditingController();
   bool _loading = false;
-  bool _obscure = true;
 
   @override
   void dispose() {
     _firstCtrl.dispose();
     _lastCtrl.dispose();
     _phoneCtrl.dispose();
-    _passCtrl.dispose();
     super.dispose();
   }
 
@@ -1024,8 +1021,6 @@ class _AddCaretakerDialogState extends ConsumerState<_AddCaretakerDialog> {
         'first_name': _firstCtrl.text.trim(),
         'last_name': _lastCtrl.text.trim(),
         'role': 'caretaker',
-        'password': _passCtrl.text,
-        'password_confirm': _passCtrl.text,
       });
 
       // The register response returns only a message and phone, so re-read the
@@ -1099,26 +1094,9 @@ class _AddCaretakerDialogState extends ConsumerState<_AddCaretakerDialog> {
                 validator: validateKenyanPhone,
               ),
               const SizedBox(height: 12),
-              TextFormField(
-                controller: _passCtrl,
-                obscureText: _obscure,
-                decoration: InputDecoration(
-                  labelText: 'Temporary Password *',
-                  prefixIcon: const Icon(Icons.lock_rounded),
-                  helperText: 'Share this with them; they can change it later.',
-                  suffixIcon: IconButton(
-                    icon: Icon(_obscure
-                        ? Icons.visibility_rounded
-                        : Icons.visibility_off_rounded),
-                    onPressed: () => setState(() => _obscure = !_obscure),
-                    tooltip: _obscure ? 'Show password' : 'Hide password',
-                  ),
-                ),
-                validator: (v) {
-                  if (v == null || v.isEmpty) return 'Required';
-                  if (v.length < 8) return 'Minimum 8 characters';
-                  return null;
-                },
+              const Text(
+                'They sign in with a code sent to this number. No password to share.',
+                style: TextStyle(fontSize: 12, color: Colors.grey),
               ),
             ],
           ),
