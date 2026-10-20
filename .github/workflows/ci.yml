@@ -162,4 +162,10 @@ jobs:
 
       - name: Verify Android bundle signature
         working-directory: mobile
-        run: jarsigner -verify -strict build/app/outputs/bundle/release/app-release.aab
+        # WHY not -strict: on an .aab its streaming re-check reports every entry
+        # as "signed in JarFile but is not signed in JarInputStream" and exits
+        # 4 although the bundle is signed. Without it an unsigned bundle still
+        # exits 0, so the step requires jarsigner's own success line instead.
+        run: |
+          jarsigner -verify build/app/outputs/bundle/release/app-release.aab | tee verify.log
+          grep -q "^jar verified" verify.log
