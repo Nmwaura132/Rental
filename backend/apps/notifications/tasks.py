@@ -12,19 +12,22 @@ logger = logging.getLogger(__name__)
 MOBILESASA_SEND_URL = "https://api.mobilesasa.com/v1/send/message"
 
 
-def _send_via_mobilesasa(phone: str, message: str) -> tuple[bool, str]:
-    """Send one SMS through MobileSasa. Returns (delivered to MobileSasa, detail).
+class SmsNotSentYet(Exception):
+    """MobileSasa did not take the message and said to try again later."""
 
-    A network failure raises, so the task retries it; a refusal (bad number,
-    no credit, unknown sender ID) comes back as False and is recorded, since
-    sending it again would only be refused again.
+
+def _send_via_mobilesasa(phone: str, message: str) -> tuple[bool, str]:
+    """Send one SMS through MobileSasa (docs.mobilesasa.com/quickstart).
+
+    Returns (accepted by MobileSasa, message id or the reason it was refused).
+    Raises SmsNotSentYet when the send is safe to try again, and a requests
+    error when MobileSasa could not be reached or did not answer.
     """
     response = _requests.post(
         MOBILESASA_SEND_URL,
         json={
             "senderID": settings.MOBILESASA_SENDER_ID,
-            # MobileSasa wants 2547..., without the plus.
-            "phone": phone.lstrip("+"),
+            "phone": phone,
             "message": message,
         },
         headers={
@@ -33,41 +36,61 @@ def _send_via_mobilesasa(phone: str, message: str) -> tuple[bool, str]:
         },
         timeout=15,
     )
+    # Rate limited or a fault on their side: the message was not taken.
+    if response.status_code == 429 or response.status_code >= 500:
+        raise SmsNotSentYet(f"HTTP {response.status_code}")
     try:
         body = response.json()
     except ValueError:
         body = {"message": response.text[:200]}
     if response.ok and body.get("status"):
         return True, str(body.get("messageId", ""))
-    return False, f"HTTP {response.status_code}: {body.get('message') or body}"
+    # A refusal (bad number, no credit, unknown sender ID, or the same message
+    # already delivered today) fails the same way every time, so it is
+    # recorded rather than retried.
+    return False, f"{body.get('responseCode', response.status_code)}: {body.get('message') or body}"
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=30)
+@shared_task(bind=True, max_retries=4)
 def send_sms(self, recipient_id, message, phone_number=None):
     """Send an SMS via MobileSasa. Logs result to Notification model."""
     from .models import Notification
     from django.contrib.auth import get_user_model
 
     User = get_user_model()
+    user = User.objects.get(id=recipient_id)
+    phone = phone_number or user.phone_number
 
-    try:
-        user = User.objects.get(id=recipient_id)
-        phone = phone_number or user.phone_number
-
-        success, detail = _send_via_mobilesasa(phone, message)
+    def record(success, error=""):
         Notification.objects.create(
             recipient=user,
             channel=Notification.Channel.SMS,
             message=message,
             status=Notification.Status.SENT if success else Notification.Status.FAILED,
             sent_at=timezone.now() if success else None,
-            error="" if success else detail,
+            error=error,
         )
-        logger.info("SMS sent to %s: %s", phone, "OK" if success else "FAILED")
 
-    except Exception as exc:
-        logger.error("SMS failed for user %s: %s", recipient_id, exc)
-        raise self.retry(exc=exc)
+    try:
+        success, detail = _send_via_mobilesasa(phone, message)
+    except (SmsNotSentYet, _requests.ConnectionError) as exc:
+        # Never reached MobileSasa, or it said to try later: nothing was sent,
+        # so sending again cannot double up. Waits 30s, 60s, 120s, 240s.
+        # (ConnectTimeout is a ConnectionError: the connection never opened.)
+        if self.request.retries >= self.max_retries:
+            logger.error("SMS to user %s gave up after retries: %s", recipient_id, exc)
+            record(False, f"Not sent: {exc}")
+            return
+        raise self.retry(exc=exc, countdown=30 * 2 ** self.request.retries)
+    except _requests.Timeout:
+        # WHY no retry: MobileSasa may have queued it before the reply was
+        # lost, and their docs warn a blind retry can send it twice.
+        logger.warning("SMS to user %s: no reply from MobileSasa; it may have been sent.", recipient_id)
+        record(False, "No reply from MobileSasa; it may still have been sent.")
+        return
+
+    record(success, "" if success else detail)
+    logger.info("SMS to user %s: %s", recipient_id, "accepted" if success else f"refused ({detail})")
 
 
 @shared_task(bind=True, max_retries=5, default_retry_delay=5)

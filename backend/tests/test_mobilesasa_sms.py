@@ -52,10 +52,10 @@ class TestWhatIsSent:
         _send(tenant)
         assert sent["headers"]["Authorization"] == "Bearer key-123"
 
-    def test_the_number_has_no_plus(self, tenant, mobilesasa):
+    def test_the_number_is_sent_as_stored(self, tenant, mobilesasa):
         sent = mobilesasa()
         _send(tenant)
-        assert sent["json"]["phone"] == "254700111111"
+        assert sent["json"]["phone"] == "+254700111111"
 
     def test_it_uses_the_registered_sender_id(self, tenant, mobilesasa):
         sent = mobilesasa()
@@ -95,3 +95,49 @@ class TestWhenMobileSasaCannotBeReached:
         monkeypatch.setattr(tasks._requests, "post", down)
         _send(tenant)
         assert not Notification.objects.filter(recipient=tenant, status=Notification.Status.SENT).exists()
+
+
+def _count_posts(monkeypatch, outcome):
+    calls = []
+
+    def post(url, json, headers, timeout):
+        calls.append(json)
+        return outcome()
+
+    monkeypatch.setattr(tasks._requests, "post", post)
+    return calls
+
+
+class TestWhatIsTriedAgain:
+    def test_a_rate_limited_send_is_tried_again(self, tenant, monkeypatch):
+        calls = _count_posts(monkeypatch, lambda: _Reply(429, {"status": False}))
+        _send(tenant)
+        assert len(calls) == 5
+
+    def test_after_the_last_try_it_is_recorded_as_not_sent(self, tenant, monkeypatch):
+        _count_posts(monkeypatch, lambda: _Reply(503, {"status": False}))
+        _send(tenant)
+        assert Notification.objects.get(recipient=tenant).status == Notification.Status.FAILED
+
+    def test_a_refusal_is_not_tried_again(self, tenant, monkeypatch):
+        calls = _count_posts(monkeypatch, lambda: _Reply(
+            422, {"status": False, "responseCode": "0422", "message": "Invalid phone"}))
+        _send(tenant)
+        assert len(calls) == 1
+
+    def test_a_lost_reply_is_not_tried_again(self, tenant, monkeypatch):
+        # It may already be queued: sending again could reach the tenant twice.
+        def no_reply():
+            raise requests.ReadTimeout("no reply")
+
+        calls = _count_posts(monkeypatch, no_reply)
+        _send(tenant)
+        assert len(calls) == 1
+
+    def test_a_lost_reply_says_it_may_have_gone(self, tenant, monkeypatch):
+        def no_reply():
+            raise requests.ReadTimeout("no reply")
+
+        _count_posts(monkeypatch, no_reply)
+        _send(tenant)
+        assert "may still have been sent" in Notification.objects.get(recipient=tenant).error
