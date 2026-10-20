@@ -30,9 +30,8 @@ export TZ
 
 echo "[backup] starting | tz=$TZ | hour=$BACKUP_HOUR | retention=${RETENTION_DAYS}d"
 
-# Configure mc alias once.
-mc alias set local "$MINIO_ENDPOINT" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null
-mc mb --ignore-existing "local/$BACKUP_BUCKET" >/dev/null
+export MINIO_ENDPOINT MINIO_ROOT_USER MINIO_ROOT_PASSWORD BACKUP_BUCKET
+python /store.py ensure-bucket
 
 while true; do
   # Sleep until next BACKUP_HOUR:00 in TZ.
@@ -93,8 +92,8 @@ while true; do
   rm -f "$RAW_FILE"
   SIZE=$(stat -c%s "$DUMP_FILE")
   echo "[backup] dump OK (${SIZE} bytes), uploading..."
-  if mc cp "$DUMP_FILE" "local/$BACKUP_BUCKET/$(basename "$DUMP_FILE")"; then
-    echo "[backup] uploaded to local/$BACKUP_BUCKET/$(basename "$DUMP_FILE")"
+  if python /store.py upload "$DUMP_FILE"; then
+    echo "[backup] uploaded to $BACKUP_BUCKET/$(basename "$DUMP_FILE")"
   else
     echo "[backup] ERROR: upload failed; keeping local dump for next attempt" >&2
   fi
@@ -102,8 +101,7 @@ while true; do
 
   # Retention sweep — drop dumps older than RETENTION_DAYS.
   echo "[backup] retention sweep (older than ${RETENTION_DAYS}d)..."
-  mc rm --recursive --force --older-than "${RETENTION_DAYS}d" \
-      "local/$BACKUP_BUCKET" >/dev/null 2>&1 || true
+  python /store.py prune "$RETENTION_DAYS" || echo "[backup] WARNING: retention sweep failed" >&2
 
   echo "[backup] sleeping until next cycle"
 done
