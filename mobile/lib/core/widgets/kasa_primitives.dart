@@ -273,6 +273,7 @@ class KasaButton extends StatelessWidget {
     Widget content() {
       final text = Text(
         label,
+        textAlign: TextAlign.center,
         style: KasaFont.sans(
           fontSize: compact ? 14 : 16,
           fontWeight: FontWeight.w600,
@@ -290,7 +291,10 @@ class KasaButton extends StatelessWidget {
               mainAxisSize: fullWidth ? MainAxisSize.max : MainAxisSize.min,
               children: [
                 if (leading != null) ...[leading!, const SizedBox(width: 8)],
-                text,
+                // WHY Flexible: an icon plus a long label ("Add a payment
+                // method") is wider than a 320dp phone at large text sizes,
+                // and a bare Text in a Row overflows rather than wrapping.
+                Flexible(child: text),
               ],
             ),
           ),
