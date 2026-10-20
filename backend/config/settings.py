@@ -346,9 +346,13 @@ RENT_ACCOUNT_PREFIX = env("RENT_ACCOUNT_PREFIX", default="")
 STK_PUSH_ENABLED = env.bool("STK_PUSH_ENABLED", default=True)
 
 # ── Africa's Talking ──────────────────────────────────────────────────────────
+# SMS goes through MobileSasa. The sender ID must be one registered on the
+# MobileSasa account, or every message is refused.
+MOBILESASA_API_KEY = env("MOBILESASA_API_KEY", default="")
+MOBILESASA_SENDER_ID = env("MOBILESASA_SENDER_ID", default="")
+# Africa's Talking is kept for WhatsApp only.
 AT_USERNAME = env("AT_USERNAME", default="sandbox")
 AT_API_KEY = env("AT_API_KEY", default="")
-AT_SENDER_ID = env("AT_SENDER_ID", default="")
 # WhatsApp delivery is ~3–5x more expensive than SMS. Disabled by default.
 # Enable only for document delivery (lease PDFs, financial reports).
 WHATSAPP_ENABLED = env.bool("WHATSAPP_ENABLED", default=False)

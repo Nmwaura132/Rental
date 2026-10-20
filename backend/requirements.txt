@@ -30,7 +30,6 @@ requests==2.33.0
 urllib3==2.7.0
 
 # ── Notifications ─────────────────────────────────────────────────────────────
-africastalking==2.0.2            # SMS + WhatsApp
 
 # ── Files & PDFs ─────────────────────────────────────────────────────────────
 Pillow==12.3.0                   # image handling (maintenance photos)

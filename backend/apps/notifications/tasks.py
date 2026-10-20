@@ -9,15 +9,42 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
-def _get_sms_service():
-    import africastalking
-    africastalking.initialize(settings.AT_USERNAME, settings.AT_API_KEY)
-    return africastalking.SMS
+MOBILESASA_SEND_URL = "https://api.mobilesasa.com/v1/send/message"
+
+
+def _send_via_mobilesasa(phone: str, message: str) -> tuple[bool, str]:
+    """Send one SMS through MobileSasa. Returns (delivered to MobileSasa, detail).
+
+    A network failure raises, so the task retries it; a refusal (bad number,
+    no credit, unknown sender ID) comes back as False and is recorded, since
+    sending it again would only be refused again.
+    """
+    response = _requests.post(
+        MOBILESASA_SEND_URL,
+        json={
+            "senderID": settings.MOBILESASA_SENDER_ID,
+            # MobileSasa wants 2547..., without the plus.
+            "phone": phone.lstrip("+"),
+            "message": message,
+        },
+        headers={
+            "Authorization": f"Bearer {settings.MOBILESASA_API_KEY}",
+            "Accept": "application/json",
+        },
+        timeout=15,
+    )
+    try:
+        body = response.json()
+    except ValueError:
+        body = {"message": response.text[:200]}
+    if response.ok and body.get("status"):
+        return True, str(body.get("messageId", ""))
+    return False, f"HTTP {response.status_code}: {body.get('message') or body}"
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=30)
 def send_sms(self, recipient_id, message, phone_number=None):
-    """Send an SMS via Africa's Talking. Logs result to Notification model."""
+    """Send an SMS via MobileSasa. Logs result to Notification model."""
     from .models import Notification
     from django.contrib.auth import get_user_model
 
@@ -27,17 +54,14 @@ def send_sms(self, recipient_id, message, phone_number=None):
         user = User.objects.get(id=recipient_id)
         phone = phone_number or user.phone_number
 
-        sms = _get_sms_service()
-        response = sms.send(message, [phone], sender_id=settings.AT_SENDER_ID or None)
-
-        success = response["SMSMessageData"]["Recipients"][0]["status"] == "Success"
+        success, detail = _send_via_mobilesasa(phone, message)
         Notification.objects.create(
             recipient=user,
             channel=Notification.Channel.SMS,
             message=message,
             status=Notification.Status.SENT if success else Notification.Status.FAILED,
             sent_at=timezone.now() if success else None,
-            error="" if success else str(response),
+            error="" if success else detail,
         )
         logger.info("SMS sent to %s: %s", phone, "OK" if success else "FAILED")
 

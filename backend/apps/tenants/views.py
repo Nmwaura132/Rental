@@ -316,24 +316,14 @@ class TenancyViewSet(viewsets.ModelViewSet):
         tenancy.save(update_fields=["document_key"])
 
         # ── 4. SMS the tenant with the download link ──────────────────────────
-        sms_sent = False
-        try:
-            import africastalking
-            at_username = getattr(settings, "AT_USERNAME", "sandbox")
-            at_api_key = getattr(settings, "AT_API_KEY", "")
-            if at_api_key:
-                africastalking.initialize(at_username, at_api_key)
-                sms = africastalking.SMS
-                tenant_name = tenancy.tenant.first_name
-                message = (
-                    f"Dear {tenant_name}, your tenancy agreement for "
-                    f"Unit {tenancy.unit.unit_number}, {tenancy.unit.property.name} "
-                    f"is ready. Download: {pdf_url}"
-                )
-                sms.send(message, [tenancy.tenant.phone_number])
-                sms_sent = True
-        except Exception as e:
-            logger.warning("SMS send failed for tenancy %s: %s", tenancy.id, e)
+        send_sms.delay(
+            tenancy.tenant.id,
+            f"Dear {tenancy.tenant.first_name}, your tenancy agreement for "
+            f"Unit {tenancy.unit.unit_number}, {tenancy.unit.property.name} "
+            f"is ready. Download: {pdf_url}",
+        )
+        # Queued: delivery and its retries are send_sms's to record.
+        sms_sent = True
 
         # ── 5. WhatsApp delivery (if enabled) ────────────────────────────────
         whatsapp_queued = False
