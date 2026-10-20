@@ -15,6 +15,7 @@ import '../../core/utils/currency.dart';
 import '../../core/widgets/kasa_layout.dart';
 import '../../core/widgets/kasa_primitives.dart';
 import 'needs_attention.dart';
+import 'setup_checklist.dart';
 
 const _storage = FlutterSecureStorage();
 
@@ -117,6 +118,7 @@ class _LandlordHome extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        SetupChecklist(totalUnits: total),
         KasaCard(
           padding: const EdgeInsets.all(16),
           child: Column(

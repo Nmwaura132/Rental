@@ -63,22 +63,6 @@ class PropertiesScreen extends ConsumerWidget {
     final isLandlord = role == 'landlord';
     final cs = Theme.of(context).colorScheme;
 
-    void openAddProperty() => Navigator.of(context, rootNavigator: true).push(
-          MaterialPageRoute(
-            fullscreenDialog: true,
-            builder: (ctx) => Scaffold(
-              appBar: AppBar(
-                title: const Text('Add property'),
-                leading: IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.of(ctx).pop(),
-                ),
-              ),
-              body: _AddPropertyPage(onDone: () => ref.invalidate(propertiesProvider)),
-            ),
-          ),
-        );
-
     return Scaffold(
       backgroundColor: cs.kasaBg,
       appBar: AppBar(
@@ -97,7 +81,7 @@ class PropertiesScreen extends ConsumerWidget {
                 label: 'Add property',
                 variant: KasaButtonVariant.primary,
                 leading: Icon(Icons.add_rounded, size: 20, color: cs.onPrimary),
-                onTap: openAddProperty,
+                onTap: () => openAddProperty(context, ref),
               ),
             ])
           : null,
@@ -325,6 +309,26 @@ const _unitTypeLabels = {
   'studio': 'Studio',
   'commercial': 'Commercial',
 };
+
+/// The building, its units with rent and deposit, and its bills, in one form.
+///
+/// Public so the landlord's set-up checklist on Home opens the same form.
+Future<void> openAddProperty(BuildContext context, WidgetRef ref) =>
+    Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (ctx) => Scaffold(
+          appBar: AppBar(
+            title: const Text('Add property'),
+            leading: IconButton(
+              icon: const Icon(Icons.close),
+              onPressed: () => Navigator.of(ctx).pop(),
+            ),
+          ),
+          body: _AddPropertyPage(onDone: () => ref.invalidate(propertiesProvider)),
+        ),
+      ),
+    );
 
 class _AddPropertyPage extends ConsumerStatefulWidget {
   const _AddPropertyPage({required this.onDone});

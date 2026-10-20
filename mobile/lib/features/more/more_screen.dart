@@ -36,6 +36,12 @@ class MoreScreen extends ConsumerWidget {
         ]),
         _Group('Finance', [
           _Row(
+            icon: Icons.account_balance_wallet_outlined,
+            title: 'How tenants pay',
+            subtitle: 'Paybill, till, bank account or cash',
+            onTap: () => context.push('/payment-methods'),
+          ),
+          _Row(
             icon: Icons.description_outlined,
             title: 'Reports',
             subtitle: 'Rent roll, arrears and collections',
