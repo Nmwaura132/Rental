@@ -128,7 +128,7 @@ class Unit(models.Model):
         super().save(*args, **kwargs)
 
     @classmethod
-    def match_reference(cls, reference):
+    def match_reference(cls, reference, owner=None):
         """
         Resolve whatever a tenant typed into a Paybill/bank reference field to
         a single Unit, or None.
@@ -147,7 +147,10 @@ class Unit(models.Model):
         if not reference:
             return None
 
-        unit = cls.objects.filter(payment_code__iexact=reference).first()
+        # With [owner] known (the money came in on that landlord's own
+        # paybill), only their units are candidates, so "G1" is unambiguous.
+        units = cls.objects.filter(property__owner=owner) if owner is not None else cls.objects
+        unit = units.filter(payment_code__iexact=reference).first()
         if unit:
             return unit
 
@@ -160,7 +163,7 @@ class Unit(models.Model):
         slug = _slugify_unit_number(reference)
         if not slug:
             return None
-        candidates = list(cls.objects.filter(unit_number__iexact=slug)[:2])
+        candidates = list(units.filter(unit_number__iexact=slug)[:2])
         return candidates[0] if len(candidates) == 1 else None
 
     def __str__(self):

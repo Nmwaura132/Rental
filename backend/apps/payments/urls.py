@@ -1,7 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
-    InvoiceViewSet, PaymentViewSet,
+    InvoiceViewSet, PaymentAccountViewSet, PaymentViewSet,
     MpesaRegisterC2BView,
     MpesaC2BValidateView, MpesaC2BConfirmView,
     MpesaSTKPushView, MpesaSTKCallbackView, MpesaSTKStatusView,
@@ -19,6 +19,8 @@ from .mri_views import MRIStatementView
 
 router = DefaultRouter()
 router.register("invoices", InvoiceViewSet, basename="invoice")
+# "accounts" before "": the empty prefix would otherwise read it as a payment id.
+router.register("accounts", PaymentAccountViewSet, basename="paymentaccount")
 router.register("", PaymentViewSet, basename="payment")
 
 urlpatterns = [

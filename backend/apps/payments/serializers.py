@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.db import transaction
-from .models import Invoice, Payment, InvoiceLineItem
+from .models import PaymentAccount, Invoice, Payment, InvoiceLineItem
 from .services import pay_to
 
 
@@ -136,3 +136,58 @@ class InvoiceSerializer(serializers.ModelSerializer):
                 ]
             )
         return invoice
+
+
+class PaymentAccountSerializer(serializers.ModelSerializer):
+    """A landlord's own way of being paid. The KCB secret is never exposed and
+    the status is set by the server: a KCB paybill is "connecting" until staff
+    finish the link."""
+
+    kind_display = serializers.CharField(source="get_kind_display", read_only=True)
+
+    class Meta:
+        model = PaymentAccount
+        fields = [
+            "id", "kind", "kind_display", "status", "number", "account_prefix",
+            "bank_name", "bank_branch", "account_name", "account_number", "created_at",
+        ]
+        read_only_fields = ["status", "created_at"]
+
+    def validate(self, attrs):
+        import re
+
+        kind = attrs.get("kind", getattr(self.instance, "kind", None))
+        if self.instance is not None and kind != self.instance.kind:
+            raise serializers.ValidationError({"kind": "Add a new method rather than changing this one's type."})
+
+        def value(name):
+            return (attrs.get(name, getattr(self.instance, name, "")) or "").strip()
+
+        K = PaymentAccount.Kind
+        errors = {}
+        if kind in (K.KCB_PAYBILL, K.PAYBILL, K.TILL):
+            if not re.fullmatch(r"\d{5,8}", value("number")):
+                errors["number"] = "Enter the 5 to 8 digit number."
+            if kind == K.TILL and value("account_prefix"):
+                errors["account_prefix"] = "A till has no account number."
+        if kind == K.BANK:
+            for name, label in (("bank_name", "bank"), ("account_name", "account name"),
+                                ("account_number", "account number")):
+                if not value(name):
+                    errors[name] = f"Enter the {label}."
+        if kind == K.CASH:
+            owner = self.context["request"].user
+            others = PaymentAccount.objects.filter(owner=owner, kind=K.CASH)
+            if self.instance is not None:
+                others = others.exclude(pk=self.instance.pk)
+            if others.exists():
+                errors["kind"] = "Cash is already set up."
+        if kind == K.KCB_PAYBILL:
+            taken = PaymentAccount.objects.filter(kind=K.KCB_PAYBILL, number=value("number"))
+            if self.instance is not None:
+                taken = taken.exclude(pk=self.instance.pk)
+            if taken.exists():
+                errors["number"] = "This KCB paybill is already connected to another account. Contact support."
+        if errors:
+            raise serializers.ValidationError(errors)
+        return attrs

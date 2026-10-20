@@ -331,3 +331,67 @@ class TenancyCredit(models.Model):
 
     def __str__(self):
         return f"Credit KES {self.remaining} of {self.amount} on tenancy {self.tenancy_id}"
+
+
+class PaymentAccount(models.Model):
+    """Where one landlord's tenants pay: a paybill, a till, a bank account or cash.
+
+    WHY per landlord rather than in settings: every landlord who signs up has
+    their own paybill, and the bill, the SMS and the tenant's app must all name
+    that landlord's, not the platform's.
+    """
+
+    class Kind(models.TextChoices):
+        # Payments arrive by KCB's notification and are recorded on their own.
+        KCB_PAYBILL = "kcb_paybill", "KCB paybill"
+        # Shown to tenants; the landlord records what arrives.
+        PAYBILL = "paybill", "Paybill"
+        TILL = "till", "Till number"
+        BANK = "bank", "Bank account"
+        CASH = "cash", "Cash"
+
+    class Status(models.TextChoices):
+        # A KCB paybill waits here until KCB's notifications are switched on
+        # for it; everything else is usable as soon as it is saved.
+        CONNECTING = "connecting", "Connecting"
+        ACTIVE = "active", "Active"
+
+    # Mobile money a tenant can be told to pay to, best first: one recorded on
+    # its own beats one the landlord types in.
+    MOBILE_KINDS = (Kind.KCB_PAYBILL, Kind.PAYBILL, Kind.TILL)
+
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="payment_accounts"
+    )
+    kind = models.CharField(max_length=12, choices=Kind.choices)
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.ACTIVE)
+    # Paybill or till number.
+    number = models.CharField(max_length=12, blank=True, default="")
+    # What goes before the house number in the account field: "623943#" makes
+    # G1's account "623943#G1". Empty means the house number alone.
+    account_prefix = models.CharField(max_length=20, blank=True, default="")
+    bank_name = models.CharField(max_length=60, blank=True, default="")
+    bank_branch = models.CharField(max_length=60, blank=True, default="")
+    account_name = models.CharField(max_length=120, blank=True, default="")
+    account_number = models.CharField(max_length=40, blank=True, default="")
+    # Signs KCB's notifications for this paybill. Set by staff in admin when
+    # the connection is made; never sent to the app.
+    ipn_secret = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "payment_accounts"
+        ordering = ["created_at", "id"]
+        constraints = [
+            # A KCB notification is routed by the paybill number in it, so two
+            # landlords cannot both claim one. A shared bank paybill (Caritas)
+            # is different: there the account prefix tells landlords apart.
+            models.UniqueConstraint(
+                fields=["number"],
+                condition=models.Q(kind="kcb_paybill"),
+                name="kcb_paybill_number_unique",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.get_kind_display()} {self.number or self.account_number} ({self.owner_id})"

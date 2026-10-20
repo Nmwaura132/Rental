@@ -12,8 +12,8 @@ from rest_framework.views import APIView
 from drf_spectacular.utils import extend_schema
 
 from apps.core.permissions import IsLandlord
-from .models import Invoice, Payment, MpesaSTKRequest
-from .serializers import InvoiceSerializer, PaymentSerializer
+from .models import Invoice, Payment, MpesaSTKRequest, PaymentAccount
+from .serializers import InvoiceSerializer, PaymentAccountSerializer, PaymentSerializer
 from .mpesa import make_idempotency_key
 from .services import (
     apply_confirmed_payment,
@@ -21,6 +21,7 @@ from .services import (
     credit_remaining,
     how_to_pay,
     pay_to,
+    prompts_allowed,
 )
 
 logger = logging.getLogger(__name__)
@@ -274,6 +275,22 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
         return Response(PaymentSerializer(payment).data)
 
 
+def _bank_accounts(landlord) -> list[dict]:
+    from .models import PaymentAccount
+
+    if landlord is None:
+        return []
+    return [
+        {
+            "bank_name": a.bank_name,
+            "bank_branch": a.bank_branch,
+            "account_name": a.account_name,
+            "account_number": a.account_number,
+        }
+        for a in PaymentAccount.objects.filter(owner=landlord, kind=PaymentAccount.Kind.BANK)
+    ]
+
+
 def _notice_by(tenancy) -> str | None:
     if tenancy is None or not tenancy.has_notice:
         return None
@@ -367,7 +384,9 @@ class DashboardStatsView(APIView):
                 },
                 "open_bills": open_bills.count(),
                 "pay_account": pay_to(tenancy.unit)[1] if tenancy else None,
-                "stk_enabled": django_settings.STK_PUSH_ENABLED,
+                "stk_enabled": prompts_allowed(tenancy.unit) if tenancy else False,
+                # Bank details, for a tenant paying by transfer or at a branch.
+                "bank_accounts": _bank_accounts(landlord),
                 "credit": credit_remaining(tenancy) if tenancy else 0,
                 "deposit_held": tenancy.deposit_amount if (tenancy and tenancy.deposit_paid) else 0,
                 "last_paid": last_paid,
@@ -392,7 +411,7 @@ class DashboardStatsView(APIView):
                 # no giver on record predates landlords being able to give one.
                 "notice_by": _notice_by(tenancy),
                 "notice_reason": tenancy.notice_reason if _notice_by(tenancy) == "landlord" else "",
-                "mpesa_paybill": django_settings.RENT_PAYBILL,
+                "mpesa_paybill": pay_to(tenancy.unit)[0] if tenancy else django_settings.RENT_PAYBILL,
             })
 
         # Landlord / caretaker dashboard
@@ -539,14 +558,6 @@ class MpesaSTKPushView(APIView):
         from .mpesa import stk_push
         from apps.core.utils.phone import normalize_phone
 
-        # A shared bank paybill cannot send prompts. Refuse plainly rather than
-        # let Safaricom's error surface as "STK Push failed".
-        if not django_settings.STK_PUSH_ENABLED:
-            return Response(
-                {"error": "M-Pesa prompts are switched off for this account. Pay to the paybill and account number instead."},
-                status=400,
-            )
-
         invoice_id = request.data.get("invoice_id")
         if not invoice_id:
             return Response({"error": "invoice_id is required."}, status=400)
@@ -560,6 +571,15 @@ class MpesaSTKPushView(APIView):
 
         if invoice.status == Invoice.Status.PAID:
             return Response({"error": "Invoice is already fully paid."}, status=400)
+
+        # A shared bank paybill cannot send prompts, and a landlord's own
+        # paybill is not the one a prompt pays. Refuse plainly rather than let
+        # Safaricom's error surface as "STK Push failed".
+        if not prompts_allowed(invoice.tenancy.unit):
+            return Response(
+                {"error": "M-Pesa prompts are switched off for this account. Pay to the paybill and account number instead."},
+                status=400,
+            )
 
         # Block duplicate pushes — only one pending STK request per invoice at a time
         existing = MpesaSTKRequest.objects.filter(
@@ -749,3 +769,39 @@ class MpesaC2BConfirmView(APIView):
         )
 
         return Response({"ResultCode": 0, "ResultDesc": "OK"})
+
+
+class PaymentAccountViewSet(viewsets.ModelViewSet):
+    """GET/POST /api/v1/payments/accounts/: the landlord's ways of being paid."""
+
+    serializer_class = PaymentAccountSerializer
+    permission_classes = [IsLandlord]
+    queryset = PaymentAccount.objects.none()  # for drf-spectacular schema introspection
+
+    def get_queryset(self):
+        return PaymentAccount.objects.filter(owner=self.request.user)
+
+    def perform_create(self, serializer):
+        kind = serializer.validated_data["kind"]
+        # Only a KCB paybill waits on anyone: KCB has to send its payments here
+        # before they can be recorded on their own.
+        status = (
+            PaymentAccount.Status.CONNECTING
+            if kind == PaymentAccount.Kind.KCB_PAYBILL
+            else PaymentAccount.Status.ACTIVE
+        )
+        account = serializer.save(owner=self.request.user, status=status)
+        if kind == PaymentAccount.Kind.KCB_PAYBILL:
+            logger.warning(
+                "KCB paybill %s added by landlord %s; waiting to be connected in admin.",
+                account.number, self.request.user.id,
+            )
+
+    def perform_update(self, serializer):
+        account = serializer.instance
+        changed = serializer.validated_data.get("number", account.number) != account.number
+        # A new number is a new paybill: the old KCB link no longer applies.
+        if account.kind == PaymentAccount.Kind.KCB_PAYBILL and changed:
+            serializer.save(status=PaymentAccount.Status.CONNECTING, ipn_secret="")
+        else:
+            serializer.save()

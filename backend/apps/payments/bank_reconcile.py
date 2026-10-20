@@ -33,11 +33,16 @@ def reconcile_bank_notification(notification, *, invoice_id=None) -> bool:
         invoice = Invoice.objects.filter(
             invoice_number__iexact=reference,
             status__in=open_statuses,
-        ).first()
+        )
+        # Money that came in on one landlord's own account can only pay that
+        # landlord's bills, whatever reference the payer typed.
+        if notification.owner_id:
+            invoice = invoice.filter(tenancy__unit__property__owner_id=notification.owner_id)
+        invoice = invoice.first()
 
     if not invoice and invoice_id is None and reference:
         from apps.properties.models import Unit
-        unit = Unit.match_reference(reference)
+        unit = Unit.match_reference(_without_prefix(notification, reference), owner=notification.owner)
         tenancy = Tenancy.objects.filter(
             unit=unit,
             status=Tenancy.Status.ACTIVE,
@@ -113,3 +118,16 @@ def reconcile_bank_notification(notification, *, invoice_id=None) -> bool:
         notification.amount,
     )
     return True
+
+
+def _without_prefix(notification, reference: str) -> str:
+    """A tenant told to pay to "623943#G1" may type all of it; the house is G1."""
+    from .models import PaymentAccount
+
+    if not notification.owner_id:
+        return reference
+    prefixes = PaymentAccount.objects.filter(owner_id=notification.owner_id).exclude(account_prefix="")
+    for prefix in prefixes.values_list("account_prefix", flat=True):
+        if reference.startswith(prefix.upper()):
+            return reference[len(prefix):]
+    return reference

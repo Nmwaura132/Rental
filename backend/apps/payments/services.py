@@ -67,25 +67,59 @@ def apply_confirmed_payment(
     return payment, True
 
 
-def pay_to(unit) -> tuple[str, str]:
-    """The paybill and account number a tenant pays this unit's rent to.
+def mobile_account(owner):
+    """The landlord's own paybill or till, best first, or None."""
+    from .models import PaymentAccount
 
-    Behind a bank's shared paybill the account number already identifies the
-    landlord ("623943#G1"), so the house number only has to be unique within
-    their own buildings and is quoted exactly as the landlord set it. On a
-    paybill shared by every landlord, the system-wide payment code is needed
-    to tell two landlords' G1s apart.
+    accounts = list(PaymentAccount.objects.filter(owner=owner, kind__in=PaymentAccount.MOBILE_KINDS))
+    for kind in PaymentAccount.MOBILE_KINDS:
+        for account in accounts:
+            if account.kind == kind:
+                return account
+    return None
+
+
+def pay_to(unit) -> tuple[str, str]:
+    """The paybill (or till) and account number a tenant pays this unit's rent
+    to. A till has no account number, so it comes back empty.
+
+    The landlord's own paybill comes first. Without one, the platform's: behind
+    a bank's shared paybill the account number already identifies the landlord
+    ("623943#G1"), so the house number is quoted exactly as the landlord set it;
+    on a paybill shared by every landlord, the system-wide payment code is
+    needed to tell two landlords' G1s apart.
     """
     from django.conf import settings
 
+    from .models import PaymentAccount
+
+    account = mobile_account(unit.property.owner_id)
+    if account is not None:
+        if account.kind == PaymentAccount.Kind.TILL:
+            return account.number, ""
+        return account.number, f"{account.account_prefix}{unit.unit_number}"
     if settings.RENT_ACCOUNT_PREFIX:
         return settings.RENT_PAYBILL, f"{settings.RENT_ACCOUNT_PREFIX}{unit.unit_number}"
     return settings.RENT_PAYBILL, unit.payment_code
 
 
 def how_to_pay(unit) -> str:
-    paybill, account = pay_to(unit)
-    return f"Pay via M-Pesa Paybill {paybill}, Acc: {account}."
+    number, account = pay_to(unit)
+    if not account:
+        return f"Pay via M-Pesa Till {number}."
+    return f"Pay via M-Pesa Paybill {number}, Acc: {account}."
+
+
+def prompts_allowed(unit) -> bool:
+    """Whether a tenant of this unit can be sent an M-Pesa prompt.
+
+    WHY not when the landlord has a paybill of their own: the prompt is sent
+    through the platform's shortcode, so it would pay the platform rather than
+    the landlord.
+    """
+    from django.conf import settings
+
+    return settings.STK_PUSH_ENABLED and mobile_account(unit.property.owner_id) is None
 
 
 def create_move_in_invoice(tenancy, *, notify=True):

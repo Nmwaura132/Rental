@@ -81,8 +81,33 @@ class KCBIPNView(APIView):
     """
     permission_classes = [permissions.AllowAny]
 
-    def _verify_signature(self, request) -> bool:
-        secret = getattr(settings, "KCB_IPN_SECRET", "")
+    def _account(self, request):
+        """The landlord paybill this notification is for, if it is one.
+
+        WHY reading the body before the signature is checked is safe: the
+        paybill only picks which secret to check with, and a forged body still
+        has to carry that landlord's signature.
+        """
+        import json
+
+        from .models import PaymentAccount
+
+        # WHY the raw bytes and not request.data: once DRF parses the stream,
+        # the body can no longer be read for the signature check.
+        try:
+            shortcode = str(json.loads(request.body).get("BusinessShortCode", "")).strip()
+        except (ValueError, AttributeError):
+            return None
+        if not shortcode:
+            return None
+        return PaymentAccount.objects.filter(
+            kind=PaymentAccount.Kind.KCB_PAYBILL,
+            status=PaymentAccount.Status.ACTIVE,
+            number=shortcode,
+        ).first()
+
+    def _verify_signature(self, request, account) -> bool:
+        secret = account.ipn_secret if account else getattr(settings, "KCB_IPN_SECRET", "")
         if not secret:
             # WHY: fail-CLOSED in production. An unset secret is a misconfiguration,
             # not a license to accept unsigned payments. Allow skip only in DEBUG.
@@ -100,7 +125,8 @@ class KCBIPNView(APIView):
         return hmac.compare_digest(received_sig, expected_sig)
 
     def post(self, request):
-        if not self._verify_signature(request):
+        account = self._account(request)
+        if not self._verify_signature(request, account):
             logger.warning("KCB IPN: invalid signature — rejected.")
             return Response({"ResultCode": 1, "ResultDesc": "Invalid signature"}, status=403)
 
@@ -147,6 +173,10 @@ class KCBIPNView(APIView):
             payment_ref=data.get("BillRefNumber", ""),
             credited_at=credited_at,
             raw_payload=data,
+            # Whose money it is, known from the paybill it came in on. It is
+            # then matched only against that landlord's tenants, and if it
+            # matches none it waits in their "Payments to assign".
+            owner=account.owner if account else None,
         )
 
         from .tasks import process_bank_notification

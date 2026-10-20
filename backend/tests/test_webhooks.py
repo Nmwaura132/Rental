@@ -18,7 +18,7 @@ def test_kcb_signature_check_fails_closed_when_secret_missing_in_prod():
         mock_settings.DEBUG = False
         mock_settings.KCB_IPN_SECRET = ""
         request = type("R", (), {"headers": {}, "body": b""})()
-        assert view._verify_signature(request) is False
+        assert view._verify_signature(request, None) is False
 
 
 @pytest.mark.django_db
@@ -29,7 +29,7 @@ def test_kcb_signature_check_fails_open_only_in_debug():
         mock_settings.DEBUG = True
         mock_settings.KCB_IPN_SECRET = ""
         request = type("R", (), {"headers": {}, "body": b""})()
-        assert view._verify_signature(request) is True
+        assert view._verify_signature(request, None) is True
 
 
 @pytest.mark.django_db
