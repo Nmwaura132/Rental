@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/providers/user_role_provider.dart';
 import '../../core/theme/kasa_tokens.dart';
+import 'tenant_me_screen.dart';
 
 /// The "More" tab for landlords and the "Me" tab for tenants.
 ///
@@ -18,6 +19,7 @@ class MoreScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final role = ref.watch(userRoleProvider).valueOrNull;
     final isTenant = role == 'tenant';
+    if (isTenant) return const TenantMeScreen();
     final cs = Theme.of(context).colorScheme;
 
     // Scaffold(extendBody: true) hands the bar's height down as bottom padding,

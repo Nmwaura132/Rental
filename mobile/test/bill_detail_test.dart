@@ -164,9 +164,27 @@ void main() {
   });
 
   testWidgets('a tenant pays with M-Pesa and sees no landlord tools', (tester) async {
-    await tester.pumpWidget(_host(role: 'tenant'));
+    // A tenant reaches their bill from the Pay tab, which opens it with
+    // openBill rather than through the landlord's list.
+    final dio = Dio()..httpClientAdapter = _Offline();
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        dioProvider.overrideWithValue(dio),
+        userRoleProvider.overrideWith((ref) async => 'tenant'),
+        invoicesProvider.overrideWith((ref) async => [_overdue, _paid]),
+      ],
+      child: MaterialApp(
+        theme: ThemeData(colorScheme: const ColorScheme.light()),
+        home: Consumer(
+          builder: (context, ref, _) => Scaffold(
+            body: TextButton(onPressed: () => openBill(context, ref, _overdue), child: const Text('open')),
+          ),
+        ),
+      ),
+    ));
     await tester.pumpAndSettle();
-    await _open(tester, 'Peter Kamau');
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
 
     expect(find.textContaining('with M-Pesa'), findsOneWidget);
     expect(find.byTooltip('Send reminder SMS'), findsNothing);

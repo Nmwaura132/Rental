@@ -13,6 +13,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/widgets/kasa_layout.dart';
 import '../../core/widgets/kasa_primitives.dart';
 import '../../shared/widgets/shimmer_loading.dart';
+import 'tenant_pay_screen.dart';
 import 'unplaced_payments.dart';
 
 final _apiDate = DateFormat('yyyy-MM-dd');
@@ -117,6 +118,16 @@ Future<void> recordPaymentOn(BuildContext context, WidgetRef ref, int invoiceId)
   );
 }
 
+/// One bill's full screen. Public so the tenant's Pay tab opens the same one.
+void openBill(BuildContext context, WidgetRef ref, Map<String, dynamic> invoice) {
+  Navigator.of(context).push(MaterialPageRoute(
+    builder: (_) => _InvoiceDetailScreen(
+      invoice: invoice,
+      onChanged: () => ref.invalidate(invoicesProvider),
+    ),
+  ));
+}
+
 class InvoicesScreen extends ConsumerStatefulWidget {
   const InvoicesScreen({super.key});
 
@@ -167,6 +178,8 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // A tenant's Pay tab is their own bill and history, not a ledger.
+    if (ref.watch(userRoleProvider).valueOrNull == 'tenant') return const TenantPayScreen();
     final invoices = ref.watch(invoicesProvider);
     final isLandlord = ref.watch(userRoleProvider).valueOrNull == 'landlord';
     final cs = Theme.of(context).colorScheme;

@@ -137,7 +137,7 @@ void main() {
 
       expect(find.text('Me'), findsOneWidget);
       expect(find.text('Notifications'), findsOneWidget);
-      expect(find.text('Profile and settings'), findsOneWidget);
+      expect(find.text('Settings and sign out'), findsOneWidget);
       for (final t in ['Tenants', 'Reports', 'Tax statement']) {
         expect(find.text(t), findsNothing, reason: t);
       }
