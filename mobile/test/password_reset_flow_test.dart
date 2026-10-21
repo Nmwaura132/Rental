@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rental_manager/core/widgets/kasa_primitives.dart';
 import 'package:rental_manager/core/api/api_client.dart';
 import 'package:rental_manager/features/auth/login_screen.dart';
 
@@ -64,7 +65,7 @@ void main() {
       find.widgetWithText(TextFormField, 'Confirm Password'),
       'RotatedLandlord@Test2',
     );
-    final resetButton = find.widgetWithText(ElevatedButton, 'Reset Password');
+    final resetButton = find.widgetWithText(KasaButton, 'Reset Password');
     await tester.ensureVisible(resetButton);
     await tester.tap(resetButton);
     await tester.pumpAndSettle();

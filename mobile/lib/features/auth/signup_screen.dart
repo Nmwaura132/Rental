@@ -57,7 +57,9 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
     if (!_phoneForm.currentState!.validate()) return;
     setState(() => _busy = true);
     try {
-      await ref.read(publicDioProvider).post('/api/v1/auth/signup/request-code/', data: {
+      await ref
+          .read(publicDioProvider)
+          .post('/api/v1/auth/signup/request-code/', data: {
         'phone_number': normalizeKenyanPhone(_phoneCtrl.text),
       });
       if (mounted) setState(() => _codeSent = true);
@@ -73,7 +75,8 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
     setState(() => _busy = true);
     try {
       final phone = normalizeKenyanPhone(_phoneCtrl.text);
-      final resp = await ref.read(publicDioProvider).post('/api/v1/auth/signup/', data: {
+      final resp =
+          await ref.read(publicDioProvider).post('/api/v1/auth/signup/', data: {
         'phone_number': phone,
         'code': _codeCtrl.text.trim(),
         'first_name': _firstCtrl.text.trim(),
@@ -86,7 +89,8 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
       await _storage.write(key: 'refresh_token', value: resp.data['refresh']);
       await _storage.write(key: 'user_role', value: resp.data['role']);
       await _storage.write(key: 'user_name', value: resp.data['name']);
-      await _storage.write(key: 'user_phone', value: resp.data['phone_number'] ?? '');
+      await _storage.write(
+          key: 'user_phone', value: resp.data['phone_number'] ?? '');
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('saved_phone', phone);
       ref.read(sessionUnlockedProvider.notifier).state = true;
@@ -111,99 +115,117 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
         surfaceTintColor: Colors.transparent,
         title: const Text('Create an account'),
       ),
-      bottomNavigationBar: KasaActionBar(children: [
-        KasaButton(
-          label: _codeSent ? 'Create account' : 'Send code',
-          isLoading: _busy,
-          onTap: _busy ? null : (_codeSent ? _createAccount : _sendCode),
-        ),
-      ]),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-        children: [
-          Text(
-            'For landlords. Your tenants get their accounts from you.',
-            style: muted,
-          ),
-          const SizedBox(height: 24),
-          Form(
-            key: _phoneForm,
-            child: TextFormField(
-              controller: _phoneCtrl,
-              enabled: !_codeSent,
-              keyboardType: TextInputType.phone,
-              autofillHints: const [AutofillHints.telephoneNumber],
-              inputFormatters: [
-                FilteringTextInputFormatter.digitsOnly,
-                LengthLimitingTextInputFormatter(12),
-              ],
-              decoration: const InputDecoration(
-                labelText: 'Phone number',
-                prefixText: '+254 ',
-                hintText: '712 345 678',
+      // WHY the action bar inside the body: the body shrinks for the
+      // keyboard, so the button stays in reach while typing.
+      body: Column(children: [
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            children: [
+              Text(
+                'For landlords. Your tenants get their accounts from you.',
+                style: muted,
               ),
-              validator: validateKenyanPhone,
-            ),
-          ),
-          if (_codeSent) ...[
-            const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton(
-                onPressed: _busy ? null : () => setState(() => _codeSent = false),
-                child: const Text('Use a different number'),
+              const SizedBox(height: 24),
+              Form(
+                key: _phoneForm,
+                child: TextFormField(
+                  controller: _phoneCtrl,
+                  enabled: !_codeSent,
+                  keyboardType: TextInputType.phone,
+                  autofillHints: const [AutofillHints.telephoneNumber],
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(12),
+                  ],
+                  decoration: const InputDecoration(
+                    labelText: 'Phone number',
+                    prefixText: '+254 ',
+                    hintText: '712 345 678',
+                  ),
+                  validator: validateKenyanPhone,
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            KasaNotice(
-              icon: Icons.sms_outlined,
-              title: 'Check your messages',
-              body: 'We sent a 6-digit code to ${_phoneCtrl.text}. It lasts 5 minutes.',
-            ),
-            const SizedBox(height: 20),
-            Form(
-              key: _detailsForm,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  TextFormField(
-                    controller: _codeCtrl,
-                    keyboardType: TextInputType.number,
-                    autofillHints: const [AutofillHints.oneTimeCode],
-                    inputFormatters: [
-                      FilteringTextInputFormatter.digitsOnly,
-                      LengthLimitingTextInputFormatter(6),
+              if (_codeSent) ...[
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton(
+                    onPressed:
+                        _busy ? null : () => setState(() => _codeSent = false),
+                    child: const Text('Use a different number'),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                KasaNotice(
+                  icon: Icons.sms_outlined,
+                  title: 'Check your messages',
+                  body:
+                      'We sent a 6-digit code to ${_phoneCtrl.text}. It lasts 5 minutes.',
+                ),
+                const SizedBox(height: 20),
+                Form(
+                  key: _detailsForm,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      TextFormField(
+                        controller: _codeCtrl,
+                        keyboardType: TextInputType.number,
+                        autofillHints: const [AutofillHints.oneTimeCode],
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                          LengthLimitingTextInputFormatter(6),
+                        ],
+                        decoration: const InputDecoration(labelText: 'Code'),
+                        validator: (v) => (v ?? '').length == 6
+                            ? null
+                            : 'Enter the 6-digit code',
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _firstCtrl,
+                        textCapitalization: TextCapitalization.words,
+                        autofillHints: const [AutofillHints.givenName],
+                        decoration:
+                            const InputDecoration(labelText: 'First name'),
+                        validator: (v) => (v ?? '').trim().isEmpty
+                            ? 'Enter your first name'
+                            : null,
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _lastCtrl,
+                        textCapitalization: TextCapitalization.words,
+                        autofillHints: const [AutofillHints.familyName],
+                        decoration:
+                            const InputDecoration(labelText: 'Last name'),
+                        validator: (v) => (v ?? '').trim().isEmpty
+                            ? 'Enter your last name'
+                            : null,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'No password needed. Next time, sign in with a code sent to this number.',
+                        style: KasaFont.sans(
+                            fontSize: 14,
+                            color: Theme.of(context).colorScheme.kasaTextSub),
+                      ),
                     ],
-                    decoration: const InputDecoration(labelText: 'Code'),
-                    validator: (v) => (v ?? '').length == 6 ? null : 'Enter the 6-digit code',
                   ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _firstCtrl,
-                    textCapitalization: TextCapitalization.words,
-                    autofillHints: const [AutofillHints.givenName],
-                    decoration: const InputDecoration(labelText: 'First name'),
-                    validator: (v) => (v ?? '').trim().isEmpty ? 'Enter your first name' : null,
-                  ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _lastCtrl,
-                    textCapitalization: TextCapitalization.words,
-                    autofillHints: const [AutofillHints.familyName],
-                    decoration: const InputDecoration(labelText: 'Last name'),
-                    validator: (v) => (v ?? '').trim().isEmpty ? 'Enter your last name' : null,
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'No password needed. Next time, sign in with a code sent to this number.',
-                    style: KasaFont.sans(fontSize: 14, color: Theme.of(context).colorScheme.kasaTextSub),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        KasaActionBar(children: [
+          KasaButton(
+            label: _codeSent ? 'Create account' : 'Send code',
+            isLoading: _busy,
+            onTap: _busy ? null : (_codeSent ? _createAccount : _sendCode),
+          ),
+        ]),
+      ]),
     );
   }
 }

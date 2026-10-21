@@ -9,6 +9,8 @@ import '../../core/api/api_client.dart';
 import '../../core/auth/biometric_pulse.dart';
 import '../../core/auth/biometric_service.dart';
 import '../../core/theme/kasa_tokens.dart';
+import '../../core/widgets/kasa_layout.dart';
+import '../../core/theme/kasa_fonts.dart';
 import '../../core/widgets/kasa_primitives.dart';
 import '../../core/utils/api_error.dart';
 import '../../core/utils/phone.dart';
@@ -94,8 +96,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           // the credential goes with it.
           await _forgetBiometrics();
           if (mounted) {
-            setState(() => _unlockError =
-                'Session expired. Sign in again.');
+            setState(() => _unlockError = 'Session expired. Sign in again.');
           }
           return;
         }
@@ -119,8 +120,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       setState(() {
         _pulse = BiometricPulseState.error;
         _unlockError = switch (e.failure) {
-          BiometricFailure.lockedOut =>
-            'Too many attempts. Sign in again.',
+          BiometricFailure.lockedOut => 'Too many attempts. Sign in again.',
           _ => 'Not recognised. Tap to try again.',
         };
       });
@@ -136,9 +136,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
     try {
       final resp = await ref.read(publicDioProvider).post(
-            '/api/v1/auth/token/refresh/',
-            data: {'refresh': refresh},
-          );
+        '/api/v1/auth/token/refresh/',
+        data: {'refresh': refresh},
+      );
       await _storage.write(key: 'access_token', value: resp.data['access']);
       // Backend rotates and blacklists on refresh, so the new token has to
       // replace the old one or the next refresh fails.
@@ -263,7 +263,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loading = true);
     try {
-      await ref.read(publicDioProvider).post('/api/v1/auth/login/request-code/', data: {
+      await ref
+          .read(publicDioProvider)
+          .post('/api/v1/auth/login/request-code/', data: {
         'phone_number': normalizeKenyanPhone(_phoneCtrl.text),
       });
       if (mounted) setState(() => _codeSent = true);
@@ -279,7 +281,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     setState(() => _loading = true);
     try {
       final phone = normalizeKenyanPhone(_phoneCtrl.text);
-      final resp = await ref.read(publicDioProvider).post('/api/v1/auth/login/code/', data: {
+      final resp = await ref
+          .read(publicDioProvider)
+          .post('/api/v1/auth/login/code/', data: {
         'phone_number': phone,
         'code': _codeCtrl.text.trim(),
       });
@@ -292,7 +296,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 
   /// What every way of signing in ends with: keep the session, then open Home.
-  Future<void> _finishSignIn(Map data, String phone, {required bool remember}) async {
+  Future<void> _finishSignIn(Map data, String phone,
+      {required bool remember}) async {
     await _storage.write(key: 'access_token', value: data['access']);
     await _storage.write(key: 'refresh_token', value: data['refresh']);
     final prefs = await SharedPreferences.getInstance();
@@ -350,253 +355,220 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
+    final cs = Theme.of(context).colorScheme;
+    final muted = KasaFont.sans(fontSize: 14, color: cs.kasaTextSub);
+
+    if (_isLocked) {
+      return Scaffold(
+        backgroundColor: cs.kasaBg,
+        body: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                // WHY a plain rise-and-fade: the mark is a wordmark, and an
+                // overshooting bounce on type reads as a toy. Entrance only.
+                const _RiseIn(child: KasaLockupStacked(markSize: 72)),
+                const SizedBox(height: 40),
+                _RiseIn(
+                  delayMs: 120,
+                  child: _UnlockPanel(
+                    pulse: _pulse,
+                    error: _unlockError,
+                    onUnlock: _unlock,
+                    onUsePassword: _showPasswordForm,
+                  ),
+                ),
+              ]),
+            ),
+          ),
+        ),
+      );
+    }
+
+    final (primaryLabel, primaryAction) = _usePassword
+        ? ('Sign In', _login)
+        : _codeSent
+            ? ('Sign in', _signInWithCode)
+            : ('Send code', _sendCode);
 
     return Scaffold(
       backgroundColor: cs.kasaBg,
       body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            return SingleChildScrollView(
-              reverse: true,
-              physics: const BouncingScrollPhysics(),
-              child: ConstrainedBox(
-                constraints: BoxConstraints(minHeight: constraints.maxHeight),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      // WHY a plain rise-and-fade instead of the previous elastic
-                      // bounce: the mark is a wordmark, and overshoot on type reads
-                      // as a toy. Entrance only, nothing looping.
-                      const _RiseIn(
-                        child: KasaLockupStacked(markSize: 72),
-                      ),
-                      const SizedBox(height: 12),
-                      _RiseIn(
-                        delayMs: 60,
-                        child: Text(
-                          'Rent, sorted.',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: cs.onSurfaceVariant,
-                          ),
+        child: Form(
+          key: _formKey,
+          // WHY the action bar inside the body and not as bottomNavigationBar:
+          // the body shrinks for the keyboard, so the button stays in reach
+          // while typing; a bottomNavigationBar sits behind the keyboard.
+          child: Column(children: [
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
+                children: [
+                  const Align(
+                      alignment: Alignment.centerLeft,
+                      child: KasaLockupHorizontal(markSize: 32)),
+                  const SizedBox(height: 32),
+                  Text('Sign In',
+                      style: KasaFont.sans(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w600,
+                          color: cs.onSurface)),
+                  const SizedBox(height: 4),
+                  Text(
+                    _usePassword
+                        ? 'With your phone number and password.'
+                        : 'We text a code to your phone. No password needed.',
+                    style: muted,
+                  ),
+                  // Being asked to sign in again after weeks of fingerprints
+                  // looks like a fault unless the reason is stated.
+                  if (widget.hasExpired) ...[
+                    const SizedBox(height: 16),
+                    const KasaNotice(
+                      icon: Icons.schedule_rounded,
+                      title: 'Sign in once more',
+                      body:
+                          'It has been 60 days since you last signed in. Sign in once to turn '
+                          'your fingerprint back on.',
+                    ),
+                  ],
+                  const SizedBox(height: 24),
+                  TextFormField(
+                    controller: _phoneCtrl,
+                    keyboardType: TextInputType.phone,
+                    autofillHints: const [AutofillHints.telephoneNumber],
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      LengthLimitingTextInputFormatter(12),
+                    ],
+                    decoration: const InputDecoration(
+                      labelText: 'Phone Number',
+                      prefixText: '+254 ',
+                      hintText: '712 345 678',
+                    ),
+                    validator: validateKenyanPhone,
+                    onChanged: (_) {
+                      if (_codeSent) setState(() => _codeSent = false);
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  if (!_usePassword) ...[
+                    if (_codeSent) ...[
+                      TextFormField(
+                        controller: _codeCtrl,
+                        autofocus: true,
+                        keyboardType: TextInputType.number,
+                        autofillHints: const [AutofillHints.oneTimeCode],
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                          LengthLimitingTextInputFormatter(6),
+                        ],
+                        decoration: const InputDecoration(
+                          labelText: 'Code',
+                          helperText: 'The 6 digits we just texted you.',
                         ),
+                        validator: (v) => (v ?? '').length == 6
+                            ? null
+                            : 'Enter the 6-digit code',
                       ),
-                      const SizedBox(height: 40),
-
-                      if (_isLocked)
-                        _RiseIn(
-                          delayMs: 120,
-                          child: _UnlockPanel(
-                            pulse: _pulse,
-                            error: _unlockError,
-                            onUnlock: _unlock,
-                            onUsePassword: _showPasswordForm,
-                          ),
-                        )
-                      else
-                      _RiseIn(
-                        delayMs: 120,
-                        child: KasaCard(
-                          padding: const EdgeInsets.all(24),
-                          child: Form(
-                            key: _formKey,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                Text(
-                                  'Sign In',
-                                  style: theme.textTheme.headlineSmall,
-                                ),
-
-                                // Being asked for a password after weeks of
-                                // fingerprints looks like a fault unless the
-                                // reason is stated.
-                                if (widget.hasExpired) ...[
-                                  const SizedBox(height: 12),
-                                  Row(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Icon(Icons.schedule_rounded,
-                                          size: 18, color: cs.onSurfaceVariant),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        child: Text(
-                                          'It has been 60 days since you last '
-                                          'signed in. Sign in once to turn your '
-                                          'fingerprint back on.',
-                                          style: theme.textTheme.bodySmall
-                                              ?.copyWith(
-                                            color: cs.onSurfaceVariant,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                                const SizedBox(height: 20),
-
-                                TextFormField(
-                                  controller: _phoneCtrl,
-                                  keyboardType: TextInputType.phone,
-                                  inputFormatters: [
-                                    FilteringTextInputFormatter.digitsOnly,
-                                    LengthLimitingTextInputFormatter(12),
-                                  ],
-                                  decoration: const InputDecoration(
-                                    labelText: 'Phone Number',
-                                    prefixIcon: Icon(Icons.phone_rounded),
-                                    prefixText: '+254 ',
-                                    hintText: '712 345 678',
-                                  ),
-                                  validator: validateKenyanPhone,
-                                  onChanged: (_) {
-                                    if (_codeSent) setState(() => _codeSent = false);
-                                  },
-                                ),
-                                const SizedBox(height: 16),
-
-                                if (!_usePassword) ...[
-                                  if (_codeSent) ...[
-                                    TextFormField(
-                                      controller: _codeCtrl,
-                                      keyboardType: TextInputType.number,
-                                      autofillHints: const [AutofillHints.oneTimeCode],
-                                      inputFormatters: [
-                                        FilteringTextInputFormatter.digitsOnly,
-                                        LengthLimitingTextInputFormatter(6),
-                                      ],
-                                      decoration: const InputDecoration(
-                                        labelText: 'Code',
-                                        helperText: 'The 6 digits we just texted you.',
-                                        prefixIcon: Icon(Icons.sms_outlined),
-                                      ),
-                                      validator: (v) => (v ?? '').length == 6
-                                          ? null
-                                          : 'Enter the 6-digit code',
-                                    ),
-                                    const SizedBox(height: 20),
-                                  ],
-                                  KasaButton(
-                                    label: _codeSent ? 'Sign in' : 'Send code',
-                                    isLoading: _loading,
-                                    onTap: _loading
-                                        ? null
-                                        : (_codeSent ? _signInWithCode : _sendCode),
-                                  ),
-                                  if (_codeSent)
-                                    TextButton(
-                                      onPressed: _loading ? null : _sendCode,
-                                      child: const Text('Send a new code'),
-                                    ),
-                                  TextButton(
-                                    onPressed: () => setState(() => _usePassword = true),
-                                    child: const Text('Use password instead'),
-                                  ),
-                                ] else ...[
-                                TextFormField(
-                                  controller: _passCtrl,
-                                  obscureText: _obscure,
-                                  decoration: InputDecoration(
-                                    labelText: 'Password',
-                                    prefixIcon: const Icon(Icons.lock_rounded),
-                                    suffixIcon: IconButton(
-                                      icon: Icon(_obscure
-                                          ? Icons.visibility_rounded
-                                          : Icons.visibility_off_rounded),
-                                      onPressed: () =>
-                                          setState(() => _obscure = !_obscure),
-                                      tooltip: _obscure
-                                          ? 'Show password'
-                                          : 'Hide password',
-                                    ),
-                                  ),
-                                  validator: (v) => v == null || v.isEmpty
-                                      ? 'Password is required'
-                                      : null,
-                                ),
-                                const SizedBox(height: 8),
-
-                                // WHY the whole row toggles: a bare 24px checkbox
-                                // is under the 44px touch-target minimum.
-                                InkWell(
-                                  onTap: () =>
-                                      setState(() => _rememberMe = !_rememberMe),
-                                  borderRadius:
-                                      BorderRadius.circular(KasaRadius.sm),
-                                  child: Padding(
-                                    padding:
-                                        const EdgeInsets.symmetric(vertical: 10),
-                                    child: Row(
-                                      children: [
-                                        SizedBox(
-                                          height: 24,
-                                          width: 24,
-                                          child: Checkbox(
-                                            value: _rememberMe,
-                                            onChanged: (v) => setState(
-                                                () => _rememberMe = v ?? true),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 12),
-                                        Text('Keep me signed in',
-                                            style: theme.textTheme.bodyMedium),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 20),
-
-                                KasaButton(
-                                  label: 'Sign In',
-                                  isLoading: _loading,
-                                  onTap: _loading ? null : _login,
-                                ),
-                                const SizedBox(height: 4),
-
-                                TextButton(
-                                  onPressed: () => Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      fullscreenDialog: true,
-                                      builder: (_) => const _ForgotPasswordPage(),
-                                    ),
-                                  ),
-                                  child: const Text('Forgot password?'),
-                                ),
-                                TextButton(
-                                  onPressed: () => setState(() => _usePassword = false),
-                                  child: const Text('Sign in with a code instead'),
-                                ),
-                                ],
-                                TextButton(
-                                  onPressed: () => context.push('/signup'),
-                                  child: const Text('New landlord? Create an account'),
-                                ),
-
-                                // The way back. Without it, "Use password
-                                // instead" is a one-way door for anyone who
-                                // taps it by mistake.
-                                if (_canUseBiometrics)
-                                  TextButton.icon(
-                                    onPressed: _showUnlockPanel,
-                                    icon: const Icon(Icons.fingerprint_rounded,
-                                        size: 20),
-                                    label: const Text('Use biometrics'),
-                                  ),
-                              ],
-                            ),
-                          ),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton(
+                          onPressed: _loading ? null : _sendCode,
+                          child: const Text('Send a new code'),
                         ),
                       ),
                     ],
+                  ] else ...[
+                    TextFormField(
+                      controller: _passCtrl,
+                      obscureText: _obscure,
+                      autofillHints: const [AutofillHints.password],
+                      decoration: InputDecoration(
+                        labelText: 'Password',
+                        suffixIcon: IconButton(
+                          icon: Icon(_obscure
+                              ? Icons.visibility_rounded
+                              : Icons.visibility_off_rounded),
+                          onPressed: () => setState(() => _obscure = !_obscure),
+                          tooltip: _obscure ? 'Show password' : 'Hide password',
+                        ),
+                      ),
+                      validator: (v) => v == null || v.isEmpty
+                          ? 'Password is required'
+                          : null,
+                    ),
+                    // WHY the whole row toggles: a bare 24px checkbox is under
+                    // the 44px touch-target minimum.
+                    InkWell(
+                      onTap: () => setState(() => _rememberMe = !_rememberMe),
+                      borderRadius: BorderRadius.circular(KasaRadius.sm),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        child: Row(children: [
+                          SizedBox(
+                            height: 24,
+                            width: 24,
+                            child: Checkbox(
+                              value: _rememberMe,
+                              onChanged: (v) =>
+                                  setState(() => _rememberMe = v ?? true),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Text('Keep me signed in',
+                              style: KasaFont.sans(
+                                  fontSize: 14, color: cs.onSurface)),
+                        ]),
+                      ),
+                    ),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton(
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            fullscreenDialog: true,
+                            builder: (_) => const _ForgotPasswordPage(),
+                          ),
+                        ),
+                        child: const Text('Forgot password?'),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  const Divider(height: 1),
+                  const SizedBox(height: 8),
+                  TextButton(
+                    onPressed: () =>
+                        setState(() => _usePassword = !_usePassword),
+                    child: Text(_usePassword
+                        ? 'Sign in with a code instead'
+                        : 'Use password instead'),
                   ),
-                ),
+                  // The way back. Without it, choosing another way to sign in
+                  // is a one-way door for anyone who taps it by mistake.
+                  if (_canUseBiometrics)
+                    TextButton.icon(
+                      onPressed: _showUnlockPanel,
+                      icon: const Icon(Icons.fingerprint_rounded, size: 20),
+                      label: const Text('Use biometrics'),
+                    ),
+                  TextButton(
+                    onPressed: () => context.push('/signup'),
+                    child: const Text('New landlord? Create an account'),
+                  ),
+                ],
               ),
-            );
-          },
+            ),
+            KasaActionBar(children: [
+              KasaButton(
+                label: primaryLabel,
+                isLoading: _loading,
+                onTap: _loading ? null : primaryAction,
+              ),
+            ]),
+          ]),
         ),
       ),
     );
@@ -641,7 +613,8 @@ class _UnlockPanel extends StatelessWidget {
           Text(
             error ??
                 switch (pulse) {
-                  BiometricPulseState.scanning => 'Waiting for your fingerprint…',
+                  BiometricPulseState.scanning =>
+                    'Waiting for your fingerprint…',
                   BiometricPulseState.success => 'Unlocked',
                   _ => 'Tap to unlock with your fingerprint or face.',
                 },
@@ -687,7 +660,8 @@ class _ForgotPasswordPage extends ConsumerStatefulWidget {
   const _ForgotPasswordPage();
 
   @override
-  ConsumerState<_ForgotPasswordPage> createState() => _ForgotPasswordPageState();
+  ConsumerState<_ForgotPasswordPage> createState() =>
+      _ForgotPasswordPageState();
 }
 
 class _ForgotPasswordPageState extends ConsumerState<_ForgotPasswordPage> {
@@ -719,12 +693,9 @@ class _ForgotPasswordPageState extends ConsumerState<_ForgotPasswordPage> {
       await dio.post('/api/v1/auth/password-reset/request/', data: {
         'phone_number': normalizeKenyanPhone(_phoneCtrl.text),
       });
-      if (mounted) {
-        setState(() => _otpRequested = true);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('If the number is registered, a reset code was sent.')),
-        );
-      }
+      // No snackbar: the page itself now says a code was sent, and a snackbar
+      // would sit over the pinned Reset button.
+      if (mounted) setState(() => _otpRequested = true);
     } on DioException {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -777,108 +748,114 @@ class _ForgotPasswordPageState extends ConsumerState<_ForgotPasswordPage> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('Reset Password')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Enter your phone number to receive a one-time reset code.',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-              ),
-              const SizedBox(height: 24),
-              TextFormField(
-                controller: _phoneCtrl,
-                keyboardType: TextInputType.phone,
-                inputFormatters: [
-                  FilteringTextInputFormatter.digitsOnly,
-                  LengthLimitingTextInputFormatter(12),
-                ],
-                decoration: const InputDecoration(
-                  labelText: 'Phone Number',
-                  prefixIcon: Icon(Icons.phone),
-                  prefixText: '+254 ',
-                  hintText: '712 345 678',
+      backgroundColor: cs.kasaBg,
+      appBar: AppBar(
+        backgroundColor: cs.kasaBg,
+        surfaceTintColor: Colors.transparent,
+        title: const Text('Reset Password'),
+      ),
+      body: Form(
+        key: _formKey,
+        child: Column(children: [
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+              children: [
+                Text(
+                  _otpRequested
+                      ? 'Enter the code we texted you and choose a new password.'
+                      : 'Enter your phone number to receive a one-time reset code.',
+                  style: KasaFont.sans(fontSize: 14, color: cs.kasaTextSub),
                 ),
-                validator: validateKenyanPhone,
-              ),
-              const SizedBox(height: 16),
-              if (_otpRequested) ...[
+                const SizedBox(height: 24),
                 TextFormField(
-                  controller: _otpCtrl,
-                  keyboardType: TextInputType.number,
+                  controller: _phoneCtrl,
+                  enabled: !_otpRequested,
+                  keyboardType: TextInputType.phone,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(12),
+                  ],
                   decoration: const InputDecoration(
-                    labelText: 'Reset Code',
-                    prefixIcon: Icon(Icons.pin_outlined),
+                    labelText: 'Phone Number',
+                    prefixText: '+254 ',
+                    hintText: '712 345 678',
                   ),
-                  validator: (v) =>
-                      v == null || v.length != 6 ? 'Enter the 6-digit code' : null,
+                  validator: validateKenyanPhone,
                 ),
-                const SizedBox(height: 16),
-              ],
-              TextFormField(
-                controller: _newPassCtrl,
-                obscureText: _obscureNew,
-                decoration: InputDecoration(
-                  labelText: 'New Password',
-                  prefixIcon: const Icon(Icons.lock_outline),
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                        _obscureNew ? Icons.visibility : Icons.visibility_off),
-                    onPressed: () =>
-                        setState(() => _obscureNew = !_obscureNew),
+                if (_otpRequested) ...[
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _otpCtrl,
+                    keyboardType: TextInputType.number,
+                    autofillHints: const [AutofillHints.oneTimeCode],
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      LengthLimitingTextInputFormatter(6),
+                    ],
+                    decoration: const InputDecoration(labelText: 'Reset Code'),
+                    validator: (v) => v == null || v.length != 6
+                        ? 'Enter the 6-digit code'
+                        : null,
                   ),
-                ),
-                validator: (v) {
-                  if (!_otpRequested) return null;
-                  if (v == null || v.isEmpty) return 'Password is required';
-                  if (v.length < 8) return 'Minimum 8 characters';
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _confirmPassCtrl,
-                obscureText: _obscureConfirm,
-                decoration: InputDecoration(
-                  labelText: 'Confirm Password',
-                  prefixIcon: const Icon(Icons.lock),
-                  suffixIcon: IconButton(
-                    icon: Icon(_obscureConfirm
-                        ? Icons.visibility
-                        : Icons.visibility_off),
-                    onPressed: () =>
-                        setState(() => _obscureConfirm = !_obscureConfirm),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _newPassCtrl,
+                    obscureText: _obscureNew,
+                    autofillHints: const [AutofillHints.newPassword],
+                    decoration: InputDecoration(
+                      labelText: 'New Password',
+                      helperText: 'At least 8 characters, not just numbers.',
+                      suffixIcon: IconButton(
+                        icon: Icon(_obscureNew
+                            ? Icons.visibility_rounded
+                            : Icons.visibility_off_rounded),
+                        tooltip:
+                            _obscureNew ? 'Show password' : 'Hide password',
+                        onPressed: () =>
+                            setState(() => _obscureNew = !_obscureNew),
+                      ),
+                    ),
+                    validator: (v) {
+                      if (v == null || v.isEmpty) return 'Password is required';
+                      if (v.length < 8) return 'Minimum 8 characters';
+                      return null;
+                    },
                   ),
-                ),
-                validator: (v) =>
-                    _otpRequested && v != _newPassCtrl.text
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _confirmPassCtrl,
+                    obscureText: _obscureConfirm,
+                    decoration: InputDecoration(
+                      labelText: 'Confirm Password',
+                      suffixIcon: IconButton(
+                        icon: Icon(_obscureConfirm
+                            ? Icons.visibility_rounded
+                            : Icons.visibility_off_rounded),
+                        tooltip:
+                            _obscureConfirm ? 'Show password' : 'Hide password',
+                        onPressed: () =>
+                            setState(() => _obscureConfirm = !_obscureConfirm),
+                      ),
+                    ),
+                    validator: (v) => v != _newPassCtrl.text
                         ? 'Passwords do not match'
                         : null,
-              ),
-              const SizedBox(height: 28),
-              ElevatedButton(
-                onPressed:
-                    _loading ? null : (_otpRequested ? _reset : _requestOtp),
-                child: _loading
-                    ? SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(
-                            color: Theme.of(context).colorScheme.onPrimary,
-                            strokeWidth: 2),
-                      )
-                    : Text(_otpRequested ? 'Reset Password' : 'Send Reset Code'),
-              ),
-            ],
+                  ),
+                ],
+              ],
+            ),
           ),
-        ),
+          KasaActionBar(children: [
+            KasaButton(
+              label: _otpRequested ? 'Reset Password' : 'Send Reset Code',
+              isLoading: _loading,
+              onTap: _loading ? null : (_otpRequested ? _reset : _requestOtp),
+            ),
+          ]),
+        ]),
       ),
     );
   }

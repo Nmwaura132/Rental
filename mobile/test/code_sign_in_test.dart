@@ -119,5 +119,32 @@ void main() {
       await _askForCode(tester);
       expect(tester.takeException(), isNull);
     });
+
+    testWidgets('fits at $width wide with text 30% larger, password showing', (tester) async {
+      await _pump(tester, size: Size(width, 700), textScale: 1.3);
+      await tester.tap(find.text('Use password instead'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('reset fits at $width wide with text 30% larger', (tester) async {
+      await _pump(tester, size: Size(width, 700), textScale: 1.3);
+      await tester.tap(find.text('Use password instead'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Forgot password?'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextFormField).first, '0712345678');
+      await tester.tap(find.text('Send Reset Code'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    });
   }
+
+  testWidgets('the main button stays above the keyboard', (tester) async {
+    await _pump(tester);
+    tester.view.viewInsets = const FakeViewPadding(bottom: 900);
+    await tester.pumpAndSettle();
+    final button = tester.getBottomLeft(find.text('Send code')).dy;
+    expect(button < 844 - 300, isTrue);
+  });
 }
