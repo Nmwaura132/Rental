@@ -5,8 +5,10 @@
 Kasa is a Kenya-focused rental property management system. Django REST API + Flutter mobile app.
 Three roles: **Landlord**, **Caretaker**, **Tenant**. Auth uses phone number (E.164) as username, not email.
 
-**Status**: In development. Phone/password login is wired; production release
-configuration is documented in `PRODUCTION.md`.
+**Status**: In test use. Sign-in is by a code texted to the phone (password
+and fingerprint as alternatives); landlords sign themselves up, tenants and
+caretakers are added by their landlord. Production configuration is in
+`PRODUCTION.md`.
 
 ## Stack
 

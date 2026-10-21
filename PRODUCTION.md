@@ -49,6 +49,13 @@ MOBILESASA_SENDER_ID=MOBILESASA  # a sender ID registered on the account
 Each SMS is recorded as a Notification, sent or failed with MobileSasa's
 response code (for example `0402` no credit, `0404` unknown sender ID).
 
+Sign-in and sign-up codes depend on SMS, so delivery must work on every
+network. Sender IDs are approved per network: the shared `MOBILESASA` ID
+delivers on Safaricom but Airtel holds it at "Sent". Register Kasa's own
+sender ID with MobileSasa for Safaricom, Airtel and Telkom, then set
+`MOBILESASA_SENDER_ID` to it. MobileSasa's delivery reports
+(`POST https://api.mobilesasa.com/v2/dlr`) show each message's final status.
+
 ## File storage
 
 MinIO runs from Chainguard's build (`cgr.dev/chainguard/minio`): MinIO no
