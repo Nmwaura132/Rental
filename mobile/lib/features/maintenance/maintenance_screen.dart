@@ -16,6 +16,7 @@ import '../../core/utils/api_error.dart';
 import '../../core/theme/kasa_tokens.dart';
 import '../../core/widgets/kasa_primitives.dart';
 import '../../core/utils/text.dart';
+import 'tenant_repairs_screen.dart';
 
 // ─── Providers ────────────────────────────────────────────────────────────────
 
@@ -95,6 +96,9 @@ class _MaintenanceScreenState extends ConsumerState<MaintenanceScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // A tenant follows their own requests; the filters and sorting are for
+    // a landlord with many.
+    if (_isTenant) return const TenantRepairsScreen();
     final listAsync = ref.watch(maintenanceListProvider);
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
@@ -495,6 +499,26 @@ class _RequestTile extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// One request's detail and notes, as the tenant sees it. Public so the
+/// tenant's Repairs tab opens the same sheet the landlord's list does.
+void openRepair(BuildContext context, WidgetRef ref, Map<String, dynamic> request) {
+  showModalBottomSheet(
+    context: context,
+    useRootNavigator: true,
+    isScrollControlled: true,
+    useSafeArea: true,
+    backgroundColor: Theme.of(context).colorScheme.kasaCard,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
+    builder: (_) => _DetailSheet(
+      request: request,
+      isLandlord: false,
+      onChanged: () => ref.invalidate(maintenanceListProvider),
+    ),
+  );
 }
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
