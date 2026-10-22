@@ -10,6 +10,7 @@ mysqlclient==2.2.4               # C extension — fastest MySQL driver for Djan
 
 # ── Auth & Security ───────────────────────────────────────────────────────────
 djangorestframework-simplejwt==5.5.1
+cryptography==50.0.2             # verifies KCB's RSA-signed payment notifications
 pyjwt==2.15.0                    # simplejwt's signer — pinned directly; 2.12.1 carries 8 CVEs
 django-cors-headers==4.4.0
 django-axes==7.0.0               # brute-force login protection

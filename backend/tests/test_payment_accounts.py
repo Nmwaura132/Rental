@@ -6,14 +6,16 @@ landlord's tenants.
 """
 from __future__ import annotations
 
-import hashlib
-import hmac
+import base64
 import json
 from decimal import Decimal
 
 import pytest
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
+
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 from apps.payments.models import BankPaymentNotification, Payment, PaymentAccount
 from apps.payments.services import how_to_pay, pay_to, prompts_allowed
@@ -49,24 +51,45 @@ def _kcb(landlord, number="522522", secret="s3cret", status=PaymentAccount.Statu
     )
 
 
-def _notify(body: dict, secret="s3cret"):
+# Stands in for KCB's signing key; settings get its public half, as they
+# would get the one KCB issues.
+KCB_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+IMPOSTOR_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+
+@pytest.fixture(autouse=True)
+def kcb_public_key(settings):
+    settings.KCB_IPN_PUBLIC_KEY = KCB_KEY.public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+    ).decode()
+
+
+def _sign(raw: bytes, key=KCB_KEY) -> str:
+    return base64.b64encode(key.sign(raw, padding.PKCS1v15(), hashes.SHA256())).decode()
+
+
+def _notify(body: dict, key=KCB_KEY):
     raw = json.dumps(body).encode()
-    signature = hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()
-    return APIClient().post(
-        KCB_IPN, data=raw, content_type="application/json", HTTP_X_KCB_SIGNATURE=signature
-    )
+    return APIClient().post(KCB_IPN, data=raw, content_type="application/json", HTTP_SIGNATURE=_sign(raw, key))
 
 
-def _payment(ref, amount="15000", shortcode="522522", trans_id="KCB001"):
+def _payment(ref, amount="15000.00", shortcode="522522", trans_id="KCB001"):
+    """A notification in the shape KCB's IPN Account specification gives."""
     return {
-        "TransactionType": "Pay Bill",
-        "TransID": trans_id,
-        "TransTime": "20261020120000",
-        "TransAmount": amount,
-        "BusinessShortCode": shortcode,
-        "BillRefNumber": ref,
-        "MSISDN": "254711000000",
-        "FirstName": "Achieng",
+        "transactionReference": trans_id,
+        "requestId": "c7d702cb-6b5f-4fa6-8b57-436d0f789017",
+        "channelCode": "202",
+        "timestamp": "20261020120000",
+        "transactionAmount": amount,
+        "currency": "KES",
+        "customerReference": ref,
+        "customerName": "Achieng Otieno",
+        "customerMobileNumber": "254711000000",
+        "balance": "",
+        "narration": "Rent",
+        "creditAccountIdentifier": "8154415",
+        "organizationShortCode": shortcode,
+        "tillNumber": "",
     }
 
 
@@ -208,13 +231,58 @@ class TestWhereTenantsArePointed:
 
 
 class TestKCBPaymentsRoutedByPaybill:
-    def test_the_landlords_own_secret_signs_it(self, landlord, invoice):
+    def test_a_notification_signed_by_kcb_is_accepted(self, landlord, invoice):
         _kcb(landlord)
         assert _notify(_payment("A1")).status_code == 200
 
-    def test_a_wrong_signature_is_refused(self, landlord, invoice):
+    def test_kcb_is_told_it_was_received(self, landlord, invoice):
         _kcb(landlord)
-        assert _notify(_payment("A1"), secret="forged").status_code == 403
+        assert _notify(_payment("A1")).data == {
+            "transactionID": "KCB001", "statusCode": "0", "statusMessage": "Notification received",
+        }
+
+    def test_a_notification_signed_by_anyone_else_is_refused(self, landlord, invoice):
+        _kcb(landlord)
+        assert _notify(_payment("A1"), key=IMPOSTOR_KEY).status_code == 403
+
+    def test_a_forged_one_records_nothing(self, landlord, invoice):
+        _kcb(landlord)
+        _notify(_payment("A1"), key=IMPOSTOR_KEY)
+        assert not BankPaymentNotification.objects.exists()
+
+    def test_a_signed_body_changed_on_the_way_is_refused(self, landlord, invoice):
+        _kcb(landlord)
+        raw = json.dumps(_payment("A1")).encode()
+        signature = _sign(raw)
+        tampered = raw.replace(b"15000.00", b"95000.00")
+        response = APIClient().post(KCB_IPN, data=tampered, content_type="application/json", HTTP_SIGNATURE=signature)
+        assert response.status_code == 403
+
+    def test_an_unsigned_one_is_refused(self, landlord, invoice):
+        _kcb(landlord)
+        response = APIClient().post(KCB_IPN, data=_payment("A1"), format="json")
+        assert response.status_code == 403
+
+    def test_without_kcbs_key_configured_everything_is_refused(self, landlord, invoice, settings):
+        settings.KCB_IPN_PUBLIC_KEY = ""
+        _kcb(landlord)
+        assert _notify(_payment("A1")).status_code == 403
+
+    def test_a_resent_notification_is_recorded_once(self, landlord, invoice):
+        _kcb(landlord)
+        _notify(_payment("A1"))
+        _notify(_payment("A1"))
+        assert Payment.objects.filter(bank_reference="KCB001").count() == 1
+
+    def test_kcbs_time_is_read_as_nairobi_time(self, landlord, invoice):
+        _kcb(landlord)
+        _notify(_payment("rent"))
+        held = BankPaymentNotification.objects.get(transaction_ref="KCB001")
+        assert held.credited_at.isoformat() == "2026-10-20T09:00:00+00:00"
+
+    def test_a_zero_amount_is_refused(self, landlord, invoice):
+        _kcb(landlord)
+        assert _notify(_payment("A1", amount="0.00")).status_code == 400
 
     def test_it_is_recorded_against_the_tenant(self, landlord, invoice):
         _kcb(landlord)
@@ -244,10 +312,11 @@ class TestKCBPaymentsRoutedByPaybill:
         _notify(_payment(invoice.invoice_number))
         assert not Payment.objects.filter(invoice=invoice).exists()
 
-    def test_a_paybill_still_connecting_is_not_trusted(self, landlord, invoice, settings):
-        settings.KCB_IPN_SECRET = "platform"
+    def test_money_on_a_paybill_still_connecting_is_not_credited(self, landlord, invoice):
+        # Until staff confirm it is this landlord's, it is held for no one.
         _kcb(landlord, status=PaymentAccount.Status.CONNECTING)
-        assert _notify(_payment("A1")).status_code == 403
+        _notify(_payment("A1"))
+        assert not Payment.objects.filter(invoice=invoice).exists()
 
 
 class TestADepositWithNoHouseNumber:
@@ -275,3 +344,31 @@ class TestADepositWithNoHouseNumber:
         _notify(_payment("rent oct"))
         rows = _client(other_landlord).get("/api/v1/payments/bank/notifications/").data["results"]
         assert rows == []
+
+
+class TestKCBsOwnSample:
+    """The sample from KCB's IPN Account specification, byte for byte."""
+
+    SAMPLE = (
+        b'{\n "transactionReference": "FT00026252",\n'
+        b' "requestId": "c7d702cb-6b5f-4fa6-8b57-436d0f789017",\n "channelCode": "202",\n'
+        b' "timestamp": "2021111103005",\n "transactionAmount": "100.00",\n "currency": "KES",\n'
+        b' "customerReference": "INV-0001",\n "customerName": "John Doe",\n'
+        b' "customerMobileNumber": "25471111111",\n "balance": "",\n'
+        b' "narration": "Payment for goods",\n "creditAccountIdentifier": "JD001",\n'
+        b' "organizationShortCode": "777777",\n "tillNumber": "150150"\n}'
+    )
+
+    def _send(self):
+        return APIClient().post(
+            KCB_IPN, data=self.SAMPLE, content_type="application/json", HTTP_SIGNATURE=_sign(self.SAMPLE)
+        )
+
+    def test_it_is_acknowledged_as_kcb_expects(self, db):
+        assert self._send().data == {
+            "transactionID": "FT00026252", "statusCode": "0", "statusMessage": "Notification received",
+        }
+
+    def test_its_amount_is_kept(self, db):
+        self._send()
+        assert BankPaymentNotification.objects.get().amount == Decimal("100.00")

@@ -345,6 +345,13 @@ RENT_ACCOUNT_PREFIX = env("RENT_ACCOUNT_PREFIX", default="")
 # account to pay to instead.
 STK_PUSH_ENABLED = env.bool("STK_PUSH_ENABLED", default=True)
 
+# ── KCB Buni payment notifications ───────────────────────────────────────────
+# KCB signs every notification with its private key (SHA256withRSA); this is
+# the public key KCB issues to check it with, as PEM. One key for all
+# landlords: it is KCB's, not theirs. "\n" in the value stands for a newline,
+# since an environment variable holds one line.
+KCB_IPN_PUBLIC_KEY = env("KCB_IPN_PUBLIC_KEY", default="").replace("\\n", "\n")
+
 # ── Africa's Talking ──────────────────────────────────────────────────────────
 # SMS goes through MobileSasa. The sender ID must be one registered on the
 # MobileSasa account, or every message is refused.

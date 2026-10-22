@@ -374,8 +374,9 @@ class PaymentAccount(models.Model):
     bank_branch = models.CharField(max_length=60, blank=True, default="")
     account_name = models.CharField(max_length=120, blank=True, default="")
     account_number = models.CharField(max_length=40, blank=True, default="")
-    # Signs KCB's notifications for this paybill. Set by staff in admin when
-    # the connection is made; never sent to the app.
+    # NOTE: no longer read. KCB signs notifications with its own RSA key
+    # (settings.KCB_IPN_PUBLIC_KEY), not a per-paybill secret; the column stays
+    # until a migration drops it. Never sent to the app.
     ipn_secret = models.CharField(max_length=255, blank=True, default="")
     # A KCB notification is routed by the paybill number in it, so two
     # landlords cannot both claim one. A shared bank paybill (Caritas) is

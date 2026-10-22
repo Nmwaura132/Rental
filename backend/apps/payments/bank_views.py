@@ -8,8 +8,6 @@ Endpoints:
   GET  /api/v1/payments/bank/notifications/ – List bank notifications (landlord)
   POST /api/v1/payments/bank/notifications/<id>/match/ – Manually match to invoice
 """
-import hashlib
-import hmac
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -61,43 +59,65 @@ class KCBIPNView(APIView):
     """
     POST /api/v1/payments/bank/kcb/ipn/
 
-    KCB Buni sends a POST for every credit on the registered account.
-    Expected payload (mirrors Daraja C2B Confirm):
+    KCB Buni's Instant Payment Notification for an account, sent after each
+    credit. Format per KCB's "IPN Account Notification" specification:
       {
-        "TransactionType": "Pay Bill",
-        "TransID": "RLJ3KLJ4KL",
-        "TransTime": "20250101120000",
-        "TransAmount": "15000.00",
-        "BusinessShortCode": "123456",
-        "BillRefNumber": "UNIT101",       ← what tenant typed as reference
-        "MSISDN": "254712345678",
-        "FirstName": "John",
-        "MiddleName": "",
-        "LastName": "Doe"
+        "transactionReference": "FT00026252",
+        "requestId": "c7d702cb-6b5f-4fa6-8b57-436d0f789017",
+        "channelCode": "202",
+        "timestamp": "20211111030050",
+        "transactionAmount": "100.00",
+        "currency": "KES",
+        "customerReference": "INV-0001",      <- what the tenant typed
+        "customerName": "John Doe",
+        "customerMobileNumber": "25471111111",
+        "balance": "",
+        "narration": "Payment for goods",
+        "creditAccountIdentifier": "JD001",
+        "organizationShortCode": "777777",
+        "tillNumber": "150150"
       }
-
-    Signature: KCB sends X-KCB-Signature = HMAC-SHA256(body, KCB_IPN_SECRET).
-    Set KCB_IPN_SECRET in Django settings once you have live credentials.
+    The `signature` header is base64 SHA256withRSA over the body, checked
+    with KCB's public key (KCB_IPN_PUBLIC_KEY). KCB expects
+    {"transactionID", "statusCode", "statusMessage"} back.
     """
     permission_classes = [permissions.AllowAny]
 
-    def _account(self, request):
-        """The landlord paybill this notification is for, if it is one.
+    @staticmethod
+    def _reply(transaction_id, code, message, http_status=200):
+        return Response(
+            {"transactionID": transaction_id, "statusCode": code, "statusMessage": message},
+            status=http_status,
+        )
 
-        WHY reading the body before the signature is checked is safe: the
-        paybill only picks which secret to check with, and a forged body still
-        has to carry that landlord's signature.
-        """
-        import json
+    def _signed_by_kcb(self, request) -> bool:
+        import base64
+        import binascii
 
+        from cryptography.exceptions import InvalidSignature
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding
+
+        pem = settings.KCB_IPN_PUBLIC_KEY
+        if not pem:
+            # WHY fail closed even in DEBUG: anyone can post here, and an
+            # unchecked notification credits rent that was never paid.
+            logger.error("KCB_IPN_PUBLIC_KEY is not set; refusing KCB notification.")
+            return False
+        try:
+            signature = base64.b64decode(request.headers.get("signature", ""), validate=True)
+            key = serialization.load_pem_public_key(pem.encode())
+            # WHY the raw bytes: re-serialised JSON would differ from what KCB signed.
+            key.verify(signature, request.body, padding.PKCS1v15(), hashes.SHA256())
+        except (InvalidSignature, ValueError, TypeError, binascii.Error):
+            return False
+        return True
+
+    def _account(self, data):
+        """The landlord's KCB paybill this money came in on, once connected."""
         from .models import PaymentAccount
 
-        # WHY the raw bytes and not request.data: once DRF parses the stream,
-        # the body can no longer be read for the signature check.
-        try:
-            shortcode = str(json.loads(request.body).get("BusinessShortCode", "")).strip()
-        except (ValueError, AttributeError):
-            return None
+        shortcode = str(data.get("organizationShortCode", "")).strip()
         if not shortcode:
             return None
         return PaymentAccount.objects.filter(
@@ -106,71 +126,48 @@ class KCBIPNView(APIView):
             number=shortcode,
         ).first()
 
-    def _verify_signature(self, request, account) -> bool:
-        secret = account.ipn_secret if account else getattr(settings, "KCB_IPN_SECRET", "")
-        if not secret:
-            # WHY: fail-CLOSED in production. An unset secret is a misconfiguration,
-            # not a license to accept unsigned payments. Allow skip only in DEBUG.
-            if settings.DEBUG:
-                logger.warning("KCB_IPN_SECRET not set — skipping signature verification (DEBUG only).")
-                return True
-            logger.error("KCB_IPN_SECRET not set in production — rejecting webhook.")
-            return False
-        received_sig = request.headers.get("X-KCB-Signature", "")
-        expected_sig = hmac.new(
-            secret.encode(),
-            request.body,
-            hashlib.sha256,
-        ).hexdigest()
-        return hmac.compare_digest(received_sig, expected_sig)
-
     def post(self, request):
-        account = self._account(request)
-        if not self._verify_signature(request, account):
-            logger.warning("KCB IPN: invalid signature — rejected.")
-            return Response({"ResultCode": 1, "ResultDesc": "Invalid signature"}, status=403)
+        if not self._signed_by_kcb(request):
+            logger.warning("KCB IPN: signature did not verify; rejected.")
+            return self._reply("", "1", "Invalid signature", status.HTTP_403_FORBIDDEN)
 
         data = request.data
-        logger.info("KCB IPN received: %s", data)
-
-        transaction_ref = data.get("TransID", "").strip()
+        transaction_ref = str(data.get("transactionReference", "")).strip()
         if not transaction_ref:
-            return Response({"ResultCode": 1, "ResultDesc": "Missing TransID"}, status=400)
+            return self._reply("", "1", "Missing transactionReference", status.HTTP_400_BAD_REQUEST)
 
-        # Idempotency — ignore if already stored
+        # KCB may resend; the same transaction is recorded once.
         if BankPaymentNotification.objects.filter(
-            bank=BankPaymentNotification.Bank.KCB,
-            transaction_ref=transaction_ref,
+            bank=BankPaymentNotification.Bank.KCB, transaction_ref=transaction_ref
         ).exists():
             logger.info("KCB IPN duplicate ignored: %s", transaction_ref)
-            return Response({"ResultCode": 0, "ResultDesc": "OK"})
+            return self._reply(transaction_ref, "0", "Notification received")
 
         try:
-            amount_str = str(data.get("TransAmount", "0")).replace(",", "")
-            amount = Decimal(amount_str)
-            if amount <= 0:
-                raise ValueError
-            trans_time = data.get("TransTime", "")  # "20250101120000"
-            credited_at = (
-                datetime.strptime(trans_time, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
-                if trans_time else dj_timezone.now()
+            amount = Decimal(str(data.get("transactionAmount", "")).replace(",", ""))
+        except InvalidOperation:
+            amount = Decimal("0")
+        if amount <= 0:
+            logger.error("KCB IPN %s: unusable amount %r", transaction_ref, data.get("transactionAmount"))
+            return self._reply(transaction_ref, "1", "Invalid transactionAmount", status.HTTP_400_BAD_REQUEST)
+
+        # WHY not refuse a bad timestamp: the money has arrived either way, and
+        # a refusal would only make KCB resend it. KCB times are Nairobi time.
+        try:
+            credited_at = dj_timezone.make_aware(
+                datetime.strptime(str(data.get("timestamp", "")), "%Y%m%d%H%M%S")
             )
-        except (ValueError, TypeError, InvalidOperation) as exc:
-            logger.error("KCB IPN parse error: %s — payload: %s", exc, data)
-            return Response({"ResultCode": 1, "ResultDesc": "Parse error"}, status=400)
+        except ValueError:
+            credited_at = dj_timezone.now()
 
-        first = data.get("FirstName", "")
-        middle = data.get("MiddleName", "")
-        last = data.get("LastName", "")
-        payer_name = " ".join(filter(None, [first, middle, last])).strip()
-
+        account = self._account(data)
         notification = BankPaymentNotification.objects.create(
             bank=BankPaymentNotification.Bank.KCB,
             transaction_ref=transaction_ref,
             amount=amount,
-            payer_name=payer_name,
-            payer_account=data.get("MSISDN", ""),
-            payment_ref=data.get("BillRefNumber", ""),
+            payer_name=str(data.get("customerName", ""))[:120],
+            payer_account=str(data.get("customerMobileNumber", ""))[:60],
+            payment_ref=str(data.get("customerReference", "")).strip()[:100],
             credited_at=credited_at,
             raw_payload=data,
             # Whose money it is, known from the paybill it came in on. It is
@@ -179,10 +176,15 @@ class KCBIPNView(APIView):
             owner=account.owner if account else None,
         )
 
-        from .tasks import process_bank_notification
-        process_bank_notification.delay(notification.id)
+        # WHY only with a connected landlord: matching without one searches
+        # every landlord's houses, and behind a shared KCB paybill that could
+        # credit one landlord's money to another's tenant. Without one it is
+        # kept, unmatched, for staff to look at.
+        if account:
+            from .tasks import process_bank_notification
+            process_bank_notification.delay(notification.id)
 
-        return Response({"ResultCode": 0, "ResultDesc": "Accepted"})
+        return self._reply(transaction_ref, "0", "Notification received")
 
 
 # ─── Equity Jenga IPN ─────────────────────────────────────────────────────────
