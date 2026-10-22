@@ -82,6 +82,31 @@ using a paybill of your own (it then follows `MPESA_SHORTCODE`); an empty value
 overrides that fallback. `RENT_DUE_DAY` (default `5`) is the day each month's rent
 falls due.
 
+## Mobile release
+
+Release builds are signed with Kasa's upload key, kept outside the repository
+at `C:\Users\user\.kasa\kasa-upload.jks`; `mobile/android/key.properties`
+(git-ignored, copy also in `C:\Users\user\.kasa\`) holds its alias and
+password. **Back up both files somewhere off this computer.** Android only
+installs an update signed with the same key, so losing it means every tester
+must uninstall and reinstall. Once the app is on Google Play with Play App
+Signing, a lost upload key can be reset through Play support.
+
+Key certificate SHA-256: `39:85:88:EB:7A:7A:B2:62:78:FF:76:70:2E:FF:AC:8E:A6:12:94:D4:7E:83:62:76:63:27:DA:22:5B:98:A7:4F`
+
+For testers, send the 64-bit APK (fits nearly every phone in use):
+
+```bash
+cd mobile
+flutter build apk --release --split-per-abi \
+  --dart-define=API_BASE_URL=https://rwrwarkqwn77gwu6zbky1ppo.37.221.93.219.sslip.io \
+  --dart-define=MEDIA_BASE_URL=https://files-rwrwarkqwn77gwu6zbky1ppo.37.221.93.219.sslip.io
+# build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+```
+
+Raise `version:` in `pubspec.yaml` (the number after `+`) for every build
+handed out, or phones will refuse it as an update.
+
 ## Mobile build
 
 Build the mobile app with production endpoints:
