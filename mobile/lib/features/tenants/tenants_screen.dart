@@ -822,6 +822,10 @@ class _AddTenantFormState extends ConsumerState<_AddTenantForm> {
   // form also opens the tenancy — the unit, rent and deposit are already known,
   // so asking for them again on a second screen was pure repetition.
   DateTime _startDate = DateTime.now();
+
+  /// Started before this month: being entered into Kasa, not moving in.
+  bool get _alreadyLiving =>
+      _startDate.isBefore(DateTime(DateTime.now().year, DateTime.now().month));
   bool _depositPaid = false;
   Map<String, dynamic>? _unit;
   final _uiDate = DateFormat('dd MMM yyyy');
@@ -1219,7 +1223,7 @@ class _AddTenantFormState extends ConsumerState<_AddTenantForm> {
                   const SizedBox(height: 4),
                   if (widget.forUnitId != null) ...[
                     _sectionLabel('Tenancy'),
-                    if (_unit != null)
+                    if (_unit != null && !_alreadyLiving)
                       _MoveInSummary(
                         unit: _unit!,
                         depositPaid: _depositPaid,
@@ -1230,7 +1234,7 @@ class _AddTenantFormState extends ConsumerState<_AddTenantForm> {
                         final picked = await showDatePicker(
                           context: context,
                           initialDate: _startDate,
-                          firstDate: DateTime(2020),
+                          firstDate: DateTime(2000),
                           lastDate:
                               DateTime.now().add(const Duration(days: 365)),
                         );
@@ -1247,6 +1251,18 @@ class _AddTenantFormState extends ConsumerState<_AddTenantForm> {
                         child: Text(_uiDate.format(_startDate)),
                       ),
                     ),
+                    // The server bills a move-in only from this month on; say
+                    // so, or entering a long-standing tenant looks like it will
+                    // charge them a deposit.
+                    if (_alreadyLiving)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Text(
+                          'Already living here: no move-in bill or welcome SMS. '
+                          'Their bills start with the next month.',
+                          style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.kasaTextSub),
+                        ),
+                      ),
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       value: _depositPaid,
@@ -1441,7 +1457,7 @@ class _AddTenancyDialogState extends ConsumerState<_AddTenancyDialog> {
 
   Future<void> _pickDate({required bool isStart}) async {
     final initial = isStart ? _startDate : (_endDate ?? _startDate);
-    final first = isStart ? DateTime(2020) : _startDate;
+    final first = isStart ? DateTime(2000) : _startDate;
     final last = DateTime(2035);
     final picked = await showDatePicker(
       context: context,

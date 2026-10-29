@@ -82,7 +82,13 @@ class TenancyViewSet(viewsets.ModelViewSet):
         # fixtures and shell writes included, and would collide with any invoice
         # already made for the same (tenancy, period_start). Billing is also a
         # deliberate act by the landlord, not an occupancy invariant.
-        if tenancy.status == Tenancy.Status.ACTIVE:
+        # WHY not for a start before this month: that is someone already living
+        # there being entered into Kasa, not moving in. A move-in bill dated
+        # back to their start, and a "welcome" SMS, would both be wrong; they
+        # are billed from the next monthly run like everyone else.
+        started = tenancy.start_date or timezone.localdate()
+        moving_in = started >= timezone.localdate().replace(day=1)
+        if tenancy.status == Tenancy.Status.ACTIVE and moving_in:
             try:
                 create_move_in_invoice(tenancy)
             except Exception:

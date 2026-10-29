@@ -112,3 +112,39 @@ class TestThroughTheApi:
         )
         assert response.status_code == 201
         assert Invoice.objects.filter(tenancy_id=response.data["id"]).exists()
+
+
+class TestEnteringSomeoneAlreadyLivingThere:
+    """A landlord putting existing tenants into Kasa is not moving them in."""
+
+    def _enter(self, landlord, tenant, unit, start):
+        from rest_framework.test import APIClient
+
+        tenant.created_by = landlord
+        tenant.save(update_fields=["created_by"])
+        client = APIClient()
+        client.force_authenticate(user=landlord)
+        return client.post(
+            "/api/v1/tenants/tenancies/",
+            {
+                "tenant": tenant.id, "unit": unit.id, "start_date": str(start),
+                "rent_amount": "15000.00", "deposit_amount": "15000.00", "deposit_paid": True,
+            },
+            format="json",
+        )
+
+    def test_they_get_no_move_in_bill(self, landlord, tenant, unit):
+        response = self._enter(landlord, tenant, unit, date(2024, 3, 1))
+        assert not Invoice.objects.filter(tenancy_id=response.data["id"]).exists()
+
+    def test_they_get_no_welcome_sms(self, landlord, tenant, unit, monkeypatch):
+        from apps.notifications import tasks as notification_tasks
+
+        sent = []
+        monkeypatch.setattr(notification_tasks.send_sms, "delay", lambda *a, **k: sent.append(a))
+        self._enter(landlord, tenant, unit, date(2024, 3, 1))
+        assert sent == []
+
+    def test_someone_moving_in_this_month_is_still_billed(self, landlord, tenant, unit):
+        response = self._enter(landlord, tenant, unit, date.today().replace(day=1))
+        assert Invoice.objects.filter(tenancy_id=response.data["id"]).exists()
