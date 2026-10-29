@@ -164,20 +164,20 @@ class _MeterReadingsScreenState extends ConsumerState<MeterReadingsScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
-            child: Wrap(
-              spacing: 8,
-              children: [
-                for (final month in [lastMonth, thisMonth])
-                  GestureDetector(
+            // A sideways row, like the building's filters: the pill stretches
+            // to the width it is given, so it needs an unbounded one.
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(children: [
+                for (final month in [lastMonth, thisMonth]) ...[
+                  KasaFilterPill(
+                    label: DateFormat('MMMM').format(month),
+                    selected: month == _period,
                     onTap: () => _changePeriod(month),
-                    child: KasaChip(
-                      label: DateFormat('MMMM').format(month),
-                      variant: month == _period
-                          ? KasaChipVariant.secondary
-                          : KasaChipVariant.neutral,
-                    ),
                   ),
-              ],
+                  const SizedBox(width: 8),
+                ],
+              ]),
             ),
           ),
           Padding(

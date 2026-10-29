@@ -421,13 +421,14 @@ class KasaFilterPill extends StatelessWidget {
   const KasaFilterPill({
     super.key,
     required this.label,
-    required this.count,
+    this.count,
     required this.selected,
     required this.onTap,
   });
 
   final String label;
-  final int count;
+  /// Left out where a count means nothing, such as picking a month.
+  final int? count;
   final bool selected;
   final VoidCallback onTap;
 
@@ -447,8 +448,10 @@ class KasaFilterPill extends StatelessWidget {
           alignment: Alignment.center,
           child: Text.rich(
             TextSpan(children: [
-              TextSpan(text: '$label ', style: KasaFont.sans(fontSize: 14, fontWeight: FontWeight.w500, color: fg)),
               TextSpan(
+                  text: count == null ? label : '$label ',
+                  style: KasaFont.sans(fontSize: 14, fontWeight: FontWeight.w500, color: fg)),
+              if (count != null) TextSpan(
                 text: '$count',
                 style: KasaFont.sans(
                   fontSize: 14,

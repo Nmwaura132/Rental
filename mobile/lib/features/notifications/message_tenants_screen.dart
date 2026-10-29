@@ -227,7 +227,11 @@ class _MessageTenantsScreenState extends ConsumerState<MessageTenantsScreen> {
                   onTap: _chooseRecipients,
                 ),
               ]),
-              const SizedBox(height: 16),
+              const SizedBox(height: 24),
+              // WHY a heading and no floating label: in a tall box the label
+              // sat on top of the first line of the message.
+              const KasaSectionHeader('Message'),
+              const SizedBox(height: 8),
               TextField(
                 controller: _message,
                 minLines: 4,
@@ -235,16 +239,11 @@ class _MessageTenantsScreenState extends ConsumerState<MessageTenantsScreen> {
                 maxLength: _max,
                 textCapitalization: TextCapitalization.sentences,
                 onChanged: (_) => setState(() {}),
-                decoration: const InputDecoration(
-                  labelText: 'Message',
+                decoration: InputDecoration(
                   hintText: 'e.g. Water will be off on Saturday from 9am to 1pm.',
-                  alignLabelWithHint: true,
+                  // An SMS holds 160 characters; longer ones cost two or more.
+                  helperText: length <= 160 ? '1 SMS each' : '${(length / 153).ceil()} SMS each',
                 ),
-              ),
-              Text(
-                // An SMS holds 160 characters; longer ones cost two or more.
-                length <= 160 ? '1 SMS each' : '${(length / 153).ceil()} SMS each',
-                style: KasaFont.sans(fontSize: 13, color: cs.kasaTextSub),
               ),
             ],
           ),
