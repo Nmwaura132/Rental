@@ -59,7 +59,7 @@ void main() {
 
   testWidgets('saves only the houses changed', (tester) async {
     final server = await _pump(tester, _screen());
-    await tester.enterText(find.byType(TextField).at(1), '3000');
+    await tester.enterText(find.byType(TextField).at(2), '3000');
     await tester.pump();
     await tester.tap(find.text('Save 1 change'));
     await tester.pumpAndSettle();
@@ -68,7 +68,7 @@ void main() {
 
   testWidgets('sends the new amount', (tester) async {
     final server = await _pump(tester, _screen());
-    await tester.enterText(find.byType(TextField).at(1), '3,000');
+    await tester.enterText(find.byType(TextField).at(2), '3,000');
     await tester.pump();
     await tester.tap(find.text('Save 1 change'));
     await tester.pumpAndSettle();
@@ -77,9 +77,27 @@ void main() {
 
   testWidgets('shows what a changed rent was', (tester) async {
     await _pump(tester, _screen());
-    await tester.enterText(find.byType(TextField).first, '3000');
+    await tester.enterText(find.byType(TextField).at(1), '3000');
     await tester.pump();
     expect(find.text('Was KES 2,500'), findsOneWidget);
+  });
+
+  testWidgets('one amount can be applied to every house', (tester) async {
+    await _pump(tester, _screen());
+    await tester.enterText(find.byType(TextField).first, '3000');
+    await tester.pump();
+    await tester.tap(find.text('Apply to all 3'));
+    await tester.pump();
+    expect(find.text('Save 3 changes'), findsOneWidget);
+  });
+
+  testWidgets('applying to all saves nothing until Save', (tester) async {
+    final server = await _pump(tester, _screen());
+    await tester.enterText(find.byType(TextField).first, '3000');
+    await tester.pump();
+    await tester.tap(find.text('Apply to all 3'));
+    await tester.pump();
+    expect(server.requests, isEmpty);
   });
 
   testWidgets('one house: says when a tenant is charged the new rent', (tester) async {

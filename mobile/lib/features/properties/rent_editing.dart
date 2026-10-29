@@ -119,6 +119,7 @@ class _EditRentsScreenState extends ConsumerState<EditRentsScreen> {
     for (final u in widget.units) u['id']: TextEditingController(text: toDouble(u['rent_amount']).toStringAsFixed(0)),
   };
   final _errors = <Object, String>{};
+  final _everyHouse = TextEditingController();
   bool _busy = false;
 
   @override
@@ -126,7 +127,21 @@ class _EditRentsScreenState extends ConsumerState<EditRentsScreen> {
     for (final c in _controllers.values) {
       c.dispose();
     }
+    _everyHouse.dispose();
     super.dispose();
+  }
+
+  /// Fills every house's box; nothing is saved until Save, so a few can
+  /// still be set differently first.
+  void _applyToAll() {
+    final amount = _everyHouse.text.trim();
+    if (double.tryParse(amount.replaceAll(',', '')) == null) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      for (final c in _controllers.values) {
+        c.text = amount;
+      }
+    });
   }
 
   bool _changed(Map<String, dynamic> unit) {
@@ -182,6 +197,32 @@ class _EditRentsScreenState extends ConsumerState<EditRentsScreen> {
                 style: KasaFont.sans(fontSize: 14, color: cs.kasaTextSub),
               ),
               const SizedBox(height: 16),
+              KasaCard(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  // A heading, not a floating label: with a prefix the label
+                  // was drawn over the amount once the field lost focus.
+                  Text('Set every house to (KES)',
+                      style: KasaFont.sans(fontSize: 14, fontWeight: FontWeight.w600, color: cs.onSurface)),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _everyHouse,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: _wholeShillings,
+                    onChanged: (_) => setState(() {}),
+                    onSubmitted: (_) => _applyToAll(),
+                    decoration: const InputDecoration(hintText: 'e.g. 3000'),
+                  ),
+                  const SizedBox(height: 12),
+                  KasaButton(
+                    label: 'Apply to all ${widget.units.length}',
+                    variant: KasaButtonVariant.secondary,
+                    onTap: double.tryParse(_everyHouse.text.replaceAll(',', '')) == null ? null : _applyToAll,
+                  ),
+                ]),
+              ),
+              const SizedBox(height: 24),
+              const KasaSectionHeader('Each house'),
+              const SizedBox(height: 12),
               for (final unit in widget.units) ...[
                 Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   SizedBox(
