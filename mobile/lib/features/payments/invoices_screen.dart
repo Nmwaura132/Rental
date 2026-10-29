@@ -13,6 +13,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/widgets/kasa_layout.dart';
 import '../../core/widgets/kasa_primitives.dart';
 import '../../shared/widgets/shimmer_loading.dart';
+import 'send_bills_card.dart';
 import 'tenant_pay_screen.dart';
 import 'unplaced_payments.dart';
 
@@ -269,6 +270,7 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
                 children: [
                   if (isLandlord) ...[
+                    SendBillsCard(onSent: () => ref.invalidate(invoicesProvider)),
                     const _MoneyShortcuts(),
                     const SizedBox(height: 16),
                     const _PaymentsToAssign(),

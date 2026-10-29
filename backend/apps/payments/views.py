@@ -110,6 +110,38 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         invoice.save(update_fields=["status", "updated_at"])
         return Response(self.get_serializer(invoice).data)
 
+    @action(detail=False, methods=["get", "post"], url_path="send-month", permission_classes=[IsLandlord])
+    def send_month(self, request):
+        """GET: how many of the landlord's tenants are still to be billed for
+        the coming month. POST: raise and text those bills now.
+
+        WHY "coming" turns over on the 20th: meters are read at month end and
+        rent is paid in advance, so from the 20th the bill to send is next
+        month's; before it, this month's if any were missed.
+        """
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from apps.tenants.models import Tenancy
+
+        from .tasks import bill_month
+
+        today = timezone.localdate()
+        period = today.replace(day=1)
+        if today.day >= 20:
+            period = (period + timedelta(days=32)).replace(day=1)
+
+        tenancies = Tenancy.objects.filter(
+            status=Tenancy.Status.ACTIVE, unit__property__owner=request.user
+        ).filter(Q(notice_effective_date__isnull=True) | Q(notice_effective_date__gte=period))
+        billed = Invoice.objects.filter(tenancy__in=tenancies, period_start=period).count()
+
+        if request.method == "POST":
+            created = bill_month(period, owner=request.user)
+            return Response({"period": period, "sent": created, "already_sent": billed})
+        return Response({"period": period, "tenancies": tenancies.count(), "already_sent": billed})
+
     @action(detail=True, methods=["post"], permission_classes=[IsLandlord])
     def remind(self, request, pk=None):
         """Text the tenant a reminder about this bill — at most once a day.

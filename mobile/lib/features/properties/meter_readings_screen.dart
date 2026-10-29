@@ -9,6 +9,7 @@ import '../../core/theme/kasa_tokens.dart';
 import '../../core/utils/api_error.dart';
 import '../../core/utils/currency.dart';
 import '../../core/widgets/kasa_primitives.dart';
+import '../payments/send_bills_card.dart';
 
 final _apiDate = DateFormat('yyyy-MM-dd');
 
@@ -184,9 +185,13 @@ class _MeterReadingsScreenState extends ConsumerState<MeterReadingsScreen> {
                     Expanded(
                       child: ListView.separated(
                         padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
-                        itemCount: rows.length,
+                        // The readings, then sending the bills they go on:
+                        // the order a landlord does it on reading day.
+                        itemCount: rows.length + 1,
                         separatorBuilder: (_, __) => const SizedBox(height: 8),
-                        itemBuilder: (_, i) => _ReadingRow(
+                        itemBuilder: (_, i) => i == rows.length
+                            ? const Padding(padding: EdgeInsets.only(top: 16), child: SendBillsCard())
+                            : _ReadingRow(
                           row: rows[i],
                           controller: _controllerFor(rows[i]),
                           error: _errors['${rows[i]['unit']}:${rows[i]['charge']}'],

@@ -503,16 +503,26 @@ def generate_monthly_invoices():
     found no invoice yet; the bill SMS on the 1st now does that job, so the
     date can match the contract that chasing a late tenant rests on.
     """
+    from django.utils import timezone
+
+    return bill_month(timezone.localdate().replace(day=1))
+
+
+def bill_month(period_start, owner=None):
+    """Raise and text each active tenancy's bill for the month starting
+    `period_start`; only `owner`'s tenancies when given.
+
+    WHY get_or_create per tenancy: a landlord may send a month's bills early
+    (after reading meters on the 31st), and the run on the 1st must then find
+    them already made and text no one twice.
+    """
     from apps.tenants.models import Tenancy
     from .billing import charge_lines
     from .services import apply_credit
     from .models import Invoice, InvoiceLineItem
-    from django.utils import timezone
     import uuid
 
-    today = timezone.now().date()
-    period_start = today.replace(day=1)
-    next_month = (today.replace(day=28) + timedelta(days=4)).replace(day=1)
+    next_month = (period_start.replace(day=28) + timedelta(days=4)).replace(day=1)
     period_end = next_month - timedelta(days=1)
     due_date = period_start.replace(day=settings.RENT_DUE_DAY)
 
@@ -525,6 +535,8 @@ def generate_monthly_invoices():
         .filter(Q(notice_effective_date__isnull=True) | Q(notice_effective_date__gte=period_start))
         .select_related("unit", "tenant")
     )
+    if owner is not None:
+        active_tenancies = active_tenancies.filter(unit__property__owner=owner)
     created = 0
 
     for tenancy in active_tenancies:
