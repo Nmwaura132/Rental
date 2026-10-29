@@ -18,6 +18,7 @@ import '../tenants/deposit_settlement_screen.dart';
 import '../tenants/tenants_screen.dart';
 import 'properties_screen.dart';
 import 'property_detail_screen.dart';
+import 'rent_editing.dart';
 
 final unitOccupancyProvider = FutureProvider.autoDispose
     .family<Map<String, dynamic>, int>((ref, unitId) async {
@@ -67,6 +68,11 @@ class UnitDetailScreen extends ConsumerWidget {
       ref.invalidate(propertiesProvider);
       final propertyId = unit?['property'];
       if (propertyId is int) ref.invalidate(propertyDetailProvider(propertyId));
+    }
+
+    Future<void> changeThisRent() async {
+      if (unit == null) return;
+      if (await changeRent(context, ref, unit, hasTenant: tenancy != null)) refresh();
     }
 
     Future<void> deleteUnit() async {
@@ -166,6 +172,8 @@ class UnitDetailScreen extends ConsumerWidget {
                       barrierDismissible: false,
                       builder: (_) => EditUnitDialog(unit: unit, onDone: refresh),
                     );
+                  case 'rent':
+                    await changeThisRent();
                   case 'notice':
                     await giveNoticeAsLandlord(context, ref, {'id': tenancy!['id']});
                     refresh();
@@ -182,6 +190,7 @@ class UnitDetailScreen extends ConsumerWidget {
                 }
               },
               itemBuilder: (_) => [
+                const PopupMenuItem(value: 'rent', child: Text('Change rent')),
                 const PopupMenuItem(value: 'edit', child: Text('Edit unit')),
                 if (tenancy != null && tenancy['notice_effective_date'] == null)
                   const PopupMenuItem(value: 'notice', child: Text('Give notice')),
@@ -221,8 +230,8 @@ class UnitDetailScreen extends ConsumerWidget {
         data: (d) => RefreshIndicator(
           onRefresh: () async => refresh(),
           child: d['tenancy'] == null
-              ? _VacantBody(data: d, isLandlord: isLandlord)
-              : _OccupiedBody(data: d, isLandlord: isLandlord),
+              ? _VacantBody(data: d, isLandlord: isLandlord, onChangeRent: isLandlord ? changeThisRent : null)
+              : _OccupiedBody(data: d, isLandlord: isLandlord, onChangeRent: isLandlord ? changeThisRent : null),
         ),
       ),
     );
@@ -232,9 +241,12 @@ class UnitDetailScreen extends ConsumerWidget {
 // Vacant
 
 class _VacantBody extends StatelessWidget {
-  const _VacantBody({required this.data, required this.isLandlord});
+  const _VacantBody({required this.data, required this.isLandlord, this.onChangeRent});
   final Map<String, dynamic> data;
   final bool isLandlord;
+
+  /// Landlords only: opens Change rent.
+  final VoidCallback? onChangeRent;
 
   @override
   Widget build(BuildContext context) {
@@ -249,6 +261,7 @@ class _VacantBody extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Column(children: [
             KasaKeyValue('Rent', _value(context, '${formatCurrency(toDouble(unit['rent_amount']))} / month')),
+            if (onChangeRent != null) _ChangeRentLink(onTap: onChangeRent!),
             if (isLandlord)
               KasaKeyValue('Deposit', _value(context, formatCurrency(toDouble(unit['deposit_amount'])))),
             ..._payRows(context, data),
@@ -272,9 +285,12 @@ class _VacantBody extends StatelessWidget {
 // Occupied
 
 class _OccupiedBody extends StatelessWidget {
-  const _OccupiedBody({required this.data, required this.isLandlord});
+  const _OccupiedBody({required this.data, required this.isLandlord, this.onChangeRent});
   final Map<String, dynamic> data;
   final bool isLandlord;
+
+  /// Landlords only: opens Change rent.
+  final VoidCallback? onChangeRent;
 
   @override
   Widget build(BuildContext context) {
@@ -299,7 +315,7 @@ class _OccupiedBody extends StatelessWidget {
           ),
           const SizedBox(height: 16),
         ],
-        _TenantCard(tenant: tenant, tenancy: tenancy, isLandlord: isLandlord),
+        _TenantCard(tenant: tenant, tenancy: tenancy, isLandlord: isLandlord, onChangeRent: onChangeRent),
         if (isLandlord) ...[
           const SizedBox(height: 24),
           KasaSectionHeader(
@@ -395,10 +411,13 @@ class _OccupiedBody extends StatelessWidget {
 }
 
 class _TenantCard extends StatelessWidget {
-  const _TenantCard({required this.tenant, required this.tenancy, required this.isLandlord});
+  const _TenantCard({required this.tenant, required this.tenancy, required this.isLandlord, this.onChangeRent});
   final Map<String, dynamic> tenant;
   final Map<String, dynamic> tenancy;
   final bool isLandlord;
+
+  /// Landlords only: opens Change rent.
+  final VoidCallback? onChangeRent;
 
   @override
   Widget build(BuildContext context) {
@@ -453,6 +472,7 @@ class _TenantCard extends StatelessWidget {
             child: Column(children: [
               KasaKeyValue(
                   'Rent', _value(context, '${formatCurrency(toDouble(tenancy['rent_amount']))} / month')),
+              if (onChangeRent != null) _ChangeRentLink(onTap: onChangeRent!),
               KasaKeyValue('Since', _value(context, _pretty(tenancy['start_date'], 'MMM yyyy'))),
               if (isLandlord) ...[
                 KasaKeyValue(
@@ -467,7 +487,15 @@ class _TenantCard extends StatelessWidget {
                 KasaKeyValue(
                   'Balance',
                   Row(mainAxisSize: MainAxisSize.min, children: [
-                    _value(context, formatCurrency(balance)),
+                    // Sized to the text: beside a chip, an expanding value has
+                    // no width to fill.
+                    Flexible(
+                      child: Text(
+                        formatCurrency(balance),
+                        style: KasaFont.sans(fontSize: 14, fontWeight: FontWeight.w600, color: cs.onSurface)
+                            .copyWith(fontFeatures: KasaType.tabular),
+                      ),
+                    ),
                     const SizedBox(width: 8),
                     KasaStatusChip(kind: kind, label: label),
                   ]),
@@ -515,9 +543,32 @@ class _RepairRow extends StatelessWidget {
 
 /// A value in a key/value row: 14 tall, in the full text colour, in figures
 /// that line up.
+/// Under the rent, on its own line: rent is the figure most often set wrong,
+/// so changing it should not hide in a menu, and beside the amount it did not
+/// fit a small phone with large text.
+class _ChangeRentLink extends StatelessWidget {
+  const _ChangeRentLink({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton.icon(
+          onPressed: onTap,
+          // Flush with the labels above, and still a 44px target.
+          style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(0, 44)),
+          icon: const Icon(Icons.edit_outlined, size: 18),
+          label: const Text('Change rent'),
+        ),
+      );
+}
+
 Widget _value(BuildContext context, String text) {
   final cs = Theme.of(context).colorScheme;
-  return Flexible(
+  // Expanded, not Flexible: a Flexible value shrinks to its text and floats
+  // mid-row, out of line with the values beneath it.
+  return Expanded(
+    flex: 2,
     child: Text(
       text,
       textAlign: TextAlign.end,

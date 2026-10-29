@@ -187,6 +187,36 @@ class UnitViewSet(viewsets.ModelViewSet):
             .distinct()
         )
 
+    @action(detail=True, methods=["post"], url_path="set-rent")
+    def set_rent(self, request, pk=None):
+        """Change a house's monthly rent, for its current tenant too.
+
+        POST {"rent_amount"} -> the unit and, if let, the tenancy billed from it.
+
+        WHY both at once: bills use the tenancy's rent, not the unit's, so
+        changing only the unit left the tenant billed the old amount. Bills
+        already raised are left as they are; the change applies from the next.
+        """
+        from decimal import Decimal, InvalidOperation
+
+        from django.db import transaction
+
+        unit = self.get_object()  # landlord-only, and only their own units
+        try:
+            rent = Decimal(str(request.data.get("rent_amount", "")).replace(",", ""))
+        except InvalidOperation:
+            rent = Decimal("0")
+        if rent <= 0 or rent >= Decimal("100000000"):
+            return Response({"error": "Enter the monthly rent in shillings."}, status=400)
+        rent = rent.quantize(Decimal("0.01"))
+
+        with transaction.atomic():
+            unit.rent_amount = rent
+            unit.save(update_fields=["rent_amount"])
+            tenancies = Tenancy.objects.filter(unit=unit, status=Tenancy.Status.ACTIVE)
+            moved = tenancies.update(rent_amount=rent)
+        return Response({"rent_amount": rent, "tenancy_updated": bool(moved)})
+
     @action(detail=True, methods=["get"], url_path="occupancy")
     def occupancy(self, request, pk=None):
         """Everything the unit screen shows, in one call.

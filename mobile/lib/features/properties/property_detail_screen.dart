@@ -13,6 +13,7 @@ import '../../core/widgets/kasa_primitives.dart';
 import '../dashboard/needs_attention.dart';
 import '../tenants/tenants_screen.dart';
 import 'meter_readings_screen.dart';
+import 'rent_editing.dart';
 import 'properties_screen.dart';
 import 'renumber_units_screen.dart';
 import 'unit_numbering.dart';
@@ -295,31 +296,16 @@ class _PropertyDetailViewState extends ConsumerState<_PropertyDetailView> {
     ].take(2).join(', ');
     final muted = KasaFont.sans(fontSize: 14, color: cs.kasaTextSub);
 
+    // WHY full-width rows and not tiles side by side: three tiles across a
+    // phone broke their titles mid-word ("Meter readin gs").
     Widget tool(IconData icon, String title, String? caption, VoidCallback onTap,
             {bool warn = false}) =>
-        Expanded(
-          child: KasaCard(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            onTap: onTap,
-            child: Row(children: [
-              Icon(icon, size: 20, color: cs.onSurface),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title,
-                        style: KasaFont.sans(
-                            fontSize: 14, fontWeight: FontWeight.w600, color: cs.onSurface)),
-                    if (caption != null)
-                      Text(caption,
-                          style: KasaFont.sans(
-                              fontSize: 13, color: warn ? cs.statusDue : cs.kasaTextSub)),
-                  ],
-                ),
-              ),
-            ]),
-          ),
+        KasaListRow(
+          tight: true,
+          leading: KasaLeadIcon(icon, tone: warn && caption != null ? KasaStatusKind.due : null),
+          title: title,
+          subtitle: caption,
+          onTap: onTap,
         );
 
     return Scaffold(
@@ -380,8 +366,7 @@ class _PropertyDetailViewState extends ConsumerState<_PropertyDetailView> {
             ]),
             const SizedBox(height: 16),
             if (canWork)
-              IntrinsicHeight(
-                child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              KasaListGroup(children: [
                   tool(
                     Icons.speed_rounded,
                     'Meter readings',
@@ -397,12 +382,22 @@ class _PropertyDetailViewState extends ConsumerState<_PropertyDetailView> {
                     warn: true,
                   ),
                   if (canManage && units.isNotEmpty) ...[
-                    const SizedBox(width: 8),
-                    tool(Icons.format_list_numbered_rounded, 'Renumber units', 'G1, 1A \u2026',
+                    tool(Icons.payments_outlined, 'Edit rents', 'Change what each house pays', () async {
+                      final changed = await Navigator.of(context, rootNavigator: true).push<bool>(
+                        MaterialPageRoute(
+                          fullscreenDialog: true,
+                          builder: (_) => EditRentsScreen(
+                            buildingName: data['name']?.toString() ?? '',
+                            units: units.cast<Map<String, dynamic>>(),
+                          ),
+                        ),
+                      );
+                      if (changed == true) onRefresh();
+                    }),
+                    tool(Icons.format_list_numbered_rounded, 'Renumber units', 'G1, 1A …',
                         () => _renumber(units)),
                   ],
                 ]),
-              ),
             if (canWork) const SizedBox(height: 16),
             if (units.isEmpty)
               Padding(
