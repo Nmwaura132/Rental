@@ -575,28 +575,48 @@ def bill_month(period_start, owner=None):
 
 def _send_bill(tenancy, invoice):
     from apps.notifications.tasks import send_sms
-    from .services import how_to_pay
+
+    send_sms.delay(tenancy.tenant_id, bill_text(tenancy, invoice))
+
+
+def _amount(value) -> str:
+    """25000 -> "25,000"; 1252.5 -> "1,252.50". Whole numbers stay whole."""
+    return f"{value:,.0f}" if value == value.to_integral_value() else f"{value:,.2f}"
+
+
+def bill_text(tenancy, invoice) -> str:
+    """The monthly bill as an SMS: one item per line, water with its readings.
+
+    WHY lines and not a sentence: tenants check a bill item by item, and a
+    meter charge they cannot see the readings for is the one they dispute.
+    WHY only plain characters (no em dash or curly quotes): one such character
+    switches the whole SMS to a set with 70 characters per part instead of 153,
+    tripling what every bill costs.
+    """
+    from .services import pay_to
 
     unit = tenancy.unit
-    lines = list(invoice.line_items.all())
-    # "Rent 25,000 + Water 640 = KES 25,640": the parts only when there is more
-    # than one, so a rent-only bill still reads simply.
-    parts = (
-        " + ".join(f"{line.charge_type.capitalize()} {line.amount:,.0f}" for line in lines) + " = "
-        if len(lines) > 1 else ""
-    )
-    if invoice.amount_paid <= 0:
-        tail = f"due {invoice.due_date.strftime('%d %b')}. {how_to_pay(unit)}"
-    elif invoice.balance > 0:
-        tail = (
-            f"less your credit of KES {invoice.amount_paid:,.0f} leaves KES "
-            f"{invoice.balance:,.0f} due {invoice.due_date.strftime('%d %b')}. {how_to_pay(unit)}"
-        )
-    else:
-        tail = "fully covered by the credit you paid ahead. Nothing to pay."
-    send_sms.delay(
-        tenancy.tenant_id,
-        f"Dear {tenancy.tenant.first_name}, your {invoice.period_start.strftime('%B')} "
-        f"bill for {unit.property.name} Unit {unit.unit_number}: "
-        f"{parts}KES {invoice.amount_due:,.0f}, {tail}",
-    )
+    lines = [f"Hi {tenancy.tenant.first_name},", f"{unit.property.name} {unit.unit_number}",
+             f"{invoice.period_start:%B %Y} bill", ""]
+    for item in invoice.line_items.all():
+        name = "Rent" if item.charge_type == "rent" else item.description.split(" — ")[0]
+        lines.append(f"{name}: {_amount(item.amount)}")
+        if item.current_reading is not None and item.previous_reading is not None:
+            def read(when, value):
+                return f" {when:%d %b}: {_amount(value)}" if when else f" Was: {_amount(value)}"
+            lines.append(read(item.previous_read_on, item.previous_reading))
+            lines.append(read(item.current_read_on, item.current_reading).replace(" Was:", " Now:"))
+            lines.append(f" Used {_amount(item.units_consumed)} x {_amount(item.unit_price)}")
+
+    lines += ["", f"Total: KES {_amount(invoice.amount_due)}"]
+    if invoice.amount_paid > 0:
+        lines.append(f"Paid ahead: {_amount(invoice.amount_paid)}")
+        if invoice.balance <= 0:
+            return "\n".join(lines + ["Nothing to pay this month."])
+        lines.append(f"To pay: KES {_amount(invoice.balance)}")
+    lines.append(f"Due: {invoice.due_date:%d %b %Y}")
+
+    number, account = pay_to(unit)
+    lines += ["", f"Pay: M-Pesa Paybill {number}", f"Account: {account}"] if account else [
+        "", f"Pay: M-Pesa Till {number}"]
+    return "\n".join(lines)

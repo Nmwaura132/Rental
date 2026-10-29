@@ -56,7 +56,7 @@ class TestOnTheLastSaturdayOfOctober:
     def test_each_tenant_is_texted_their_bill(self, landlord, tenancy, on, texts):
         on(date(2026, 10, 31))
         _as(landlord).post(URL)
-        assert "November bill" in texts[0]
+        assert "November 2026 bill" in texts[0]
 
 
 @pytest.mark.django_db

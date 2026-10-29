@@ -412,8 +412,10 @@ class MeterReadingViewSet(viewsets.ModelViewSet):
                     "charge_name": charge.name,
                     "unit_price": charge.unit_price,
                     "previous_reading": previous.reading if previous else None,
+                    "previous_read_on": previous.read_on if previous else None,
                     "reading_id": current.id if current else None,
                     "reading": current.reading if current else None,
+                    "read_on": current.read_on if current else None,
                 })
         return Response({"period": period, "rows": rows})
 

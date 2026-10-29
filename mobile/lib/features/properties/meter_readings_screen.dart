@@ -8,6 +8,7 @@ import '../../core/api/api_client.dart';
 import '../../core/theme/kasa_tokens.dart';
 import '../../core/utils/api_error.dart';
 import '../../core/utils/currency.dart';
+import '../../core/widgets/kasa_layout.dart';
 import '../../core/widgets/kasa_primitives.dart';
 import '../payments/send_bills_card.dart';
 
@@ -49,6 +50,7 @@ class MeterReadingsScreen extends ConsumerStatefulWidget {
 
 class _MeterReadingsScreenState extends ConsumerState<MeterReadingsScreen> {
   DateTime _period = defaultReadingPeriod();
+  late DateTime _readOn = _defaultReadOn(_period);
   // Keyed "unitId:chargeId" so a property metering water and electricity keeps
   // both figures for a unit apart.
   final _controllers = <String, TextEditingController>{};
@@ -71,6 +73,26 @@ class _MeterReadingsScreenState extends ConsumerState<MeterReadingsScreen> {
     );
   }
 
+  /// The day this month's meters were read, which bills quote: today for the
+  /// current month, else that month's last day, the usual reading day.
+  static DateTime _defaultReadOn(DateTime period) {
+    final now = DateTime.now();
+    final monthEnd = DateTime(period.year, period.month + 1, 0);
+    return monthEnd.isAfter(now) ? DateTime(now.year, now.month, now.day) : monthEnd;
+  }
+
+  Future<void> _pickReadOn() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _readOn,
+      firstDate: DateTime(_period.year, _period.month - 1),
+      lastDate: DateTime(now.year, now.month, now.day),
+      helpText: 'Day the meters were read',
+    );
+    if (picked != null) setState(() => _readOn = picked);
+  }
+
   void _changePeriod(DateTime period) {
     for (final c in _controllers.values) {
       c.dispose();
@@ -79,6 +101,7 @@ class _MeterReadingsScreenState extends ConsumerState<MeterReadingsScreen> {
       _controllers.clear();
       _errors.clear();
       _period = period;
+      _readOn = _defaultReadOn(period);
     });
   }
 
@@ -102,11 +125,12 @@ class _MeterReadingsScreenState extends ConsumerState<MeterReadingsScreen> {
             'charge': row['charge'],
             'period': _apiDate.format(_period),
             'reading': text,
+            'read_on': _apiDate.format(_readOn),
           });
         } else {
           await dio.patch(
             '/api/v1/properties/meter-readings/${row['reading_id']}/',
-            data: {'reading': text},
+            data: {'reading': text, 'read_on': _apiDate.format(_readOn)},
           );
         }
         saved++;
@@ -163,6 +187,18 @@ class _MeterReadingsScreenState extends ConsumerState<MeterReadingsScreen> {
               '${DateFormat('MMMM').format(DateTime(_period.year, _period.month + 1))} bill.',
               style: KasaFont.sans(fontSize: 12, color: cs.kasaTextSub),
             ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+            child: KasaListGroup(children: [
+              KasaListRow(
+                tight: true,
+                leading: const KasaLeadIcon(Icons.event_outlined),
+                title: 'Read on ${DateFormat('d MMM yyyy').format(_readOn)}',
+                subtitle: 'Tenants see this date on their bill. Tap to change.',
+                onTap: _pickReadOn,
+              ),
+            ]),
           ),
           Expanded(
             child: sheet.when(

@@ -87,7 +87,7 @@ class TestTheMonthlyBill:
 
     def test_the_bill_sms_itemises_the_charges(self, tenancy, garbage, sent):
         generate_monthly_invoices()
-        assert "Garbage 200" in sent[0][1]
+        assert "Garbage: 200" in sent[0][1]
 
 
 class TestAReadingEnteredAfterTheBill:

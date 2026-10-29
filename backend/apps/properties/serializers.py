@@ -92,7 +92,7 @@ class MeterReadingSerializer(serializers.ModelSerializer):
     class Meta:
         model = MeterReading
         fields = [
-            "id", "unit", "charge", "period", "reading",
+            "id", "unit", "charge", "period", "reading", "read_on",
             "previous_reading", "recorded_by_name", "recorded_at",
         ]
         read_only_fields = ["id", "recorded_by_name", "recorded_at"]
@@ -100,6 +100,13 @@ class MeterReadingSerializer(serializers.ModelSerializer):
     def get_previous_reading(self, obj):
         previous = obj.previous()
         return previous.reading if previous else None
+
+    def validate_read_on(self, value):
+        from django.utils import timezone
+
+        if value > timezone.localdate():
+            raise serializers.ValidationError("A meter cannot be read on a day still to come.")
+        return value
 
     def validate_period(self, value):
         # Any day in the month names that month's reading.

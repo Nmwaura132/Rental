@@ -272,6 +272,9 @@ class InvoiceLineItem(models.Model):
     previous_reading = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     current_reading = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     units_consumed = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    # When each meter reading was taken, so the bill can say "as of".
+    previous_read_on = models.DateField(null=True, blank=True)
+    current_read_on = models.DateField(null=True, blank=True)
     unit_price = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
 

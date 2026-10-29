@@ -60,6 +60,8 @@ def metered_line(unit, charge, usage_period) -> dict | None:
         "charge_type": charge.charge_type,
         "previous_reading": previous.reading,
         "current_reading": current.reading,
+        "previous_read_on": previous.read_on,
+        "current_read_on": current.read_on,
         "units_consumed": used,
         "unit_price": charge.unit_price,
         "amount": (used * charge.unit_price).quantize(Decimal("0.01")),

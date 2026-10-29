@@ -2,6 +2,7 @@ import re
 
 from django.db import models
 from django.conf import settings
+from django.utils import timezone
 import random
 import string
 
@@ -222,6 +223,9 @@ class MeterReading(models.Model):
     charge = models.ForeignKey(PropertyCharge, on_delete=models.PROTECT, related_name="readings")
     period = models.DateField()
     reading = models.DecimalField(max_digits=10, decimal_places=2)
+    # The day the meter was read, which the tenant's bill quotes. Not
+    # recorded_at: a reading taken on the 30th may be typed in days later.
+    read_on = models.DateField(default=timezone.localdate)
     recorded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="meter_readings"
     )
