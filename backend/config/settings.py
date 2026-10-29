@@ -345,6 +345,11 @@ RENT_ACCOUNT_PREFIX = env("RENT_ACCOUNT_PREFIX", default="")
 # account to pay to instead.
 STK_PUSH_ENABLED = env.bool("STK_PUSH_ENABLED", default=True)
 
+# ── Tenant access to the app ─────────────────────────────────────────────────
+# Off while landlords run Kasa on their own: tenants get their bills and
+# reminders by SMS but cannot sign in. Turn on when tenants are given the app.
+TENANT_APP_ACCESS = env.bool("TENANT_APP_ACCESS", default=False)
+
 # ── KCB Buni payment notifications ───────────────────────────────────────────
 # KCB signs every notification with its private key (SHA256withRSA); this is
 # the public key KCB issues to check it with, as PEM. One key for all

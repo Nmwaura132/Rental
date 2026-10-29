@@ -120,6 +120,20 @@ def _session_for(user):
     }
 
 
+APP_CLOSED_TO_TENANTS = "The Kasa app is not open to tenants yet. Your landlord sends your bills by SMS."
+APP_CLOSED_SMS = (
+    "The Kasa app is not open to tenants yet. You will keep getting your bills and "
+    "receipts by SMS from your landlord."
+)
+
+
+def closed_to(user) -> bool:
+    """Whether this account may not sign in because tenants are not let in yet."""
+    from django.conf import settings
+
+    return user.role == User.Role.TENANT and not settings.TENANT_APP_ACCESS
+
+
 def _tenant_qs_for_manager(user):
     tenants = User.objects.filter(role=User.Role.TENANT, is_active=True)
     if user.is_landlord:
@@ -240,6 +254,10 @@ class PasswordResetRequestView(APIView):
         cache.delete(f"pwd_reset_attempts:{phone_number}")
 
         from apps.notifications.tasks import send_sms
+        if closed_to(user):
+            cache.delete(cache_key)
+            send_sms.delay(user.id, APP_CLOSED_SMS)
+            return Response({"message": "If that number is registered, an OTP has been sent."})
         send_sms.delay(
             user.id,
             f"Your Kasa password reset code is {otp}. Valid for 5 minutes. Do not share it.",
@@ -457,7 +475,8 @@ class SignupCodeView(APIView):
         if existing:
             send_sms.delay(
                 existing.id,
-                "This number already has a Kasa account. Open Kasa and sign in with a code instead.",
+                APP_CLOSED_SMS if closed_to(existing)
+                else "This number already has a Kasa account. Open Kasa and sign in with a code instead.",
             )
             return Response({"message": SIGNUP_CODE_SENT})
 
@@ -557,7 +576,12 @@ class LoginCodeView(APIView):
             return Response({"error": "Enter a valid Kenyan phone number."}, status=400)
 
         user = User.objects.filter(phone_number=phone_number, is_active=True).first()
-        if user and _may_text("login", phone_number):
+        if user and closed_to(user):
+            # Told by SMS rather than in this reply, which stays the same for
+            # every number so it cannot reveal who is a tenant.
+            if _may_text("login", phone_number):
+                send_sms.delay(user.id, APP_CLOSED_SMS)
+        elif user and _may_text("login", phone_number):
             code = _issue_code("login", phone_number)
             send_sms.delay(user.id, f"Your Kasa sign-in code is {code}. Valid for 5 minutes. Do not share it.")
         return Response({"message": LOGIN_CODE_SENT})
@@ -585,4 +609,6 @@ class CodeLoginView(APIView):
         user = User.objects.filter(phone_number=phone_number, is_active=True).first()
         if user is None or not _use_code("login", phone_number):
             return wrong
+        if closed_to(user):
+            return Response({"error": APP_CLOSED_TO_TENANTS}, status=status.HTTP_403_FORBIDDEN)
         return Response(_session_for(user))

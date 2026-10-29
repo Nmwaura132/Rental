@@ -39,6 +39,13 @@ def isolated_cache(settings):
 
 
 @pytest.fixture(autouse=True)
+def tenants_let_in(settings):
+    # Most tests are about what tenants do once they have the app; the
+    # closed-to-tenants phase has its own tests.
+    settings.TENANT_APP_ACCESS = True
+
+
+@pytest.fixture(autouse=True)
 def isolate_external_celery_tasks(monkeypatch):
     from apps.notifications.tasks import send_payment_receipt_sms, send_sms
 

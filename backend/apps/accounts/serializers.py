@@ -106,6 +106,12 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             attrs["phone_number"] = normalize_phone(phone)
 
         data = super().validate(attrs)
+        from .views import APP_CLOSED_TO_TENANTS, closed_to
+
+        if closed_to(self.user):
+            from rest_framework.exceptions import PermissionDenied
+
+            raise PermissionDenied(APP_CLOSED_TO_TENANTS)
         data["role"] = self.user.role
         data["name"] = self.user.get_full_name()
         data["phone_number"] = self.user.phone_number
