@@ -18,7 +18,7 @@ import '../tenants/deposit_settlement_screen.dart';
 import '../tenants/tenants_screen.dart';
 import 'properties_screen.dart';
 import 'property_detail_screen.dart';
-import 'rent_editing.dart';
+import 'edit_property_screen.dart';
 
 final unitOccupancyProvider = FutureProvider.autoDispose
     .family<Map<String, dynamic>, int>((ref, unitId) async {

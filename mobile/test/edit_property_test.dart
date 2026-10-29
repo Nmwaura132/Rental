@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rental_manager/core/api/api_client.dart';
-import 'package:rental_manager/features/properties/rent_editing.dart';
+import 'package:rental_manager/features/properties/edit_property_screen.dart';
 
 import 'support/kasa_test_fonts.dart';
 
@@ -47,7 +47,14 @@ Future<_Server> _pump(WidgetTester tester, Widget child, {Size size = const Size
   return server;
 }
 
-Widget _screen() => const EditRentsScreen(buildingName: 'Maria Goretti Apartments', units: _units);
+Widget _screen() => const EditPropertyScreen(
+    propertyId: 8, name: 'Maria Goretti Apartments', caretakerId: null, units: _units);
+
+// Boxes in order: building name, set every house, then one per house.
+Finder _house(int i) => find.byType(TextField).at(2 + i);
+Finder get _everyHouse => find.byType(TextField).at(1);
+
+Iterable<RequestOptions> _posts(_Server s) => s.requests.where((r) => r.method == 'POST');
 
 void main() {
   setUpAll(loadKasaFonts);
@@ -59,32 +66,32 @@ void main() {
 
   testWidgets('saves only the houses changed', (tester) async {
     final server = await _pump(tester, _screen());
-    await tester.enterText(find.byType(TextField).at(2), '3000');
+    await tester.enterText(_house(1), '3000');
     await tester.pump();
     await tester.tap(find.text('Save 1 change'));
     await tester.pumpAndSettle();
-    expect(server.requests.map((r) => r.path), ['/api/v1/properties/units/2/set-rent/']);
+    expect(_posts(server).map((r) => r.path), ['/api/v1/properties/units/2/set-rent/']);
   });
 
   testWidgets('sends the new amount', (tester) async {
     final server = await _pump(tester, _screen());
-    await tester.enterText(find.byType(TextField).at(2), '3,000');
+    await tester.enterText(_house(1), '3,000');
     await tester.pump();
     await tester.tap(find.text('Save 1 change'));
     await tester.pumpAndSettle();
-    expect(server.requests.single.data, {'rent_amount': '3,000'});
+    expect(_posts(server).single.data, {'rent_amount': '3,000'});
   });
 
   testWidgets('shows what a changed rent was', (tester) async {
     await _pump(tester, _screen());
-    await tester.enterText(find.byType(TextField).at(1), '3000');
+    await tester.enterText(_house(0), '3000');
     await tester.pump();
     expect(find.text('Was KES 2,500'), findsOneWidget);
   });
 
   testWidgets('one amount can be applied to every house', (tester) async {
     await _pump(tester, _screen());
-    await tester.enterText(find.byType(TextField).first, '3000');
+    await tester.enterText(_everyHouse, '3000');
     await tester.pump();
     await tester.tap(find.text('Apply to all 3'));
     await tester.pump();
@@ -93,11 +100,21 @@ void main() {
 
   testWidgets('applying to all saves nothing until Save', (tester) async {
     final server = await _pump(tester, _screen());
-    await tester.enterText(find.byType(TextField).first, '3000');
+    await tester.enterText(_everyHouse, '3000');
     await tester.pump();
     await tester.tap(find.text('Apply to all 3'));
     await tester.pump();
-    expect(server.requests, isEmpty);
+    expect(_posts(server), isEmpty);
+  });
+
+  testWidgets('renaming the building is saved with the rents', (tester) async {
+    final server = await _pump(tester, _screen());
+    await tester.enterText(find.byType(TextField).first, 'Maria Goretti Court');
+    await tester.pump();
+    await tester.tap(find.text('Save 1 change'));
+    await tester.pumpAndSettle();
+    expect(server.requests.where((r) => r.method == 'PATCH').single.data,
+        {'name': 'Maria Goretti Court', 'caretaker': null});
   });
 
   testWidgets('one house: says when a tenant is charged the new rent', (tester) async {
@@ -116,7 +133,7 @@ void main() {
   });
 
   for (final width in [360.0, 320.0]) {
-    testWidgets('edit rents fits at $width, text 30% larger', (tester) async {
+    testWidgets('edit property fits at $width, text 30% larger', (tester) async {
       await _pump(tester, _screen(), size: Size(width, 700), textScale: 1.3);
       expect(tester.takeException(), isNull);
     });

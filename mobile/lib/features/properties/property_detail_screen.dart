@@ -13,7 +13,7 @@ import '../../core/widgets/kasa_primitives.dart';
 import '../dashboard/needs_attention.dart';
 import '../tenants/tenants_screen.dart';
 import 'meter_readings_screen.dart';
-import 'rent_editing.dart';
+import 'edit_property_screen.dart';
 import 'properties_screen.dart';
 import 'renumber_units_screen.dart';
 import 'unit_numbering.dart';
@@ -134,20 +134,23 @@ class _PropertyDetailViewState extends ConsumerState<_PropertyDetailView> {
         builder: (_) => _AddUnitDialog(propertyId: propertyId, onDone: onRefresh),
       );
 
-  void _editProperty() => showDialog(
-        context: context,
-        useRootNavigator: true,
-        barrierDismissible: false,
-        builder: (_) => EditPropertyDialog(
+  Future<void> _editProperty() async {
+    final changed = await Navigator.of(context, rootNavigator: true).push<bool>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => EditPropertyScreen(
           propertyId: propertyId,
-          currentName: data['name'] as String? ?? '',
-          currentCaretakerId: data['caretaker'] as int?,
-          onDone: () {
-            ref.invalidate(propertiesProvider);
-            onRefresh();
-          },
+          name: data['name'] as String? ?? '',
+          caretakerId: data['caretaker'] as int?,
+          units: (data['units'] as List? ?? const []).cast<Map<String, dynamic>>(),
         ),
-      );
+      ),
+    );
+    if (changed == true) {
+      ref.invalidate(propertiesProvider);
+      onRefresh();
+    }
+  }
 
   Future<void> _deleteProperty() async {
     final gone = await confirmDeleteProperty(
@@ -382,18 +385,7 @@ class _PropertyDetailViewState extends ConsumerState<_PropertyDetailView> {
                     warn: true,
                   ),
                   if (canManage && units.isNotEmpty) ...[
-                    tool(Icons.payments_outlined, 'Edit rents', 'Change what each house pays', () async {
-                      final changed = await Navigator.of(context, rootNavigator: true).push<bool>(
-                        MaterialPageRoute(
-                          fullscreenDialog: true,
-                          builder: (_) => EditRentsScreen(
-                            buildingName: data['name']?.toString() ?? '',
-                            units: units.cast<Map<String, dynamic>>(),
-                          ),
-                        ),
-                      );
-                      if (changed == true) onRefresh();
-                    }),
+                    tool(Icons.edit_outlined, 'Edit property', 'Name, caretaker and rents', _editProperty),
                     tool(Icons.format_list_numbered_rounded, 'Renumber units', 'G1, 1A …',
                         () => _renumber(units)),
                   ],
