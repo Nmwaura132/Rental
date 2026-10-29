@@ -12,55 +12,71 @@ import '../../core/widgets/kasa_layout.dart';
 import '../../core/widgets/kasa_primitives.dart';
 import 'properties_screen.dart';
 
-String _setRentUrl(Object unitId) => '/api/v1/properties/units/$unitId/set-rent/';
+String _amountsUrl(Object unitId) => '/api/v1/properties/units/$unitId/set-amounts/';
 
 final _wholeShillings = [FilteringTextInputFormatter.allow(RegExp(r'[0-9,]'))];
 
-/// Ask for one house's new rent and save it. True when it changed.
+String _shillings(Object? value) => toDouble(value).toStringAsFixed(0);
+
+/// Ask for one house's new rent and deposit and save what changed. True
+/// when something was saved.
 ///
 /// The server updates the house and its current tenant together, since bills
-/// are worked out from the tenant's rent.
-Future<bool> changeRent(BuildContext context, WidgetRef ref, Map<String, dynamic> unit,
+/// use the tenant's rent and the move-out refund uses the tenant's deposit.
+Future<bool> changeAmounts(BuildContext context, WidgetRef ref, Map<String, dynamic> unit,
     {required bool hasTenant}) async {
-  final controller = TextEditingController(text: toDouble(unit['rent_amount']).toStringAsFixed(0));
   final saved = await showModalBottomSheet<bool>(
     context: context,
     useRootNavigator: true,
     isScrollControlled: true,
     showDragHandle: true,
-    builder: (ctx) => _ChangeRentSheet(
+    builder: (ctx) => _ChangeAmountsSheet(
       unit: unit,
       hasTenant: hasTenant,
-      controller: controller,
-      onSave: (amount) => ref.read(dioProvider).post(_setRentUrl(unit['id']), data: {'rent_amount': amount}),
+      onSave: (body) => ref.read(dioProvider).post(_amountsUrl(unit['id']), data: body),
     ),
   );
-  controller.dispose();
   return saved == true;
 }
 
-class _ChangeRentSheet extends StatefulWidget {
-  const _ChangeRentSheet({required this.unit, required this.hasTenant, required this.controller, required this.onSave});
+class _ChangeAmountsSheet extends StatefulWidget {
+  const _ChangeAmountsSheet({required this.unit, required this.hasTenant, required this.onSave});
   final Map<String, dynamic> unit;
   final bool hasTenant;
-  final TextEditingController controller;
-  final Future<Object?> Function(String amount) onSave;
+  final Future<Object?> Function(Map<String, String> body) onSave;
 
   @override
-  State<_ChangeRentSheet> createState() => _ChangeRentSheetState();
+  State<_ChangeAmountsSheet> createState() => _ChangeAmountsSheetState();
 }
 
-class _ChangeRentSheetState extends State<_ChangeRentSheet> {
+class _ChangeAmountsSheetState extends State<_ChangeAmountsSheet> {
+  late final _rent = TextEditingController(text: _shillings(widget.unit['rent_amount']));
+  late final _deposit = TextEditingController(text: _shillings(widget.unit['deposit_amount']));
   bool _busy = false;
   String? _error;
 
+  @override
+  void dispose() {
+    _rent.dispose();
+    _deposit.dispose();
+    super.dispose();
+  }
+
   Future<void> _save() async {
+    final body = <String, String>{
+      if (_rent.text.trim() != _shillings(widget.unit['rent_amount'])) 'rent_amount': _rent.text.trim(),
+      if (_deposit.text.trim() != _shillings(widget.unit['deposit_amount'])) 'deposit_amount': _deposit.text.trim(),
+    };
+    if (body.isEmpty) {
+      Navigator.pop(context, false);
+      return;
+    }
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
-      await widget.onSave(widget.controller.text.trim());
+      await widget.onSave(body);
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (mounted) {
@@ -79,22 +95,30 @@ class _ChangeRentSheetState extends State<_ChangeRentSheet> {
       padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + MediaQuery.viewInsetsOf(context).bottom),
       child: SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text('Rent for ${widget.unit['unit_number']}',
+          Text('${widget.unit['unit_number']}: rent and deposit',
               style: KasaFont.sans(fontSize: 20, fontWeight: FontWeight.w600, color: cs.onSurface)),
           const SizedBox(height: 8),
           Text(
             widget.hasTenant
-                ? 'The tenant is charged this from their next bill. Bills already sent stay as they are.'
-                : 'The next tenant is charged this.',
+                ? 'The tenant\'s next bill uses the new rent, and their deposit record is corrected. '
+                    'Bills already sent stay as they are.'
+                : 'The next tenant is charged these.',
             style: KasaFont.sans(fontSize: 14, color: cs.kasaTextSub),
           ),
           const SizedBox(height: 16),
           TextField(
-            controller: widget.controller,
+            controller: _rent,
             autofocus: true,
             keyboardType: TextInputType.number,
             inputFormatters: _wholeShillings,
-            decoration: InputDecoration(labelText: 'Monthly rent', prefixText: 'KES ', errorText: _error),
+            decoration: const InputDecoration(labelText: 'Monthly rent', prefixText: 'KES '),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _deposit,
+            keyboardType: TextInputType.number,
+            inputFormatters: _wholeShillings,
+            decoration: InputDecoration(labelText: 'Deposit', prefixText: 'KES ', errorText: _error),
             onSubmitted: (_) => _busy ? null : _save(),
           ),
           const SizedBox(height: 16),
@@ -105,11 +129,12 @@ class _ChangeRentSheetState extends State<_ChangeRentSheet> {
   }
 }
 
-/// A building's details and every house's rent, on one screen with one Save.
+/// A building's details and every house's rent and deposit, on one screen
+/// with one Save.
 ///
-/// WHY rents live here: the landlord looks for "edit the building" to fix a
-/// rent set wrong at setup, and a separate rents screen was one more place to
-/// find. The rent part keeps "Set every house to" for a building-wide change.
+/// WHY rents live here: the landlord looks for "edit the building" to fix
+/// figures set wrong at setup, and a separate screen was one more place to
+/// find. "Set every house to" makes a building-wide change one step.
 class EditPropertyScreen extends ConsumerStatefulWidget {
   const EditPropertyScreen({
     super.key,
@@ -133,11 +158,15 @@ class _EditPropertyScreenState extends ConsumerState<EditPropertyScreen> {
   List<Map<String, dynamic>> _caretakers = const [];
   bool _caretakersLoading = true;
 
-  late final _controllers = {
-    for (final u in widget.units) u['id']: TextEditingController(text: toDouble(u['rent_amount']).toStringAsFixed(0)),
+  late final _rents = {
+    for (final u in widget.units) u['id']: TextEditingController(text: _shillings(u['rent_amount'])),
+  };
+  late final _deposits = {
+    for (final u in widget.units) u['id']: TextEditingController(text: _shillings(u['deposit_amount'])),
   };
   final _errors = <Object, String>{};
-  final _everyHouse = TextEditingController();
+  final _everyRent = TextEditingController();
+  final _everyDeposit = TextEditingController();
   String? _nameError;
   bool _busy = false;
 
@@ -149,11 +178,9 @@ class _EditPropertyScreenState extends ConsumerState<EditPropertyScreen> {
 
   @override
   void dispose() {
-    for (final c in _controllers.values) {
+    for (final c in [..._rents.values, ..._deposits.values, _everyRent, _everyDeposit, _name]) {
       c.dispose();
     }
-    _everyHouse.dispose();
-    _name.dispose();
     super.dispose();
   }
 
@@ -183,23 +210,36 @@ class _EditPropertyScreenState extends ConsumerState<EditPropertyScreen> {
     if (mounted) setState(() => _caretakerId = created['id'] as int?);
   }
 
-  /// Fills every house's box; nothing is saved until Save, so a few can
-  /// still be set differently first.
+  static bool _isAmount(String text) => double.tryParse(text.trim().replaceAll(',', '')) != null;
+
+  bool get _canApply => _isAmount(_everyRent.text) || _isAmount(_everyDeposit.text);
+
+  /// Fills every house's boxes with whichever amounts were typed; nothing is
+  /// saved until Save, so a few can still be set differently first.
   void _applyToAll() {
-    final amount = _everyHouse.text.trim();
-    if (double.tryParse(amount.replaceAll(',', '')) == null) return;
     FocusScope.of(context).unfocus();
     setState(() {
-      for (final c in _controllers.values) {
-        c.text = amount;
+      if (_isAmount(_everyRent.text)) {
+        for (final c in _rents.values) {
+          c.text = _everyRent.text.trim();
+        }
+      }
+      if (_isAmount(_everyDeposit.text)) {
+        for (final c in _deposits.values) {
+          c.text = _everyDeposit.text.trim();
+        }
       }
     });
   }
 
-  bool _changed(Map<String, dynamic> unit) {
-    final typed = double.tryParse(_controllers[unit['id']]!.text.replaceAll(',', ''));
-    return typed != null && typed != toDouble(unit['rent_amount']);
+  static bool _differs(TextEditingController c, Object? was) {
+    final typed = double.tryParse(c.text.replaceAll(',', ''));
+    return typed != null && typed != toDouble(was);
   }
+
+  bool _rentChanged(Map<String, dynamic> u) => _differs(_rents[u['id']]!, u['rent_amount']);
+  bool _depositChanged(Map<String, dynamic> u) => _differs(_deposits[u['id']]!, u['deposit_amount']);
+  bool _changed(Map<String, dynamic> u) => _rentChanged(u) || _depositChanged(u);
 
   bool get _detailsChanged => _name.text.trim() != widget.name || _caretakerId != widget.caretakerId;
 
@@ -236,7 +276,10 @@ class _EditPropertyScreenState extends ConsumerState<EditPropertyScreen> {
     }
     for (final unit in changed) {
       try {
-        await dio.post(_setRentUrl(unit['id']), data: {'rent_amount': _controllers[unit['id']]!.text.trim()});
+        await dio.post(_amountsUrl(unit['id']), data: {
+          if (_rentChanged(unit)) 'rent_amount': _rents[unit['id']]!.text.trim(),
+          if (_depositChanged(unit)) 'deposit_amount': _deposits[unit['id']]!.text.trim(),
+        });
       } catch (e) {
         _errors[unit['id']] = apiError(e);
       }
@@ -249,6 +292,20 @@ class _EditPropertyScreenState extends ConsumerState<EditPropertyScreen> {
       setState(() => _busy = false);
     }
   }
+
+  Widget _amountField(TextEditingController c, String label, Object? was, {String? error}) => TextField(
+        controller: c,
+        keyboardType: TextInputType.number,
+        inputFormatters: _wholeShillings,
+        onChanged: (_) => setState(() {}),
+        decoration: InputDecoration(
+          labelText: label,
+          prefixText: 'KES ',
+          errorText: error,
+          errorMaxLines: 3,
+          helperText: _differs(c, was) ? 'Was ${formatCurrency(toDouble(was))}' : null,
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -300,63 +357,68 @@ class _EditPropertyScreenState extends ConsumerState<EditPropertyScreen> {
                 ),
               ),
               const SizedBox(height: 24),
-              const KasaSectionHeader('Rents'),
+              const KasaSectionHeader('Rent and deposit'),
               const SizedBox(height: 4),
               Text(
-                'Tenants are charged a new rent from their next bill; bills already sent stay as they are.',
+                'Tenants\' next bills use a new rent, and their deposit records are corrected. '
+                'Bills already sent stay as they are.',
                 style: KasaFont.sans(fontSize: 14, color: cs.kasaTextSub),
               ),
               const SizedBox(height: 12),
               KasaCard(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                  // A heading, not a floating label: with a prefix the label
-                  // was drawn over the amount once the field lost focus.
+                  // Headings, not floating labels: with a prefix the label was
+                  // drawn over the amount once the field lost focus.
                   Text('Set every house to (KES)', style: heading),
                   const SizedBox(height: 8),
-                  TextField(
-                    controller: _everyHouse,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: _wholeShillings,
-                    onChanged: (_) => setState(() {}),
-                    onSubmitted: (_) => _applyToAll(),
-                    decoration: const InputDecoration(hintText: 'e.g. 3000'),
-                  ),
+                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _everyRent,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: _wholeShillings,
+                        onChanged: (_) => setState(() {}),
+                        decoration: const InputDecoration(hintText: 'Rent'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextField(
+                        controller: _everyDeposit,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: _wholeShillings,
+                        onChanged: (_) => setState(() {}),
+                        onSubmitted: (_) => _canApply ? _applyToAll() : null,
+                        decoration: const InputDecoration(hintText: 'Deposit'),
+                      ),
+                    ),
+                  ]),
+                  const SizedBox(height: 4),
+                  Text('Leave either empty to keep each house\'s own.',
+                      style: KasaFont.sans(fontSize: 13, color: cs.kasaTextSub)),
                   const SizedBox(height: 12),
                   KasaButton(
                     label: 'Apply to all ${widget.units.length}',
                     variant: KasaButtonVariant.secondary,
-                    onTap: double.tryParse(_everyHouse.text.replaceAll(',', '')) == null ? null : _applyToAll,
+                    onTap: _canApply ? _applyToAll : null,
                   ),
                 ]),
               ),
               const SizedBox(height: 16),
               Text('Each house', style: heading),
-              const SizedBox(height: 12),
               for (final unit in widget.units) ...[
+                const SizedBox(height: 16),
+                Text('${unit['unit_number']}',
+                    style: KasaFont.sans(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
+                const SizedBox(height: 8),
                 Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  SizedBox(
-                    width: 64,
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: 16),
-                      child: Text('${unit['unit_number']}',
-                          style: KasaFont.sans(fontSize: 16, fontWeight: FontWeight.w600, color: cs.onSurface)),
-                    ),
-                  ),
+                  Expanded(child: _amountField(_rents[unit['id']]!, 'Rent', unit['rent_amount'])),
+                  const SizedBox(width: 8),
                   Expanded(
-                    child: TextField(
-                      controller: _controllers[unit['id']],
-                      keyboardType: TextInputType.number,
-                      inputFormatters: _wholeShillings,
-                      onChanged: (_) => setState(() {}),
-                      decoration: InputDecoration(
-                        prefixText: 'KES ',
-                        errorText: _errors[unit['id']],
-                        helperText: _changed(unit) ? 'Was ${formatCurrency(toDouble(unit['rent_amount']))}' : null,
-                      ),
-                    ),
+                    child: _amountField(_deposits[unit['id']]!, 'Deposit', unit['deposit_amount'],
+                        error: _errors[unit['id']]),
                   ),
                 ]),
-                const SizedBox(height: 12),
               ],
             ],
           ),

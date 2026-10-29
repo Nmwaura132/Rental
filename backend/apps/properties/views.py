@@ -187,35 +187,70 @@ class UnitViewSet(viewsets.ModelViewSet):
             .distinct()
         )
 
-    @action(detail=True, methods=["post"], url_path="set-rent")
-    def set_rent(self, request, pk=None):
-        """Change a house's monthly rent, for its current tenant too.
+    @action(detail=True, methods=["post"], url_path="set-amounts")
+    def set_amounts(self, request, pk=None):
+        """Change a house's monthly rent and/or deposit, for its current tenant too.
 
-        POST {"rent_amount"} -> the unit and, if let, the tenancy billed from it.
+        POST {"rent_amount"?, "deposit_amount"?} -> the unit and, if let, its tenancy.
 
-        WHY both at once: bills use the tenancy's rent, not the unit's, so
-        changing only the unit left the tenant billed the old amount. Bills
-        already raised are left as they are; the change applies from the next.
+        WHY both at once: bills use the tenancy's rent and the deposit refund
+        uses the tenancy's deposit, not the unit's, so changing only the unit
+        left the tenant on the old figures. Bills already raised are left as
+        they are. A deposit already settled at move-out is not changed.
         """
         from decimal import Decimal, InvalidOperation
 
         from django.db import transaction
 
         unit = self.get_object()  # landlord-only, and only their own units
-        try:
-            rent = Decimal(str(request.data.get("rent_amount", "")).replace(",", ""))
-        except InvalidOperation:
-            rent = Decimal("0")
-        if rent <= 0 or rent >= Decimal("100000000"):
+
+        def amount(field, *, allow_zero):
+            raw = request.data.get(field)
+            if raw in (None, ""):
+                return None
+            try:
+                value = Decimal(str(raw).replace(",", ""))
+            except InvalidOperation:
+                return "bad"
+            if value < 0 or (value == 0 and not allow_zero) or value >= Decimal("100000000"):
+                return "bad"
+            return value.quantize(Decimal("0.01"))
+
+        rent = amount("rent_amount", allow_zero=False)
+        deposit = amount("deposit_amount", allow_zero=True)
+        if rent == "bad":
             return Response({"error": "Enter the monthly rent in shillings."}, status=400)
-        rent = rent.quantize(Decimal("0.01"))
+        if deposit == "bad":
+            return Response({"error": "Enter the deposit in shillings, or 0 for none."}, status=400)
+        if rent is None and deposit is None:
+            return Response({"error": "Give a new rent or deposit."}, status=400)
+
+        tenancy = Tenancy.objects.filter(unit=unit, status=Tenancy.Status.ACTIVE).first()
+        if deposit is not None and tenancy and hasattr(tenancy, "deposit_settlement"):
+            return Response({"error": "This tenant's deposit has already been settled."}, status=400)
 
         with transaction.atomic():
-            unit.rent_amount = rent
-            unit.save(update_fields=["rent_amount"])
-            tenancies = Tenancy.objects.filter(unit=unit, status=Tenancy.Status.ACTIVE)
-            moved = tenancies.update(rent_amount=rent)
-        return Response({"rent_amount": rent, "tenancy_updated": bool(moved)})
+            unit_fields, tenancy_fields = [], []
+            if rent is not None:
+                unit.rent_amount = rent
+                unit_fields.append("rent_amount")
+            if deposit is not None:
+                unit.deposit_amount = deposit
+                unit_fields.append("deposit_amount")
+            unit.save(update_fields=unit_fields)
+            if tenancy:
+                if rent is not None:
+                    tenancy.rent_amount = rent
+                    tenancy_fields.append("rent_amount")
+                if deposit is not None:
+                    tenancy.deposit_amount = deposit
+                    tenancy_fields.append("deposit_amount")
+                tenancy.save(update_fields=tenancy_fields)
+        return Response({
+            "rent_amount": unit.rent_amount,
+            "deposit_amount": unit.deposit_amount,
+            "tenancy_updated": tenancy is not None,
+        })
 
     @action(detail=True, methods=["get"], url_path="occupancy")
     def occupancy(self, request, pk=None):

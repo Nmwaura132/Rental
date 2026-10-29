@@ -25,12 +25,12 @@ class _Server implements HttpClientAdapter {
 }
 
 const _units = [
-  {'id': 1, 'unit_number': 'G1', 'rent_amount': '2500.00'},
-  {'id': 2, 'unit_number': 'G2', 'rent_amount': '2500.00'},
-  {'id': 3, 'unit_number': '1A', 'rent_amount': '2500.00'},
+  {'id': 1, 'unit_number': 'G1', 'rent_amount': '2500.00', 'deposit_amount': '2500.00'},
+  {'id': 2, 'unit_number': 'G2', 'rent_amount': '2500.00', 'deposit_amount': '2500.00'},
+  {'id': 3, 'unit_number': '1A', 'rent_amount': '2500.00', 'deposit_amount': '2500.00'},
 ];
 
-Future<_Server> _pump(WidgetTester tester, Widget child, {Size size = const Size(390, 844), double textScale = 1}) async {
+Future<_Server> _pump(WidgetTester tester, Widget child, {Size size = const Size(390, 2400), double textScale = 1}) async {
   tester.view.physicalSize = Size(size.width * 3, size.height * 3);
   tester.view.devicePixelRatio = 3;
   tester.platformDispatcher.textScaleFactorTestValue = textScale;
@@ -50,9 +50,12 @@ Future<_Server> _pump(WidgetTester tester, Widget child, {Size size = const Size
 Widget _screen() => const EditPropertyScreen(
     propertyId: 8, name: 'Maria Goretti Apartments', caretakerId: null, units: _units);
 
-// Boxes in order: building name, set every house, then one per house.
-Finder _house(int i) => find.byType(TextField).at(2 + i);
+// Boxes in order: building name, every-house rent and deposit, then each
+// house's rent and deposit.
+Finder _house(int i) => find.byType(TextField).at(3 + 2 * i);
+Finder _houseDeposit(int i) => find.byType(TextField).at(4 + 2 * i);
 Finder get _everyHouse => find.byType(TextField).at(1);
+Finder get _everyDeposit => find.byType(TextField).at(2);
 
 Iterable<RequestOptions> _posts(_Server s) => s.requests.where((r) => r.method == 'POST');
 
@@ -61,7 +64,7 @@ void main() {
 
   testWidgets('lists every house with its rent', (tester) async {
     await _pump(tester, _screen());
-    expect(find.text('2500'), findsNWidgets(3));
+    expect(find.text('2500'), findsNWidgets(6));
   });
 
   testWidgets('saves only the houses changed', (tester) async {
@@ -70,7 +73,7 @@ void main() {
     await tester.pump();
     await tester.tap(find.text('Save 1 change'));
     await tester.pumpAndSettle();
-    expect(_posts(server).map((r) => r.path), ['/api/v1/properties/units/2/set-rent/']);
+    expect(_posts(server).map((r) => r.path), ['/api/v1/properties/units/2/set-amounts/']);
   });
 
   testWidgets('sends the new amount', (tester) async {
@@ -107,6 +110,26 @@ void main() {
     expect(_posts(server), isEmpty);
   });
 
+  testWidgets('a deposit can be changed on its own', (tester) async {
+    final server = await _pump(tester, _screen());
+    await tester.enterText(_houseDeposit(0), '5000');
+    await tester.pump();
+    await tester.tap(find.text('Save 1 change'));
+    await tester.pumpAndSettle();
+    expect(_posts(server).single.data, {'deposit_amount': '5000'});
+  });
+
+  testWidgets('one deposit can be applied to every house', (tester) async {
+    final server = await _pump(tester, _screen());
+    await tester.enterText(_everyDeposit, '5000');
+    await tester.pump();
+    await tester.tap(find.text('Apply to all 3'));
+    await tester.pump();
+    await tester.tap(find.text('Save 3 changes'));
+    await tester.pumpAndSettle();
+    expect(_posts(server).map((r) => r.data).toList(), List.filled(3, {'deposit_amount': '5000'}));
+  });
+
   testWidgets('renaming the building is saved with the rents', (tester) async {
     final server = await _pump(tester, _screen());
     await tester.enterText(find.byType(TextField).first, 'Maria Goretti Court');
@@ -122,14 +145,14 @@ void main() {
       tester,
       Consumer(builder: (context, ref, _) => Scaffold(
         body: TextButton(
-          onPressed: () => changeRent(context, ref, _units.first, hasTenant: true),
+          onPressed: () => changeAmounts(context, ref, _units.first, hasTenant: true),
           child: const Text('open'),
         ),
       )),
     );
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('from their next bill'), findsOneWidget);
+    expect(find.textContaining('next bill uses the new rent'), findsOneWidget);
   });
 
   for (final width in [360.0, 320.0]) {

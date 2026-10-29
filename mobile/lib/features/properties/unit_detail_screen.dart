@@ -72,7 +72,7 @@ class UnitDetailScreen extends ConsumerWidget {
 
     Future<void> changeThisRent() async {
       if (unit == null) return;
-      if (await changeRent(context, ref, unit, hasTenant: tenancy != null)) refresh();
+      if (await changeAmounts(context, ref, unit, hasTenant: tenancy != null)) refresh();
     }
 
     Future<void> deleteUnit() async {
@@ -190,7 +190,7 @@ class UnitDetailScreen extends ConsumerWidget {
                 }
               },
               itemBuilder: (_) => [
-                const PopupMenuItem(value: 'rent', child: Text('Change rent')),
+                const PopupMenuItem(value: 'rent', child: Text('Change rent or deposit')),
                 const PopupMenuItem(value: 'edit', child: Text('Edit unit')),
                 if (tenancy != null && tenancy['notice_effective_date'] == null)
                   const PopupMenuItem(value: 'notice', child: Text('Give notice')),
@@ -245,7 +245,7 @@ class _VacantBody extends StatelessWidget {
   final Map<String, dynamic> data;
   final bool isLandlord;
 
-  /// Landlords only: opens Change rent.
+  /// Landlords only: opens Change rent or deposit.
   final VoidCallback? onChangeRent;
 
   @override
@@ -261,9 +261,9 @@ class _VacantBody extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Column(children: [
             KasaKeyValue('Rent', _value(context, '${formatCurrency(toDouble(unit['rent_amount']))} / month')),
-            if (onChangeRent != null) _ChangeRentLink(onTap: onChangeRent!),
             if (isLandlord)
               KasaKeyValue('Deposit', _value(context, formatCurrency(toDouble(unit['deposit_amount'])))),
+            if (onChangeRent != null) _ChangeRentLink(onTap: onChangeRent!),
             ..._payRows(context, data),
           ]),
         ),
@@ -289,7 +289,7 @@ class _OccupiedBody extends StatelessWidget {
   final Map<String, dynamic> data;
   final bool isLandlord;
 
-  /// Landlords only: opens Change rent.
+  /// Landlords only: opens Change rent or deposit.
   final VoidCallback? onChangeRent;
 
   @override
@@ -416,7 +416,7 @@ class _TenantCard extends StatelessWidget {
   final Map<String, dynamic> tenancy;
   final bool isLandlord;
 
-  /// Landlords only: opens Change rent.
+  /// Landlords only: opens Change rent or deposit.
   final VoidCallback? onChangeRent;
 
   @override
@@ -558,7 +558,7 @@ class _ChangeRentLink extends StatelessWidget {
           // Flush with the labels above, and still a 44px target.
           style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(0, 44)),
           icon: const Icon(Icons.edit_outlined, size: 18),
-          label: const Text('Change rent'),
+          label: const Text('Change rent or deposit'),
         ),
       );
 }
