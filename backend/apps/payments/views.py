@@ -269,6 +269,23 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
         except DjangoValidationError as exc:
             return Response({"error": exc.messages[0]}, status=status.HTTP_400_BAD_REQUEST)
 
+        # WHY: while every payment is entered by hand, this SMS is the tenant's
+        # only proof that the landlord has it.
+        from apps.notifications.tasks import send_sms
+
+        invoice.refresh_from_db()
+        tenancy = invoice.tenancy
+        unit = tenancy.unit
+        how = "cash" if method == Payment.Method.CASH else "bank"
+        after = (
+            f"You still owe KES {invoice.balance:,.0f} on your {invoice.period_start:%B} bill."
+            if invoice.balance > 0 else f"Your {invoice.period_start:%B} bill is fully paid."
+        )
+        send_sms.delay(
+            tenancy.tenant_id,
+            f"Dear {tenancy.tenant.first_name}, your {how} payment of KES {amount:,.0f} for "
+            f"{unit.property.name} Unit {unit.unit_number} has been received. {after}",
+        )
         return Response(PaymentSerializer(payment).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"], url_path="etims-receipt",
