@@ -35,6 +35,13 @@ class MoreScreen extends ConsumerWidget {
             subtitle: 'Everyone living in your units',
             onTap: () => context.push('/tenants'),
           ),
+          if (role == 'landlord')
+            _Row(
+              icon: Icons.sms_outlined,
+              title: 'Message tenants',
+              subtitle: 'An SMS to everyone, a building or one tenant',
+              onTap: () => context.push('/message-tenants'),
+            ),
         ]),
         _Group('Finance', [
           _Row(
