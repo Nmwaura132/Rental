@@ -62,8 +62,8 @@ class TestTheReceipt:
             "",
             f"{invoice.tenancy.unit.property.name} {invoice.tenancy.unit.unit_number}",
             "Amount: KES 5,000",
-            "M-Pesa code: SIR4K7X2QP",
-            f"Confirmed: {today.day} {today:%b %Y}",
+            "M-Pesa: SIR4K7X2QP",
+            f"Confirmed: {today.day} {today:%b}",
             "",
             f"{invoice.period_start:%B} bill: KES {left:,.0f} left",
         ]

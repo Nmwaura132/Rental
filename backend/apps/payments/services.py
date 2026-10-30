@@ -112,7 +112,7 @@ def receipt_text(parts: list, credit=None) -> str:
     unit = tenancy.unit
     total = sum((part.amount for part in parts), credit.amount if credit else Decimal("0"))
     how = {
-        Payment.Method.MPESA: f"M-Pesa code: {first.mpesa_receipt_number}",
+        Payment.Method.MPESA: f"M-Pesa: {first.mpesa_receipt_number}",
         Payment.Method.BANK: f"Bank ref: {first.bank_reference}",
         Payment.Method.CASH: "Paid by: Cash",
     }[first.method]
@@ -124,7 +124,7 @@ def receipt_text(parts: list, credit=None) -> str:
         f"{unit.property.name} {unit.unit_number}",
         f"Amount: KES {total:,.0f}",
         how,
-        f"Confirmed: {paid_on.day} {paid_on:%b %Y}",
+        f"Confirmed: {paid_on.day} {paid_on:%b}",
         "",
     ]
     for part in parts:
