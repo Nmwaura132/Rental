@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:dio/dio.dart';
 import '../../core/api/api_client.dart';
+import '../../core/providers/user_role_provider.dart';
 import '../../core/api/pagination.dart';
 import '../../core/constants.dart';
 import '../../core/theme/kasa_tokens.dart';
@@ -15,6 +16,7 @@ import '../../core/utils/phone.dart';
 import '../../core/widgets/kasa_primitives.dart';
 import '../../shared/widgets/shimmer_loading.dart';
 import 'deposit_settlement_screen.dart';
+import 'tenant_removal.dart';
 import '../../core/utils/text.dart';
 
 final tenanciesProvider =
@@ -459,6 +461,12 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                                           icon: Icon(Icons.more_vert,
                                               size: 20, color: cs.kasaTextSub),
                                           onSelected: (action) async {
+                                            if (action == 'delete_tenant') {
+                                              if (await deleteTenant(context, ref, tenancy['tenant'] as int)) {
+                                                ref.invalidate(tenanciesProvider);
+                                              }
+                                              return;
+                                            }
                                             if (action == 'settle_deposit') {
                                               await Navigator.of(context,
                                                       rootNavigator: true)
@@ -626,6 +634,14 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
                                                   title: Text('Terminate',
                                                       style: TextStyle(
                                                           color: cs.error)),
+                                                ),
+                                              ),
+                                            if (ref.read(userRoleProvider).valueOrNull == 'landlord')
+                                              PopupMenuItem(
+                                                value: 'delete_tenant',
+                                                child: ListTile(
+                                                  leading: Icon(Icons.delete_outline, color: cs.error),
+                                                  title: Text('Delete tenant', style: TextStyle(color: cs.error)),
                                                 ),
                                               ),
                                           ],

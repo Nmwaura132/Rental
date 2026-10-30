@@ -14,6 +14,7 @@ from .views import (
     SignupCodeView,
     SignupView,
     TenantListView,
+    TenantRemovalView,
     UploadIdPhotoView,
 )
 
@@ -31,6 +32,7 @@ urlpatterns = [
     path("password-reset/request/", PasswordResetRequestView.as_view(), name="password-reset-request"),
     path("password-reset/", PasswordResetView.as_view(), name="password-reset"),
     path("tenants/", TenantListView.as_view(), name="tenant-list"),
+    path("tenants/<int:pk>/", TenantRemovalView.as_view(), name="tenant-remove"),
     path("caretakers/", CaretakerListView.as_view(), name="caretaker-list"),
     path("upload-id/", UploadIdPhotoView.as_view(), name="upload-id"),
 ]

@@ -15,6 +15,7 @@ import '../../core/widgets/kasa_primitives.dart';
 import '../payments/invoices_screen.dart';
 import '../payments/unplaced_payments.dart';
 import '../tenants/deposit_settlement_screen.dart';
+import '../tenants/tenant_removal.dart';
 import '../tenants/tenants_screen.dart';
 import 'properties_screen.dart';
 import 'property_detail_screen.dart';
@@ -187,6 +188,9 @@ class UnitDetailScreen extends ConsumerWidget {
                     refresh();
                   case 'delete':
                     await deleteUnit();
+                  case 'delete_tenant':
+                    final tenantId = (data?['tenant'] as Map?)?['id'];
+                    if (tenantId is int && await deleteTenant(context, ref, tenantId)) refresh();
                 }
               },
               itemBuilder: (_) => [
@@ -198,6 +202,8 @@ class UnitDetailScreen extends ConsumerWidget {
                   const PopupMenuItem(value: 'settle', child: Text('Settle deposit')),
                 if (tenancy == null)
                   const PopupMenuItem(value: 'delete', child: Text('Delete unit')),
+                if (tenancy != null && isLandlord)
+                  const PopupMenuItem(value: 'delete_tenant', child: Text('Delete tenant')),
               ],
             ),
           const SizedBox(width: 4),

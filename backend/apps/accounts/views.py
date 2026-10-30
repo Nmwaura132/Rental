@@ -11,7 +11,7 @@ from drf_spectacular.utils import extend_schema
 
 logger = logging.getLogger(__name__)
 
-from apps.core.permissions import IsLandlordOrCaretaker
+from apps.core.permissions import IsLandlord, IsLandlordOrCaretaker
 
 from .serializers import (
     TenantPickerSerializer,
@@ -612,3 +612,44 @@ class CodeLoginView(APIView):
         if closed_to(user):
             return Response({"error": APP_CLOSED_TO_TENANTS}, status=status.HTTP_403_FORBIDDEN)
         return Response(_session_for(user))
+
+
+@extend_schema(exclude=True)
+class TenantRemovalView(APIView):
+    """
+    GET    /api/v1/auth/tenants/<id>/ -> what deleting this tenant would remove
+    DELETE /api/v1/auth/tenants/<id>/ -> delete them, their bills and history
+
+    Landlords only, and only their own tenants (see tenant_removal).
+    """
+    permission_classes = [IsLandlord]
+
+    def _tenant(self, pk):
+        from . import tenant_removal
+
+        tenant = User.objects.filter(pk=pk, role=User.Role.TENANT).first()
+        if tenant is None or not tenant_removal.belongs_to(tenant, self.request.user):
+            return None
+        return tenant
+
+    def get(self, request, pk):
+        from . import tenant_removal
+
+        tenant = self._tenant(pk)
+        if tenant is None:
+            return Response({"error": "Tenant not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(tenant_removal.summary(tenant))
+
+    def delete(self, request, pk):
+        from . import tenant_removal
+
+        tenant = self._tenant(pk)
+        if tenant is None:
+            return Response({"error": "Tenant not found."}, status=status.HTTP_404_NOT_FOUND)
+        found = tenant_removal.summary(tenant)
+        if not found["can_delete"]:
+            return Response({"error": found["reason"]}, status=status.HTTP_400_BAD_REQUEST)
+        logger.info("Landlord %s deleted tenant %s and their records: %s", request.user.pk, tenant.pk,
+                    {k: found[k] for k in ("bills", "payments", "paid")})
+        tenant_removal.remove(tenant)
+        return Response(status=status.HTTP_204_NO_CONTENT)
