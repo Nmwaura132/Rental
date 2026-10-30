@@ -148,3 +148,51 @@ class TestEnteringSomeoneAlreadyLivingThere:
     def test_someone_moving_in_this_month_is_still_billed(self, landlord, tenant, unit):
         response = self._enter(landlord, tenant, unit, date.today().replace(day=1))
         assert Invoice.objects.filter(tenancy_id=response.data["id"]).exists()
+
+
+class TestRentAlreadyPaidOnMoveIn:
+    """The landlord took the first month's rent in hand before adding them."""
+
+    def _move_in(self, landlord, tenant, unit, **extra):
+        from rest_framework.test import APIClient
+
+        tenant.created_by = landlord
+        tenant.save(update_fields=["created_by"])
+        client = APIClient()
+        client.force_authenticate(user=landlord)
+        response = client.post(
+            "/api/v1/tenants/tenancies/",
+            {"tenant": tenant.id, "unit": unit.id, "start_date": str(date.today()),
+             "rent_amount": "15000.00", "deposit_amount": "15000.00", **extra},
+            format="json",
+        )
+        return Invoice.objects.get(tenancy_id=response.data["id"])
+
+    def test_the_rent_is_recorded_as_received(self, landlord, tenant, unit):
+        bill = self._move_in(landlord, tenant, unit, rent_paid=True)
+        assert bill.payments.get().amount == Decimal("15000.00")
+
+    def test_as_cash_the_landlord_entered(self, landlord, tenant, unit):
+        bill = self._move_in(landlord, tenant, unit, rent_paid=True)
+        payment = bill.payments.get()
+        assert (payment.method, payment.recorded_by_id) == ("cash", landlord.id)
+
+    def test_only_the_deposit_is_left_to_pay(self, landlord, tenant, unit):
+        bill = self._move_in(landlord, tenant, unit, rent_paid=True)
+        assert bill.balance == Decimal("15000.00")
+
+    def test_with_the_deposit_paid_too_nothing_is_owed(self, landlord, tenant, unit):
+        bill = self._move_in(landlord, tenant, unit, rent_paid=True, deposit_paid=True)
+        assert bill.balance == Decimal("0")
+
+    def test_no_sms_is_sent(self, landlord, tenant, unit, monkeypatch):
+        from apps.notifications import tasks as notification_tasks
+
+        sent = []
+        monkeypatch.setattr(notification_tasks.send_sms, "delay", lambda *a, **k: sent.append(a))
+        self._move_in(landlord, tenant, unit, rent_paid=True)
+        assert sent == []
+
+    def test_without_it_the_rent_is_owed(self, landlord, tenant, unit):
+        bill = self._move_in(landlord, tenant, unit)
+        assert not bill.payments.exists()

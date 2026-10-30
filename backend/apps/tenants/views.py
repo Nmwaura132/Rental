@@ -29,6 +29,30 @@ def _validate_managed_tenant(user, tenant):
     raise PermissionDenied("You cannot create tenancies for this tenant.")
 
 
+def _record_first_rent(tenancy, invoice, landlord):
+    """The first month's rent the landlord already took in hand, recorded as
+    a cash payment on the move-in bill.
+
+    WHY a payment and not a bill without rent: the tenant's history then shows
+    the rent as received, which is what happened. No receipt SMS, like adding
+    a tenant: the landlord is setting up their records.
+    """
+    from django.db import transaction
+
+    from apps.payments.models import Payment
+    from apps.payments.services import apply_confirmed_payment
+
+    with transaction.atomic():
+        apply_confirmed_payment(
+            invoice_id=invoice.pk,
+            method=Payment.Method.CASH,
+            amount=tenancy.rent_amount,
+            idempotency_key=f"move-in-rent:{tenancy.pk}",
+            paid_at=timezone.now(),
+            recorded_by=landlord,
+        )
+
+
 class TenancyViewSet(viewsets.ModelViewSet):
     serializer_class = TenancySerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -75,6 +99,7 @@ class TenancyViewSet(viewsets.ModelViewSet):
         if user.is_caretaker and unit.property.caretaker_id != user.id:
             raise PermissionDenied("You cannot create tenancies for this unit.")
         _validate_managed_tenant(user, tenant)
+        rent_paid = serializer.validated_data.pop("rent_paid", False)
         tenancy = serializer.save()
 
         # WHY the first invoice is raised here and not in the signal beside
@@ -84,13 +109,15 @@ class TenancyViewSet(viewsets.ModelViewSet):
         # deliberate act by the landlord, not an occupancy invariant.
         # WHY not for a start before this month: that is someone already living
         # there being entered into Kasa, not moving in. A move-in bill dated
-        # back to their start, and a "welcome" SMS, would both be wrong; they
-        # are billed from the next monthly run like everyone else.
+        # back to their start would be wrong; they are billed from the next
+        # monthly run like everyone else.
         started = tenancy.start_date or timezone.localdate()
         moving_in = started >= timezone.localdate().replace(day=1)
         if tenancy.status == Tenancy.Status.ACTIVE and moving_in:
             try:
-                create_move_in_invoice(tenancy)
+                invoice, _ = create_move_in_invoice(tenancy)
+                if rent_paid:
+                    _record_first_rent(tenancy, invoice, user)
             except Exception:
                 # The tenancy is saved and sound; failing the request would
                 # throw it away over a billing problem the landlord can fix by
@@ -98,6 +125,7 @@ class TenancyViewSet(viewsets.ModelViewSet):
                 logger.exception("Move-in invoice failed for tenancy %s", tenancy.pk)
 
     def perform_update(self, serializer):
+        serializer.validated_data.pop("rent_paid", None)
         unit = serializer.validated_data.get("unit", serializer.instance.unit)
         tenant = serializer.validated_data.get("tenant", serializer.instance.tenant)
         user = self.request.user

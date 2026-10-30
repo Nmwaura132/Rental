@@ -843,6 +843,7 @@ class _AddTenantFormState extends ConsumerState<_AddTenantForm> {
   bool get _alreadyLiving =>
       _startDate.isBefore(DateTime(DateTime.now().year, DateTime.now().month));
   bool _depositPaid = false;
+  bool _rentPaid = false;
   Map<String, dynamic>? _unit;
   final _uiDate = DateFormat('dd MMM yyyy');
   final _apiDateFmt = DateFormat('yyyy-MM-dd');
@@ -918,15 +919,18 @@ class _AddTenantFormState extends ConsumerState<_AddTenantForm> {
         'rent_amount': rent,
         'deposit_amount': deposit,
         'deposit_paid': _depositPaid,
+        'rent_paid': _rentPaid && !_alreadyLiving,
       });
     } catch (_) {
       return null;
     }
-    final total = _depositPaid
-        ? (num.tryParse('$rent') ?? 0)
-        : (num.tryParse('$rent') ?? 0) + (num.tryParse('$deposit') ?? 0);
-    return 'Tenant added. Invoice of '
-        'KES ${NumberFormat('#,###').format(total)} sent to them.';
+    if (_alreadyLiving) return 'Tenant added. Their bills start with next month.';
+    final total = (_rentPaid ? 0 : (num.tryParse('$rent') ?? 0)) +
+        (_depositPaid ? 0 : (num.tryParse('$deposit') ?? 0));
+    // Nothing is texted to them on adding, so the message must not say it was.
+    if (total == 0) return 'Tenant added. Their move-in is fully paid.';
+    return 'Tenant added. Their move-in bill of KES ${NumberFormat('#,###').format(total)} '
+        'is in Money; nothing has been texted to them.';
   }
 
   Future<void> _submit() async {
@@ -1243,6 +1247,7 @@ class _AddTenantFormState extends ConsumerState<_AddTenantForm> {
                       _MoveInSummary(
                         unit: _unit!,
                         depositPaid: _depositPaid,
+                        rentPaid: _rentPaid,
                       ),
                     const SizedBox(height: 8),
                     InkWell(
@@ -1289,6 +1294,19 @@ class _AddTenantFormState extends ConsumerState<_AddTenantForm> {
                         style: TextStyle(fontSize: 11),
                       ),
                     ),
+                    // Only for a move-in: someone already living here gets no
+                    // move-in bill, so there is no first rent to mark paid.
+                    if (!_alreadyLiving)
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: _rentPaid,
+                        onChanged: (v) => setState(() => _rentPaid = v),
+                        title: const Text("First month's rent already paid"),
+                        subtitle: const Text(
+                          'Recorded as cash you received. Leave off to bill it',
+                          style: TextStyle(fontSize: 11),
+                        ),
+                      ),
                     const SizedBox(height: 4),
                   ],
                 ],
@@ -1372,8 +1390,14 @@ class _AddTenancyDialogState extends ConsumerState<_AddTenancyDialog> {
   final _rentCtrl = TextEditingController();
   final _depositCtrl = TextEditingController();
   bool _depositPaid = false;
+  bool _rentPaid = false;
   final _notesCtrl = TextEditingController();
   bool _submitting = false;
+
+  /// Started before this month: entered into Kasa, not moving in, so no
+  /// move-in bill and no first rent to mark paid.
+  bool get _alreadyLiving =>
+      _startDate.isBefore(DateTime(DateTime.now().year, DateTime.now().month));
 
   final _fmt = DateFormat('dd MMM yyyy');
   final _apiDate = DateFormat('yyyy-MM-dd');
@@ -1519,6 +1543,7 @@ class _AddTenancyDialogState extends ConsumerState<_AddTenancyDialog> {
         'rent_amount': rent,
         'deposit_amount': deposit,
         'deposit_paid': _depositPaid,
+        'rent_paid': _rentPaid && !_alreadyLiving,
         'notes': _notesCtrl.text.trim(),
       });
       widget.onDone();
@@ -1694,6 +1719,14 @@ class _AddTenancyDialogState extends ConsumerState<_AddTenancyDialog> {
                               setState(() => _depositPaid = v ?? false),
                           controlAffinity: ListTileControlAffinity.leading,
                         ),
+                        if (!_alreadyLiving)
+                          CheckboxListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text("First month's rent already paid"),
+                            value: _rentPaid,
+                            onChanged: (v) => setState(() => _rentPaid = v ?? false),
+                            controlAffinity: ListTileControlAffinity.leading,
+                          ),
                       ],
                     ),
                   ),
@@ -1804,10 +1837,11 @@ class _IdPhotoTile extends StatelessWidget {
 /// What the tenant will be billed to move in. Shown before the landlord
 /// commits, so the figures are never a surprise on either side.
 class _MoveInSummary extends StatelessWidget {
-  const _MoveInSummary({required this.unit, required this.depositPaid});
+  const _MoveInSummary({required this.unit, required this.depositPaid, required this.rentPaid});
 
   final Map<String, dynamic> unit;
   final bool depositPaid;
+  final bool rentPaid;
 
   @override
   Widget build(BuildContext context) {
@@ -1815,7 +1849,7 @@ class _MoveInSummary extends StatelessWidget {
     final money = NumberFormat('#,###');
     final rent = num.tryParse('${unit['rent_amount']}') ?? 0;
     final deposit = num.tryParse('${unit['deposit_amount']}') ?? 0;
-    final total = depositPaid ? rent : rent + deposit;
+    final total = (rentPaid ? 0 : rent) + (depositPaid ? 0 : deposit);
 
     Widget row(String label, String value, {bool strong = false}) => Padding(
           padding: const EdgeInsets.symmetric(vertical: 3),
@@ -1852,7 +1886,7 @@ class _MoveInSummary extends StatelessWidget {
       child: Column(
         children: [
           row('Unit ${unit['unit_number']} — first month rent',
-              'KES ${money.format(rent)}'),
+              rentPaid ? 'Paid' : 'KES ${money.format(rent)}'),
           if (!depositPaid)
             row('Security deposit', 'KES ${money.format(deposit)}'),
           const Divider(height: 14),
