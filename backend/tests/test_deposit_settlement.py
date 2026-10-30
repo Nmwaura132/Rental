@@ -63,7 +63,7 @@ def _fresh_tenancy(tenant, unit):
 class TestTheDepositIsKnownToBeHeld:
     def test_paying_the_move_in_bill_marks_the_deposit_held(self, tenant, unit):
         fresh = _fresh_tenancy(tenant, unit)
-        invoice, _ = create_move_in_invoice(fresh, notify=False)
+        invoice, _ = create_move_in_invoice(fresh)
         apply_confirmed_payment(
             invoice_id=invoice.pk, method=Payment.Method.MPESA, amount=invoice.amount_due,
             idempotency_key="dep:full", paid_at=timezone.now(),
@@ -73,7 +73,7 @@ class TestTheDepositIsKnownToBeHeld:
 
     def test_paying_only_the_rent_part_does_not(self, tenant, unit):
         fresh = _fresh_tenancy(tenant, unit)
-        invoice, _ = create_move_in_invoice(fresh, notify=False)
+        invoice, _ = create_move_in_invoice(fresh)
         apply_confirmed_payment(
             invoice_id=invoice.pk, method=Payment.Method.MPESA, amount=Decimal("15000.00"),
             idempotency_key="dep:part", paid_at=timezone.now(),

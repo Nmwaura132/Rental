@@ -29,34 +29,34 @@ def fresh_tenancy(db, tenant, unit):
 
 class TestWhatIsBilled:
     def test_rent_and_deposit_are_billed_together(self, fresh_tenancy):
-        invoice, _ = create_move_in_invoice(fresh_tenancy, notify=False)
+        invoice, _ = create_move_in_invoice(fresh_tenancy)
         assert invoice.amount_due == Decimal("45000.00")
 
     def test_a_paid_deposit_is_not_billed_again(self, fresh_tenancy):
         fresh_tenancy.deposit_paid = True
         fresh_tenancy.save(update_fields=["deposit_paid"])
-        invoice, _ = create_move_in_invoice(fresh_tenancy, notify=False)
+        invoice, _ = create_move_in_invoice(fresh_tenancy)
         assert invoice.amount_due == Decimal("15000.00")
 
     def test_the_deposit_is_shown_as_its_own_line(self, fresh_tenancy):
-        invoice, _ = create_move_in_invoice(fresh_tenancy, notify=False)
+        invoice, _ = create_move_in_invoice(fresh_tenancy)
         deposit_lines = invoice.line_items.filter(charge_type="deposit")
         assert deposit_lines.get().amount == Decimal("30000.00")
 
     def test_rent_is_shown_as_its_own_line(self, fresh_tenancy):
-        invoice, _ = create_move_in_invoice(fresh_tenancy, notify=False)
+        invoice, _ = create_move_in_invoice(fresh_tenancy)
         assert invoice.line_items.get(charge_type="rent").amount == Decimal("15000.00")
 
     def test_no_deposit_line_when_already_paid(self, fresh_tenancy):
         fresh_tenancy.deposit_paid = True
         fresh_tenancy.save(update_fields=["deposit_paid"])
-        invoice, _ = create_move_in_invoice(fresh_tenancy, notify=False)
+        invoice, _ = create_move_in_invoice(fresh_tenancy)
         assert not invoice.line_items.filter(charge_type="deposit").exists()
 
 
 class TestDueDate:
     def test_a_move_in_today_is_due_today(self, fresh_tenancy):
-        invoice, _ = create_move_in_invoice(fresh_tenancy, notify=False)
+        invoice, _ = create_move_in_invoice(fresh_tenancy)
         assert invoice.due_date == date.today()
 
     def test_a_backdated_tenancy_is_not_born_overdue(self, fresh_tenancy):
@@ -65,25 +65,25 @@ class TestDueDate:
         # immediately trigger the overdue chase.
         fresh_tenancy.start_date = date.today() - timedelta(days=90)
         fresh_tenancy.save(update_fields=["start_date"])
-        invoice, _ = create_move_in_invoice(fresh_tenancy, notify=False)
+        invoice, _ = create_move_in_invoice(fresh_tenancy)
         assert invoice.due_date == date.today()
 
 
 class TestRaisedOnlyOnce:
     def test_calling_twice_does_not_bill_twice(self, fresh_tenancy):
-        create_move_in_invoice(fresh_tenancy, notify=False)
-        create_move_in_invoice(fresh_tenancy, notify=False)
+        create_move_in_invoice(fresh_tenancy)
+        create_move_in_invoice(fresh_tenancy)
         assert Invoice.objects.filter(tenancy=fresh_tenancy).count() == 1
 
     def test_the_second_call_reports_it_did_not_create(self, fresh_tenancy):
-        create_move_in_invoice(fresh_tenancy, notify=False)
-        _, created = create_move_in_invoice(fresh_tenancy, notify=False)
+        create_move_in_invoice(fresh_tenancy)
+        _, created = create_move_in_invoice(fresh_tenancy)
         assert created is False
 
     def test_the_monthly_run_does_not_duplicate_it(self, fresh_tenancy):
         from apps.payments.tasks import generate_monthly_invoices
 
-        create_move_in_invoice(fresh_tenancy, notify=False)
+        create_move_in_invoice(fresh_tenancy)
         generate_monthly_invoices()
         assert Invoice.objects.filter(tenancy=fresh_tenancy).count() == 1
 

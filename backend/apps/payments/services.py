@@ -122,7 +122,7 @@ def prompts_allowed(unit) -> bool:
     return settings.STK_PUSH_ENABLED and mobile_account(unit.property.owner_id) is None
 
 
-def create_move_in_invoice(tenancy, *, notify=True):
+def create_move_in_invoice(tenancy):
     """Raise the tenant's first invoice: the first month's rent, plus the
     deposit if it has not already been handed over.
 
@@ -134,6 +134,10 @@ def create_move_in_invoice(tenancy, *, notify=True):
 
     Idempotent: called again for the same tenancy and month it returns the
     invoice already there rather than raising a second one.
+
+    WHY no SMS: a landlord adding a tenant is setting up their records, and a
+    "welcome" text with a bill surprised tenants. The bill reaches them when
+    the landlord sends bills or a reminder.
     """
     from django.utils import timezone
     import uuid
@@ -183,28 +187,7 @@ def create_move_in_invoice(tenancy, *, notify=True):
         apply_credit(tenancy)
         invoice.refresh_from_db()
 
-    if notify:
-        _notify_move_in(tenancy, invoice, rent, deposit)
-
     return invoice, True
-
-
-def _notify_move_in(tenancy, invoice, rent, deposit):
-    """Tell the tenant what they owe to move in, and how to pay it."""
-    from apps.notifications.tasks import send_sms
-
-    unit = tenancy.unit
-    parts = [f"rent KES {rent:,.0f}"]
-    if deposit > 0:
-        parts.append(f"deposit KES {deposit:,.0f}")
-
-    send_sms.delay(
-        tenancy.tenant_id,
-        f"Welcome to {unit.property.name} Unit {unit.unit_number}. "
-        f"Your first invoice is {' + '.join(parts)} = "
-        f"KES {invoice.amount_due:,.0f}, due {invoice.due_date.strftime('%d %b %Y')}. "
-        f"{how_to_pay(unit)}",
-    )
 
 
 _OPEN_STATUSES = [Invoice.Status.PENDING, Invoice.Status.PARTIALLY_PAID, Invoice.Status.OVERDUE]
