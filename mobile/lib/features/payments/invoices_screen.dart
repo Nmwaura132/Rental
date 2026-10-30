@@ -13,6 +13,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/widgets/kasa_layout.dart';
 import '../../core/widgets/kasa_primitives.dart';
 import '../../shared/widgets/shimmer_loading.dart';
+import 'record_payment_screen.dart';
 import 'send_bills_card.dart';
 import 'tenant_pay_screen.dart';
 import 'unplaced_payments.dart';
@@ -96,7 +97,7 @@ final paymentsReceivedProvider = FutureProvider.autoDispose<List<Map<String, dyn
   return rows.cast<Map<String, dynamic>>();
 });
 
-/// Records a cash or bank payment against one bill.
+/// Records a payment against one bill.
 ///
 /// Public so the Money tab and a unit's own screen use the same flow.
 Future<void> recordPaymentOn(BuildContext context, WidgetRef ref, int invoiceId) async {
@@ -104,19 +105,15 @@ Future<void> recordPaymentOn(BuildContext context, WidgetRef ref, int invoiceId)
       .cast<Map<String, dynamic>>()
       .firstWhere((b) => b['id'] == invoiceId);
   if (!context.mounted) return;
-  await showDialog(
-    context: context,
-    useRootNavigator: true,
-    barrierDismissible: false,
-    builder: (_) => _RecordPaymentDialog(
-      invoiceId: invoiceId,
-      balance: toDouble(bill['balance']),
+  await Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
+    builder: (_) => RecordPaymentScreen(
+      bill: bill,
       onDone: () {
         ref.invalidate(invoicesProvider);
         ref.invalidate(paymentsReceivedProvider);
       },
     ),
-  );
+  ));
 }
 
 /// One bill's full screen. Public so the tenant's Pay tab opens the same one.
@@ -833,16 +830,9 @@ class _InvoiceDetailScreenState extends ConsumerState<_InvoiceDetailScreen> {
                 Navigator.pop(ctx);
                 Future.delayed(const Duration(milliseconds: 300), () {
                   if (!context.mounted) return;
-                  showDialog(
-                    context: context,
-                    useRootNavigator: true,
-                    barrierDismissible: false,
-                    builder: (_) => _RecordPaymentDialog(
-                      invoiceId: invoice['id'] as int,
-                      balance: balance,
-                      onDone: onChanged,
-                    ),
-                  );
+                  Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
+                    builder: (_) => RecordPaymentScreen(bill: invoice, onDone: onChanged),
+                  ));
                 });
               },
       ),
@@ -1741,232 +1731,6 @@ class _InstructionStep extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-// ─── Record Payment Dialog ────────────────────────────────────────────────────
-
-class _RecordPaymentDialog extends ConsumerStatefulWidget {
-  const _RecordPaymentDialog({
-    required this.invoiceId,
-    required this.balance,
-    required this.onDone,
-  });
-  final int invoiceId;
-  final double balance;
-  final VoidCallback onDone;
-
-  @override
-  ConsumerState<_RecordPaymentDialog> createState() =>
-      _RecordPaymentDialogState();
-}
-
-class _RecordPaymentDialogState extends ConsumerState<_RecordPaymentDialog> {
-  String _method = 'cash';
-  late final TextEditingController _amountCtrl;
-  // Bank-specific controllers
-  String? _bankName;
-  final _bankAccountCtrl = TextEditingController();
-  final _bankReferenceCtrl = TextEditingController();
-  final _bankBranchCtrl = TextEditingController();
-  bool _loading = false;
-
-  static const _methods = [
-    ('cash', 'Cash'),
-    ('bank', 'Bank Transfer'),
-  ];
-
-  static const _kenyanBanks = [
-    'KCB', 'Equity Bank', 'Co-operative Bank', 'NCBA', 'Absa Kenya',
-    'Standard Chartered', 'DTB', 'I&M Bank', 'Family Bank', 'Stanbic',
-    'Prime Bank', 'HF Group', 'GT Bank', 'Other',
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    _amountCtrl =
-        TextEditingController(text: widget.balance.toStringAsFixed(0));
-  }
-
-  @override
-  void dispose() {
-    _amountCtrl.dispose();
-    _bankAccountCtrl.dispose();
-    _bankReferenceCtrl.dispose();
-    _bankBranchCtrl.dispose();
-    super.dispose();
-  }
-
-  bool get _isBank => _method == 'bank';
-
-  Future<void> _submit() async {
-    final amount = double.tryParse(_amountCtrl.text.replaceAll(',', ''));
-    if (amount == null || amount <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a valid amount.')),
-      );
-      return;
-    }
-    if (_isBank && _bankReferenceCtrl.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Bank reference / transaction ID is required.')),
-      );
-      return;
-    }
-    setState(() => _loading = true);
-    try {
-      final dio = ref.read(dioProvider);
-      await dio.post('/api/v1/payments/record/', data: {
-        'invoice': widget.invoiceId,
-        'method': _method,
-        'amount': amount,
-        if (_isBank) ...{
-          if (_bankName != null) 'bank_name': _bankName,
-          if (_bankAccountCtrl.text.trim().isNotEmpty)
-            'bank_account': _bankAccountCtrl.text.trim(),
-          'bank_reference': _bankReferenceCtrl.text.trim(),
-          if (_bankBranchCtrl.text.trim().isNotEmpty)
-            'bank_branch': _bankBranchCtrl.text.trim(),
-        },
-      });
-      widget.onDone();
-      if (mounted) {
-        Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Payment recorded successfully.'),
-          backgroundColor: Colors.green,
-        ));
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(apiError(e)),
-          backgroundColor: Theme.of(context).colorScheme.error,
-        ));
-      }
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return AlertDialog(
-      title: Text(
-        _isBank ? 'Record Bank Transfer' : 'Record Cash Payment',
-        style: KasaFont.sans(fontWeight: FontWeight.w600),
-      ),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // ── Method ──────────────────────────────────────────────────
-            DropdownButtonFormField<String>(
-              initialValue: _method,
-              decoration: const InputDecoration(labelText: 'Payment Method'),
-              items: _methods
-                  .map((m) => DropdownMenuItem(value: m.$1, child: Text(m.$2)))
-                  .toList(),
-              onChanged: (v) => setState(() => _method = v!),
-            ),
-            const SizedBox(height: 12),
-
-            // ── Amount ──────────────────────────────────────────────────
-            TextFormField(
-              controller: _amountCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Amount (${AppConstants.currency})',
-                prefixText: '${AppConstants.currency} ',
-              ),
-              keyboardType: TextInputType.number,
-            ),
-
-            // ── Bank-specific fields ────────────────────────────────────
-            if (_isBank) ...[
-              const SizedBox(height: 16),
-              Divider(color: cs.outlineVariant, thickness: 1),
-              const SizedBox(height: 8),
-              Text(
-                'Bank details',
-                style: KasaFont.sans(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.04,
-                  color: cs.kasaTextSub,
-                ),
-              ),
-              const SizedBox(height: 10),
-
-              // Bank name
-              DropdownButtonFormField<String>(
-                initialValue: _bankName,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Bank Name'),
-                hint: const Text('Select bank…'),
-                items: _kenyanBanks
-                    .map((b) => DropdownMenuItem(value: b, child: Text(b)))
-                    .toList(),
-                onChanged: (v) => setState(() => _bankName = v),
-              ),
-              const SizedBox(height: 10),
-
-              // Sender account / phone
-              TextFormField(
-                controller: _bankAccountCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Sender Account / Phone',
-                  hintText: 'e.g. 1234567890 or 0712 345 678',
-                  prefixIcon: Icon(Icons.account_box_outlined),
-                ),
-                keyboardType: TextInputType.text,
-              ),
-              const SizedBox(height: 10),
-
-              // Transaction reference — required
-              TextFormField(
-                controller: _bankReferenceCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Transaction Ref / Slip No. *',
-                  hintText: 'e.g. FT25001234567',
-                  prefixIcon: Icon(Icons.receipt_long_outlined),
-                ),
-                textCapitalization: TextCapitalization.characters,
-              ),
-              const SizedBox(height: 10),
-
-              // Branch — optional
-              TextFormField(
-                controller: _bankBranchCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Branch (optional)',
-                  hintText: 'e.g. Westlands',
-                  prefixIcon: Icon(Icons.location_on_outlined),
-                ),
-                textCapitalization: TextCapitalization.words,
-              ),
-            ],
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: _loading ? null : () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        ElevatedButton(
-          onPressed: _loading ? null : _submit,
-          child: _loading
-              ? const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2))
-              : const Text('Record'),
-        ),
-      ],
     );
   }
 }

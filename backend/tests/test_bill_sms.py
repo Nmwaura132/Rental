@@ -62,19 +62,19 @@ class TestTheBill:
         assert billed[2] == f"{THIS_MONTH:%B %Y} bill"
 
     def test_water_shows_the_earlier_reading_and_when(self, billed):
-        assert f" {LAST_MONTH - timedelta(days=1):%d %b}: 1,252" in billed
+        assert f" Read {(LAST_MONTH - timedelta(days=1)).day} {LAST_MONTH - timedelta(days=1):%b}: 1,252" in billed
 
     def test_water_shows_the_latest_reading_and_when(self, billed):
-        assert f" {THIS_MONTH - timedelta(days=1):%d %b}: 1,268" in billed
+        assert f" Read {(THIS_MONTH - timedelta(days=1)).day} {THIS_MONTH - timedelta(days=1):%b}: 1,268" in billed
 
     def test_water_shows_the_working(self, billed):
-        assert " Used 16 x 40" in billed
+        assert " 16 units x KES 40" in billed
 
     def test_water_is_charged_what_the_working_says(self, billed):
         assert "Water: 640" in billed
 
     def test_it_says_where_to_pay(self, billed):
-        assert any(line.startswith("Pay: M-Pesa") for line in billed)
+        assert any(line.startswith("M-Pesa Paybill: ") for line in billed)
 
     def test_it_uses_only_basic_sms_characters(self, billed):
         assert set("\n".join(billed)) <= GSM7

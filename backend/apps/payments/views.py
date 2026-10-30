@@ -1,7 +1,9 @@
+import re
 import logging
 import uuid
 from decimal import Decimal, InvalidOperation
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import IntegrityError
 from django.utils import timezone
 from django.db.models import Sum, Count, Q
 from rest_framework import viewsets, permissions, status
@@ -17,11 +19,13 @@ from .serializers import InvoiceSerializer, PaymentAccountSerializer, PaymentSer
 from .mpesa import make_idempotency_key
 from .services import (
     apply_confirmed_payment,
+    allocate_payment,
     apply_credit,
     credit_remaining,
     how_to_pay,
     pay_to,
     prompts_allowed,
+    receipt_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -198,14 +202,21 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
             permission_classes=[IsLandlord])
     def record_payment(self, request):
         """
-        Manually record a cash or bank payment — landlords only.
-        Tenants pay via STK Push. Body: { invoice, method, amount }
+        Manually record a payment the landlord has confirmed — landlords only.
+        Body: { invoice, method, amount } plus, for M-Pesa, mpesa_receipt_number.
+
+        WHY M-Pesa here: behind a paybill with no notifications, a tenant's
+        M-Pesa payment only reaches Kasa by the landlord checking their
+        statement. Calling it cash would misstate the rent roll and tell the
+        tenant they paid cash. It is placed like one that arrives by itself:
+        this bill, then their other open bills, and any excess as credit,
+        because one transfer can't be split into two entries under one code.
         """
         invoice_id = request.data.get("invoice")
         method = request.data.get("method")
         amount = request.data.get("amount")
 
-        allowed_methods = [Payment.Method.CASH, Payment.Method.BANK]
+        allowed_methods = [Payment.Method.MPESA, Payment.Method.CASH, Payment.Method.BANK]
         if method not in [m.value for m in allowed_methods]:
             return Response(
                 {"error": f"Method must be one of: {[m.value for m in allowed_methods]}"},
@@ -223,6 +234,22 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
             return Response({"error": "Amount must be a positive number."}, status=status.HTTP_400_BAD_REQUEST)
 
         bank_fields = {}
+        code = ""
+        if method == Payment.Method.MPESA:
+            code = str(request.data.get("mpesa_receipt_number") or "").strip().upper()
+            if not re.fullmatch(r"[A-Z0-9]{8,12}", code):
+                return Response(
+                    {"error": "Enter the M-Pesa code from the message, like SIR4K7X2QP."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            # WHY: a code identifies one transfer, so seeing it again means the
+            # same money is being entered twice.
+            if Payment.objects.filter(mpesa_receipt_number=code).exists():
+                return Response(
+                    {"error": f"M-Pesa code {code} has already been recorded."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            bank_fields = {"mpesa_receipt_number": code}
         if method == Payment.Method.BANK:
             bank_fields = {
                 "bank_name": (request.data.get("bank_name") or "").strip() or None,
@@ -234,59 +261,70 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
         try:
             invoice = _invoice_qs_for_user(request.user).get(id=invoice_id)
 
-            # WHY only on the manual path: an M-Pesa or bank payment has already
-            # happened, so refusing it would lose a real receipt. A figure typed
-            # in by hand has not, and one exceeding the balance is a slip or a
-            # false entry — and because confirmed payments are immutable, it
-            # cannot be corrected afterwards. Sending the excess to the invoice
-            # it belongs to also keeps the KRA rent roll honest.
-            outstanding = invoice.amount_due - (invoice.amount_paid or Decimal("0"))
-            if amount > outstanding:
-                return Response(
-                    {
-                        "error": (
-                            f"That is more than this invoice is owed. Outstanding "
-                            f"balance is KES {outstanding:,.2f}. Record the excess "
-                            f"against the invoice it belongs to."
-                        )
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
+            if method == Payment.Method.MPESA:
+                if invoice.status in [Invoice.Status.PAID, Invoice.Status.CANCELLED]:
+                    return Response(
+                        {"error": "This bill is closed. Open a bill that is still owed."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                parts, credit, _ = allocate_payment(
+                    tenancy=invoice.tenancy,
+                    amount=amount,
+                    method=method,
+                    idempotency_key=f"mpesa:{code}",
+                    paid_at=timezone.now(),
+                    payment_fields=bank_fields,
+                    recorded_by=request.user,
+                    first_invoice_id=invoice.pk,
                 )
+            else:
+                # WHY: cash or bank typed by hand has no transfer behind it to
+                # check against, so a figure above the balance is a slip or a
+                # false entry — and because confirmed payments are immutable, it
+                # cannot be corrected afterwards. Sending the excess to the invoice
+                # it belongs to also keeps the KRA rent roll honest.
+                outstanding = invoice.amount_due - (invoice.amount_paid or Decimal("0"))
+                if amount > outstanding:
+                    return Response(
+                        {
+                            "error": (
+                                f"That is more than this invoice is owed. Outstanding "
+                                f"balance is KES {outstanding:,.2f}. Record the excess "
+                                f"against the invoice it belongs to."
+                            )
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
 
-            payment, _ = apply_confirmed_payment(
-                invoice_id=invoice.pk,
-                method=method,
-                amount=amount,
-                idempotency_key=f"{method}:{uuid.uuid4().hex}",
-                paid_at=timezone.now(),
-                payment_fields=bank_fields,
-                # A hand-entered payment is permanent and cannot be edited, so
-                # the record has to say who entered it.
-                recorded_by=request.user,
-            )
+                payment, _ = apply_confirmed_payment(
+                    invoice_id=invoice.pk,
+                    method=method,
+                    amount=amount,
+                    idempotency_key=f"{method}:{uuid.uuid4().hex}",
+                    paid_at=timezone.now(),
+                    payment_fields=bank_fields,
+                    # A hand-entered payment is permanent and cannot be edited, so
+                    # the record has to say who entered it.
+                    recorded_by=request.user,
+                )
+                parts, credit = [payment], None
         except Invoice.DoesNotExist:
             return Response({"error": "Invoice not found."}, status=status.HTTP_404_NOT_FOUND)
         except DjangoValidationError as exc:
             return Response({"error": exc.messages[0]}, status=status.HTTP_400_BAD_REQUEST)
+        except IntegrityError:
+            # Two entries of one code at once: the check above passed for both.
+            return Response(
+                {"error": "That M-Pesa code has already been recorded."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # WHY: while every payment is entered by hand, this SMS is the tenant's
         # only proof that the landlord has it.
         from apps.notifications.tasks import send_sms
 
-        invoice.refresh_from_db()
-        tenancy = invoice.tenancy
-        unit = tenancy.unit
-        how = "cash" if method == Payment.Method.CASH else "bank"
-        after = (
-            f"You still owe KES {invoice.balance:,.0f} on your {invoice.period_start:%B} bill."
-            if invoice.balance > 0 else f"Your {invoice.period_start:%B} bill is fully paid."
-        )
-        send_sms.delay(
-            tenancy.tenant_id,
-            f"Dear {tenancy.tenant.first_name}, your {how} payment of KES {amount:,.0f} for "
-            f"{unit.property.name} Unit {unit.unit_number} has been received. {after}",
-        )
-        return Response(PaymentSerializer(payment).data, status=status.HTTP_201_CREATED)
+        send_sms.delay(invoice.tenancy.tenant_id, receipt_text(parts, credit))
+        return Response(PaymentSerializer(parts[0]).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"], url_path="etims-receipt",
             permission_classes=[IsLandlord])

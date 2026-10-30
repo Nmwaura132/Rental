@@ -603,10 +603,10 @@ def bill_text(tenancy, invoice) -> str:
         lines.append(f"{name}: {_amount(item.amount)}")
         if item.current_reading is not None and item.previous_reading is not None:
             def read(when, value):
-                return f" {when:%d %b}: {_amount(value)}" if when else f" Was: {_amount(value)}"
+                return f" Read {when.day} {when:%b}: {_amount(value)}" if when else f" Was: {_amount(value)}"
             lines.append(read(item.previous_read_on, item.previous_reading))
             lines.append(read(item.current_read_on, item.current_reading).replace(" Was:", " Now:"))
-            lines.append(f" Used {_amount(item.units_consumed)} x {_amount(item.unit_price)}")
+            lines.append(f" {_amount(item.units_consumed)} units x KES {_amount(item.unit_price)}")
 
     lines += ["", f"Total: KES {_amount(invoice.amount_due)}"]
     if invoice.amount_paid > 0:
@@ -614,9 +614,12 @@ def bill_text(tenancy, invoice) -> str:
         if invoice.balance <= 0:
             return "\n".join(lines + ["Nothing to pay this month."])
         lines.append(f"To pay: KES {_amount(invoice.balance)}")
-    lines.append(f"Due: {invoice.due_date:%d %b %Y}")
+    lines.append(f"Pay by: {invoice.due_date.day} {invoice.due_date:%b %Y}")
 
     number, account = pay_to(unit)
-    lines += ["", f"Pay: M-Pesa Paybill {number}", f"Account: {account}"] if account else [
-        "", f"Pay: M-Pesa Till {number}"]
+    lines += ["", f"M-Pesa Paybill: {number}", f"Account: {account}"] if account else [
+        "", f"M-Pesa Till: {number}"]
+    # Payments are confirmed by hand, so say a receipt follows rather than
+    # leave the tenant wondering if it arrived.
+    lines += ["", "We text a receipt once your payment is confirmed."]
     return "\n".join(lines)

@@ -103,6 +103,39 @@ def pay_to(unit) -> tuple[str, str]:
     return settings.RENT_PAYBILL, unit.payment_code
 
 
+def receipt_text(parts: list, credit=None) -> str:
+    """The receipt for a payment the landlord recorded, which may have cleared
+    more than one bill: one item per line, like the bill, and only plain SMS
+    characters (see bill_text)."""
+    first = parts[0]
+    tenancy = first.invoice.tenancy
+    unit = tenancy.unit
+    total = sum((part.amount for part in parts), credit.amount if credit else Decimal("0"))
+    how = {
+        Payment.Method.MPESA: f"M-Pesa code: {first.mpesa_receipt_number}",
+        Payment.Method.BANK: f"Bank ref: {first.bank_reference}",
+        Payment.Method.CASH: "Paid by: Cash",
+    }[first.method]
+    paid_on = timezone.localtime(first.paid_at)
+    lines = [
+        f"Hi {tenancy.tenant.first_name},",
+        "Payment received. Thank you.",
+        "",
+        f"{unit.property.name} {unit.unit_number}",
+        f"Amount: KES {total:,.0f}",
+        how,
+        f"Confirmed: {paid_on.day} {paid_on:%b %Y}",
+        "",
+    ]
+    for part in parts:
+        bill = part.invoice
+        month = f"{bill.period_start:%B}"
+        lines.append(f"{month} bill: KES {bill.balance:,.0f} left" if bill.balance > 0 else f"{month} bill: fully paid")
+    if credit:
+        lines.append(f"Kept for next bill: KES {credit.amount:,.0f}")
+    return "\n".join(lines)
+
+
 def how_to_pay(unit) -> str:
     number, account = pay_to(unit)
     if not account:
