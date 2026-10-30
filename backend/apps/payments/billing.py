@@ -23,6 +23,19 @@ def next_month(period_start):
     return (period_start + timedelta(days=32)).replace(day=1)
 
 
+def flat_charge_lines(unit) -> list[dict]:
+    """The property's fixed monthly extras, such as a service charge. Metered
+    charges are left out: they need a reading, so they follow on a later bill."""
+    from apps.properties.models import PropertyCharge
+
+    return [
+        {"description": charge.name, "charge_type": charge.charge_type, "amount": charge.unit_price}
+        for charge in PropertyCharge.objects.filter(
+            property=unit.property, is_active=True, billing_method=PropertyCharge.BillingMethod.FLAT
+        )
+    ]
+
+
 def charge_lines(unit, period_start) -> list[dict]:
     """Line items for the bill covering `period_start`, excluding rent."""
     from apps.properties.models import PropertyCharge

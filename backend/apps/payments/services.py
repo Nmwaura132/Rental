@@ -123,8 +123,8 @@ def prompts_allowed(unit) -> bool:
 
 
 def create_move_in_invoice(tenancy):
-    """Raise the tenant's first invoice: the first month's rent, plus the
-    deposit if it has not already been handed over.
+    """Raise the tenant's first invoice: the first month's rent and the
+    property's fixed extras, plus the deposit if not already handed over.
 
     WHY one invoice with line items rather than two invoices: the tenant pays
     once to move in, and the invoice table is unique on (tenancy, period_start),
@@ -142,6 +142,7 @@ def create_move_in_invoice(tenancy):
     from django.utils import timezone
     import uuid
 
+    from .billing import flat_charge_lines
     from .models import Invoice, InvoiceLineItem
 
     start = tenancy.start_date or timezone.localdate()
@@ -156,6 +157,7 @@ def create_move_in_invoice(tenancy):
 
     rent = Decimal(tenancy.rent_amount)
     deposit = Decimal("0") if tenancy.deposit_paid else Decimal(tenancy.deposit_amount or 0)
+    extras = flat_charge_lines(tenancy.unit)
 
     with transaction.atomic():
         invoice, created = Invoice.objects.get_or_create(
@@ -163,7 +165,7 @@ def create_move_in_invoice(tenancy):
             period_start=period_start,
             defaults={
                 "invoice_number": f"INV-{period_start.strftime('%Y%m')}-{uuid.uuid4().hex[:6].upper()}",
-                "amount_due": rent + deposit,
+                "amount_due": rent + deposit + sum((line["amount"] for line in extras), Decimal("0")),
                 "due_date": due_date,
                 "period_end": period_end,
             },
@@ -184,6 +186,7 @@ def create_move_in_invoice(tenancy):
                 charge_type="deposit",
                 amount=deposit,
             )
+        InvoiceLineItem.objects.bulk_create(InvoiceLineItem(invoice=invoice, **line) for line in extras)
         apply_credit(tenancy)
         invoice.refresh_from_db()
 

@@ -196,3 +196,67 @@ class TestRentAlreadyPaidOnMoveIn:
     def test_without_it_the_rent_is_owed(self, landlord, tenant, unit):
         bill = self._move_in(landlord, tenant, unit)
         assert not bill.payments.exists()
+
+
+class TestExtrasOnMoveIn:
+    """Fixed charges like a service charge, billed and paid like the rent."""
+
+    @pytest.fixture
+    def service(self, unit):
+        from apps.properties.models import PropertyCharge
+
+        return PropertyCharge.objects.create(
+            property=unit.property, charge_type="service", name="Service Charge",
+            billing_method=PropertyCharge.BillingMethod.FLAT, unit_price=Decimal("500.00"),
+        )
+
+    @pytest.fixture
+    def water(self, unit):
+        from apps.properties.models import PropertyCharge
+
+        return PropertyCharge.objects.create(
+            property=unit.property, charge_type="water", name="Water",
+            billing_method=PropertyCharge.BillingMethod.METERED, unit_price=Decimal("200.00"),
+        )
+
+    def _move_in(self, landlord, tenant, unit, **extra):
+        from rest_framework.test import APIClient
+
+        tenant.created_by = landlord
+        tenant.save(update_fields=["created_by"])
+        client = APIClient()
+        client.force_authenticate(user=landlord)
+        response = client.post(
+            "/api/v1/tenants/tenancies/",
+            {"tenant": tenant.id, "unit": unit.id, "start_date": str(date.today()),
+             "rent_amount": "15000.00", "deposit_amount": "15000.00", "deposit_paid": True, **extra},
+            format="json",
+        )
+        return Invoice.objects.get(tenancy_id=response.data["id"])
+
+    def test_the_bill_includes_them(self, landlord, tenant, unit, service):
+        assert self._move_in(landlord, tenant, unit).amount_due == Decimal("15500.00")
+
+    def test_they_have_their_own_line(self, landlord, tenant, unit, service):
+        bill = self._move_in(landlord, tenant, unit)
+        assert bill.line_items.get(charge_type="service").amount == Decimal("500.00")
+
+    def test_metered_water_is_left_for_a_later_bill(self, landlord, tenant, unit, service, water):
+        bill = self._move_in(landlord, tenant, unit)
+        assert not bill.line_items.filter(charge_type="water").exists()
+
+    def test_marked_paid_they_are_recorded_as_received(self, landlord, tenant, unit, service):
+        bill = self._move_in(landlord, tenant, unit, extras_paid=True)
+        assert bill.payments.get().amount == Decimal("500.00")
+
+    def test_only_the_rent_is_then_left(self, landlord, tenant, unit, service):
+        bill = self._move_in(landlord, tenant, unit, extras_paid=True)
+        assert bill.balance == Decimal("15000.00")
+
+    def test_rent_and_extras_both_paid_leaves_nothing(self, landlord, tenant, unit, service):
+        bill = self._move_in(landlord, tenant, unit, rent_paid=True, extras_paid=True)
+        assert bill.balance == Decimal("0")
+
+    def test_extras_paid_with_no_extras_does_nothing(self, landlord, tenant, unit):
+        bill = self._move_in(landlord, tenant, unit, extras_paid=True)
+        assert not bill.payments.exists()

@@ -9,9 +9,10 @@ from .models import (
 
 
 class TenancySerializer(serializers.ModelSerializer):
-    # The first month's rent already taken in hand when the tenant was added.
-    # Not stored on the tenancy: it becomes a payment on the move-in bill.
+    # Money already taken in hand when the tenant was added. Not stored on the
+    # tenancy: each becomes a payment on the move-in bill.
     rent_paid = serializers.BooleanField(write_only=True, required=False, default=False)
+    extras_paid = serializers.BooleanField(write_only=True, required=False, default=False)
     tenant_name = serializers.CharField(source="tenant.get_full_name", read_only=True)
     tenant_phone = serializers.CharField(source="tenant.phone_number", read_only=True)
     unit_number = serializers.CharField(source="unit.unit_number", read_only=True)
@@ -23,7 +24,7 @@ class TenancySerializer(serializers.ModelSerializer):
         model = Tenancy
         fields = [
             "id", "tenant", "unit", "start_date", "end_date", "rent_amount",
-            "deposit_amount", "deposit_paid", "rent_paid", "status", "notes", "created_at",
+            "deposit_amount", "deposit_paid", "rent_paid", "extras_paid", "status", "notes", "created_at",
             "tenant_name", "tenant_phone", "unit_number", "property_name", "property_id",
             "tenancy_pdf_url",
             "notice_given_at", "notice_effective_date", "notice_reason", "notice_given_by",

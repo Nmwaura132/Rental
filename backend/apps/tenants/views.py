@@ -29,28 +29,38 @@ def _validate_managed_tenant(user, tenant):
     raise PermissionDenied("You cannot create tenancies for this tenant.")
 
 
-def _record_first_rent(tenancy, invoice, landlord):
-    """The first month's rent the landlord already took in hand, recorded as
-    a cash payment on the move-in bill.
+def _record_paid_on_entry(tenancy, invoice, landlord, *, rent_paid, extras_paid):
+    """What the landlord already took in hand, recorded as cash on the move-in
+    bill: the first month's rent, the fixed extras, or both.
 
-    WHY a payment and not a bill without rent: the tenant's history then shows
-    the rent as received, which is what happened. No receipt SMS, like adding
-    a tenant: the landlord is setting up their records.
+    WHY payments and not a bill without those lines: the tenant's history then
+    shows the money as received, which is what happened. No receipt SMS, like
+    adding a tenant: the landlord is setting up their records.
     """
+    from decimal import Decimal
+
     from django.db import transaction
 
     from apps.payments.models import Payment
     from apps.payments.services import apply_confirmed_payment
 
+    lines = invoice.line_items.exclude(charge_type__in=["rent", "deposit"])
+    extras = sum((line.amount for line in lines), Decimal("0"))
+    received = []
+    if rent_paid:
+        received.append(("rent", tenancy.rent_amount))
+    if extras_paid and extras > 0:
+        received.append(("extras", extras))
     with transaction.atomic():
-        apply_confirmed_payment(
-            invoice_id=invoice.pk,
-            method=Payment.Method.CASH,
-            amount=tenancy.rent_amount,
-            idempotency_key=f"move-in-rent:{tenancy.pk}",
-            paid_at=timezone.now(),
-            recorded_by=landlord,
-        )
+        for what, amount in received:
+            apply_confirmed_payment(
+                invoice_id=invoice.pk,
+                method=Payment.Method.CASH,
+                amount=amount,
+                idempotency_key=f"move-in-{what}:{tenancy.pk}",
+                paid_at=timezone.now(),
+                recorded_by=landlord,
+            )
 
 
 class TenancyViewSet(viewsets.ModelViewSet):
@@ -100,6 +110,7 @@ class TenancyViewSet(viewsets.ModelViewSet):
             raise PermissionDenied("You cannot create tenancies for this unit.")
         _validate_managed_tenant(user, tenant)
         rent_paid = serializer.validated_data.pop("rent_paid", False)
+        extras_paid = serializer.validated_data.pop("extras_paid", False)
         tenancy = serializer.save()
 
         # WHY the first invoice is raised here and not in the signal beside
@@ -116,8 +127,7 @@ class TenancyViewSet(viewsets.ModelViewSet):
         if tenancy.status == Tenancy.Status.ACTIVE and moving_in:
             try:
                 invoice, _ = create_move_in_invoice(tenancy)
-                if rent_paid:
-                    _record_first_rent(tenancy, invoice, user)
+                _record_paid_on_entry(tenancy, invoice, user, rent_paid=rent_paid, extras_paid=extras_paid)
             except Exception:
                 # The tenancy is saved and sound; failing the request would
                 # throw it away over a billing problem the landlord can fix by
@@ -126,6 +136,7 @@ class TenancyViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         serializer.validated_data.pop("rent_paid", None)
+        serializer.validated_data.pop("extras_paid", None)
         unit = serializer.validated_data.get("unit", serializer.instance.unit)
         tenant = serializer.validated_data.get("tenant", serializer.instance.tenant)
         user = self.request.user

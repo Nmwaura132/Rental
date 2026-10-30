@@ -805,6 +805,27 @@ class _TenantsScreenState extends ConsumerState<TenantsScreen> {
 
 // ─── Add Tenant Dialog ────────────────────────────────────────────────────────
 
+/// The building's fixed monthly extras, such as a service charge: what a
+/// move-in bill adds to the rent. Metered water waits for a reading.
+Future<List<Map<String, dynamic>>> _fixedExtras(WidgetRef ref, Object? propertyId) async {
+  if (propertyId == null) return const [];
+  final rows = await fetchAllPages(
+    ref.read(dioProvider),
+    '/api/v1/properties/charges/',
+    queryParameters: {'property': propertyId, 'is_active': 'true'},
+  );
+  return rows.cast<Map<String, dynamic>>().where((c) => c['billing_method'] == 'flat').toList();
+}
+
+num _extrasTotal(List<Map<String, dynamic>> extras) =>
+    extras.fold<num>(0, (sum, c) => sum + (num.tryParse('${c['unit_price']}') ?? 0));
+
+String _kes(num amount) => 'KES ${NumberFormat('#,###').format(amount)}';
+
+/// "Service Charge already paid", or "Extras already paid" for several.
+String _extrasPaidTitle(List<Map<String, dynamic>> extras) =>
+    extras.length == 1 ? '${extras.single['name']} already paid' : 'Extras already paid';
+
 class _AddTenantForm extends ConsumerStatefulWidget {
   const _AddTenantForm({required this.onDone, this.forUnitId});
 
@@ -844,6 +865,8 @@ class _AddTenantFormState extends ConsumerState<_AddTenantForm> {
       _startDate.isBefore(DateTime(DateTime.now().year, DateTime.now().month));
   bool _depositPaid = false;
   bool _rentPaid = false;
+  bool _extrasPaid = false;
+  List<Map<String, dynamic>> _extras = const [];
   Map<String, dynamic>? _unit;
   final _uiDate = DateFormat('dd MMM yyyy');
   final _apiDateFmt = DateFormat('yyyy-MM-dd');
@@ -860,6 +883,8 @@ class _AddTenantFormState extends ConsumerState<_AddTenantForm> {
           .read(dioProvider)
           .get('/api/v1/properties/units/${widget.forUnitId}/');
       if (mounted) setState(() => _unit = Map<String, dynamic>.from(res.data));
+      final extras = await _fixedExtras(ref, _unit?['property']);
+      if (mounted) setState(() => _extras = extras);
     } catch (_) {
       // Falling back to the two-step flow is handled at submit time.
     }
@@ -920,13 +945,15 @@ class _AddTenantFormState extends ConsumerState<_AddTenantForm> {
         'deposit_amount': deposit,
         'deposit_paid': _depositPaid,
         'rent_paid': _rentPaid && !_alreadyLiving,
+        'extras_paid': _extrasPaid && !_alreadyLiving,
       });
     } catch (_) {
       return null;
     }
     if (_alreadyLiving) return 'Tenant added. Their bills start with next month.';
     final total = (_rentPaid ? 0 : (num.tryParse('$rent') ?? 0)) +
-        (_depositPaid ? 0 : (num.tryParse('$deposit') ?? 0));
+        (_depositPaid ? 0 : (num.tryParse('$deposit') ?? 0)) +
+        (_extrasPaid ? 0 : _extrasTotal(_extras));
     // Nothing is texted to them on adding, so the message must not say it was.
     if (total == 0) return 'Tenant added. Their move-in is fully paid.';
     return 'Tenant added. Their move-in bill of KES ${NumberFormat('#,###').format(total)} '
@@ -1248,6 +1275,8 @@ class _AddTenantFormState extends ConsumerState<_AddTenantForm> {
                         unit: _unit!,
                         depositPaid: _depositPaid,
                         rentPaid: _rentPaid,
+                        extras: _extras,
+                        extrasPaid: _extrasPaid,
                       ),
                     const SizedBox(height: 8),
                     InkWell(
@@ -1289,9 +1318,9 @@ class _AddTenantFormState extends ConsumerState<_AddTenantForm> {
                       value: _depositPaid,
                       onChanged: (v) => setState(() => _depositPaid = v),
                       title: const Text('Deposit already paid'),
-                      subtitle: const Text(
-                        'Leave off to bill it with the first rent',
-                        style: TextStyle(fontSize: 11),
+                      subtitle: Text(
+                        '${_kes(num.tryParse('${_unit?['deposit_amount']}') ?? 0)}. Leave off to bill it',
+                        style: const TextStyle(fontSize: 12),
                       ),
                     ),
                     // Only for a move-in: someone already living here gets no
@@ -1302,9 +1331,20 @@ class _AddTenantFormState extends ConsumerState<_AddTenantForm> {
                         value: _rentPaid,
                         onChanged: (v) => setState(() => _rentPaid = v),
                         title: const Text("First month's rent already paid"),
-                        subtitle: const Text(
-                          'Recorded as cash you received. Leave off to bill it',
-                          style: TextStyle(fontSize: 11),
+                        subtitle: Text(
+                          '${_kes(num.tryParse('${_unit?['rent_amount']}') ?? 0)}. Recorded as cash you received',
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    if (!_alreadyLiving && _extras.isNotEmpty)
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: _extrasPaid,
+                        onChanged: (v) => setState(() => _extrasPaid = v),
+                        title: Text(_extrasPaidTitle(_extras)),
+                        subtitle: Text(
+                          '${_kes(_extrasTotal(_extras))}. Recorded as cash you received',
+                          style: const TextStyle(fontSize: 12),
                         ),
                       ),
                     const SizedBox(height: 4),
@@ -1391,6 +1431,8 @@ class _AddTenancyDialogState extends ConsumerState<_AddTenancyDialog> {
   final _depositCtrl = TextEditingController();
   bool _depositPaid = false;
   bool _rentPaid = false;
+  bool _extrasPaid = false;
+  List<Map<String, dynamic>> _extras = const [];
   final _notesCtrl = TextEditingController();
   bool _submitting = false;
 
@@ -1481,7 +1523,20 @@ class _AddTenancyDialogState extends ConsumerState<_AddTenancyDialog> {
       _vacantUnits = vacantUnits;
       _rentCtrl.clear();
       _depositCtrl.clear();
+      _extras = const [];
+      _extrasPaid = false;
     });
+    _loadExtras(id);
+  }
+
+  Future<void> _loadExtras(int? propertyId) async {
+    try {
+      final extras = await _fixedExtras(ref, propertyId);
+      if (mounted) setState(() => _extras = extras);
+    } catch (_) {
+      // Without the list the option simply does not show; the bill is right
+      // either way, and extras can be recorded from Money.
+    }
   }
 
   void _onUnitChanged(int? id) {
@@ -1544,6 +1599,7 @@ class _AddTenancyDialogState extends ConsumerState<_AddTenancyDialog> {
         'deposit_amount': deposit,
         'deposit_paid': _depositPaid,
         'rent_paid': _rentPaid && !_alreadyLiving,
+        'extras_paid': _extrasPaid && !_alreadyLiving,
         'notes': _notesCtrl.text.trim(),
       });
       widget.onDone();
@@ -1727,6 +1783,15 @@ class _AddTenancyDialogState extends ConsumerState<_AddTenancyDialog> {
                             onChanged: (v) => setState(() => _rentPaid = v ?? false),
                             controlAffinity: ListTileControlAffinity.leading,
                           ),
+                        if (!_alreadyLiving && _extras.isNotEmpty)
+                          CheckboxListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(_extrasPaidTitle(_extras)),
+                            subtitle: Text(_kes(_extrasTotal(_extras))),
+                            value: _extrasPaid,
+                            onChanged: (v) => setState(() => _extrasPaid = v ?? false),
+                            controlAffinity: ListTileControlAffinity.leading,
+                          ),
                       ],
                     ),
                   ),
@@ -1837,11 +1902,19 @@ class _IdPhotoTile extends StatelessWidget {
 /// What the tenant will be billed to move in. Shown before the landlord
 /// commits, so the figures are never a surprise on either side.
 class _MoveInSummary extends StatelessWidget {
-  const _MoveInSummary({required this.unit, required this.depositPaid, required this.rentPaid});
+  const _MoveInSummary({
+    required this.unit,
+    required this.depositPaid,
+    required this.rentPaid,
+    required this.extras,
+    required this.extrasPaid,
+  });
 
   final Map<String, dynamic> unit;
   final bool depositPaid;
   final bool rentPaid;
+  final List<Map<String, dynamic>> extras;
+  final bool extrasPaid;
 
   @override
   Widget build(BuildContext context) {
@@ -1849,7 +1922,7 @@ class _MoveInSummary extends StatelessWidget {
     final money = NumberFormat('#,###');
     final rent = num.tryParse('${unit['rent_amount']}') ?? 0;
     final deposit = num.tryParse('${unit['deposit_amount']}') ?? 0;
-    final total = (rentPaid ? 0 : rent) + (depositPaid ? 0 : deposit);
+    final total = (rentPaid ? 0 : rent) + (depositPaid ? 0 : deposit) + (extrasPaid ? 0 : _extrasTotal(extras));
 
     Widget row(String label, String value, {bool strong = false}) => Padding(
           padding: const EdgeInsets.symmetric(vertical: 3),
@@ -1887,10 +1960,12 @@ class _MoveInSummary extends StatelessWidget {
         children: [
           row('Unit ${unit['unit_number']} — first month rent',
               rentPaid ? 'Paid' : 'KES ${money.format(rent)}'),
-          if (!depositPaid)
-            row('Security deposit', 'KES ${money.format(deposit)}'),
+          row('Security deposit', depositPaid ? 'Paid' : 'KES ${money.format(deposit)}'),
+          for (final charge in extras)
+            row('${charge['name']}',
+                extrasPaid ? 'Paid' : 'KES ${money.format(num.tryParse('${charge['unit_price']}') ?? 0)}'),
           const Divider(height: 14),
-          row('Invoice to tenant', 'KES ${money.format(total)}', strong: true),
+          row(total == 0 ? 'Nothing left to pay' : 'Left to pay', 'KES ${money.format(total)}', strong: true),
         ],
       ),
     );

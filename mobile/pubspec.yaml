@@ -1,6 +1,6 @@
 name: rental_manager
 description: Kenya Rental Management System — mobile app
-version: 1.0.6+7
+version: 1.0.7+8
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
