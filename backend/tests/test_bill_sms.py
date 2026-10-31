@@ -61,17 +61,15 @@ class TestTheBill:
     def test_it_names_the_month(self, billed):
         assert billed[2] == f"{THIS_MONTH:%B %Y} bill"
 
-    def test_water_shows_the_earlier_reading_and_when(self, billed):
-        assert f" Read {(LAST_MONTH - timedelta(days=1)).day} {LAST_MONTH - timedelta(days=1):%b}: 1,252" in billed
-
-    def test_water_shows_the_latest_reading_and_when(self, billed):
-        assert f" Read {(THIS_MONTH - timedelta(days=1)).day} {THIS_MONTH - timedelta(days=1):%b}: 1,268" in billed
-
-    def test_water_shows_the_working(self, billed):
-        assert " 16 units x KES 40" in billed
-
-    def test_water_is_charged_what_the_working_says(self, billed):
-        assert "Water: 640" in billed
+    def test_water_shows_the_readings_then_the_working_then_the_charge(self, billed):
+        read_on = THIS_MONTH - timedelta(days=1)
+        start = billed.index("Initial Reading :=- 1,252")
+        assert billed[start:start + 4] == [
+            "Initial Reading :=- 1,252",
+            f"Current Reading as of {read_on.day} {read_on:%b}:=- 1,268",
+            " 16 units x KES 40",
+            "Water: 640",
+        ]
 
     def test_it_says_where_to_pay(self, billed):
         assert any(line.startswith("M-Pesa Paybill: ") for line in billed)

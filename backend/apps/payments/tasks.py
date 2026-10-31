@@ -600,13 +600,13 @@ def bill_text(tenancy, invoice) -> str:
              f"{invoice.period_start:%B %Y} bill", ""]
     for item in invoice.line_items.all():
         name = "Rent" if item.charge_type == "rent" else item.description.split(" — ")[0]
-        lines.append(f"{name}: {_amount(item.amount)}")
         if item.current_reading is not None and item.previous_reading is not None:
-            def read(when, value):
-                return f" Read {when.day} {when:%b}: {_amount(value)}" if when else f" Was: {_amount(value)}"
-            lines.append(read(item.previous_read_on, item.previous_reading))
-            lines.append(read(item.current_read_on, item.current_reading).replace(" Was:", " Now:"))
+            read_on = item.current_read_on
+            as_of = f"as of {read_on.day} {read_on:%b}" if read_on else ""
+            lines.append(f"Initial Reading :=- {_amount(item.previous_reading)}")
+            lines.append(f"Current Reading {as_of}:=- {_amount(item.current_reading)}")
             lines.append(f" {_amount(item.units_consumed)} units x KES {_amount(item.unit_price)}")
+        lines.append(f"{name}: {_amount(item.amount)}")
 
     lines += ["", f"Total: KES {_amount(invoice.amount_due)}"]
     if invoice.amount_paid > 0:
