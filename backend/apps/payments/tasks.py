@@ -619,7 +619,4 @@ def bill_text(tenancy, invoice) -> str:
     number, account = pay_to(unit)
     lines += ["", f"M-Pesa Paybill: {number}", f"Account: {account}"] if account else [
         "", f"M-Pesa Till: {number}"]
-    # Payments are confirmed by hand, so say a receipt follows rather than
-    # leave the tenant wondering if it arrived.
-    lines += ["", "We text a receipt once your payment is confirmed."]
     return "\n".join(lines)
