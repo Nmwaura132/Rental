@@ -17,6 +17,8 @@ django-axes==7.0.0               # brute-force login protection
 
 # ── Async tasks ───────────────────────────────────────────────────────────────
 celery==5.4.0
+kombu==5.6.2                     # celery transport; 5.7 needs redis-py 6.1+, and an unpinned rebuild pulled it in
+amqp==5.3.1
 msgpack==1.2.1                   # celery serializer — pinned to clear GHSA-6v7p-g79w-8964
 django-celery-beat==2.8.1        # DB-backed periodic tasks — 2.7.0 caps Django<5.2
 django-celery-results==2.5.1     # store task results in DB
