@@ -165,3 +165,32 @@ class TestTheSpreadsheet:
         _get(landlord, property_, download="xlsx")
         book = load_workbook(BytesIO(next(iter(uploaded.values()))))
         assert [c.value for c in book["Deposits"][4]][4:] == ["Held", bill.tenancy.deposit_amount]
+
+
+@pytest.mark.django_db
+class TestThePdf:
+    @pytest.fixture
+    def uploaded(self, monkeypatch):
+        files = {}
+
+        def upload(key, content, content_type, content_disposition=None):
+            files[key] = (content, content_type, content_disposition)
+            return key
+
+        monkeypatch.setattr(report_views, "upload_private_file", upload)
+        monkeypatch.setattr(report_views, "private_file_url", lambda key: f"https://files.test/{key}")
+        return files
+
+    def test_it_gives_a_link(self, landlord, property_, bill, uploaded):
+        assert _get(landlord, property_, download="pdf").data["file_url"].endswith(".pdf")
+
+    def test_it_is_a_pdf(self, landlord, property_, bill, uploaded):
+        _get(landlord, property_, download="pdf")
+        assert next(iter(uploaded.values()))[0].startswith(b"%PDF")
+
+    def test_it_opens_to_read(self, landlord, property_, bill, uploaded):
+        _get(landlord, property_, download="pdf")
+        assert next(iter(uploaded.values()))[2].startswith("inline;")
+
+    def test_it_is_made_with_no_bills(self, landlord, property_, uploaded):
+        assert _get(landlord, property_, download="pdf").status_code == 200

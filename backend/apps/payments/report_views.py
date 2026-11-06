@@ -214,15 +214,16 @@ class ReportsView(APIView):
         })
 
     def _statement(self, request):
-        """Every month's bills for a building, by house. With download=xlsx, a
-        link to the same as an Excel file; with month=YYYY-MM, that month only."""
+        """Every month's bills for a building, by house. With download=xlsx or
+        download=pdf, a link to the same as a file; with month=YYYY-MM, that
+        month only."""
         if not request.user.is_landlord:
             return Response({"error": "Only the landlord can see the statement."}, status=403)
         prop, err = self._get_property(request)
         if err:
             return err
 
-        from .statement import statement, statement_xlsx
+        from .statement import statement, statement_pdf, statement_xlsx
 
         data = statement(prop)
         months, deposits = data["months"], data["deposits"]
@@ -230,20 +231,25 @@ class ReportsView(APIView):
         if only:
             months = [m for m in months if m["month"] == only]
 
-        if request.query_params.get("download") != "xlsx":
+        kind = request.query_params.get("download")
+        if kind not in ("xlsx", "pdf"):
             return Response({"property": prop.name, "months": _plain(months), "deposits": _plain(deposits)})
 
+        build, content_type, disposition = {
+            "xlsx": (statement_xlsx, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "attachment"),
+            # Inline so the phone opens it to read rather than only saving it.
+            "pdf": (statement_pdf, "application/pdf", "inline"),
+        }[kind]
         try:
-            content = statement_xlsx(prop, months, deposits)
+            content = build(prop, months, deposits)
         except Exception:
-            logger.exception("Statement spreadsheet generation failed")
-            return Response({"error": "Spreadsheet generation failed."}, status=500)
-        name = f"{prop.name} statement {only or 'all months'}.xlsx"
-        key = f"reports/statement/{prop.id}/{timezone.now():%Y%m%d%H%M%S}.xlsx"
+            logger.exception("Statement %s generation failed", kind)
+            return Response({"error": "The file could not be made."}, status=500)
+        name = f"{prop.name} statement {only or 'all months'}.{kind}"
+        key = f"reports/statement/{prop.id}/{timezone.now():%Y%m%d%H%M%S}.{kind}"
         try:
             stored = upload_private_file(
-                key, content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                content_disposition=f'attachment; filename="{name}"',
+                key, content, content_type, content_disposition=f'{disposition}; filename="{name}"',
             )
             url = private_file_url(stored)
         except Exception:

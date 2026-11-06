@@ -39,7 +39,7 @@ String _houses(int n) => n == 1 ? '1 house' : '$n houses';
 
 /// Every month's bills for a building, house by house: rent, water and
 /// service charge paid, the water readings behind each charge, and the
-/// deposits held. The same figures download as an Excel file.
+/// deposits held. The same figures download as a PDF or an Excel file.
 class StatementScreen extends ConsumerStatefulWidget {
   const StatementScreen({super.key});
 
@@ -50,16 +50,16 @@ class StatementScreen extends ConsumerStatefulWidget {
 class _StatementScreenState extends ConsumerState<StatementScreen> {
   int? _buildingId;
   String? _month;
-  bool _downloading = false;
+  String? _downloading;
 
-  Future<void> _download(int buildingId) async {
-    setState(() => _downloading = true);
+  Future<void> _download(int buildingId, String kind) async {
+    setState(() => _downloading = kind);
     final messenger = ScaffoldMessenger.of(context);
     try {
       final res = await ref.read(dioProvider).get(_url, queryParameters: {
         'type': 'statement',
         'property': buildingId,
-        'download': 'xlsx',
+        'download': kind,
         if (_month != null) 'month': _month,
       });
       final link = res.data['file_url'] as String;
@@ -76,7 +76,7 @@ class _StatementScreenState extends ConsumerState<StatementScreen> {
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text(apiError(e))));
     } finally {
-      if (mounted) setState(() => _downloading = false);
+      if (mounted) setState(() => _downloading = null);
     }
   }
 
@@ -119,10 +119,17 @@ class _StatementScreenState extends ConsumerState<StatementScreen> {
             if (statement.valueOrNull?.months.isNotEmpty ?? false)
               KasaActionBar(children: [
                 KasaButton(
-                  label: _month == null ? 'Download Excel' : 'Download this month',
-                  leading: const Icon(Icons.download_rounded, size: 20),
-                  isLoading: _downloading,
-                  onTap: _downloading ? null : () => _download(id),
+                  label: 'Excel',
+                  variant: KasaButtonVariant.secondary,
+                  fullWidth: false,
+                  isLoading: _downloading == 'xlsx',
+                  onTap: _downloading != null ? null : () => _download(id, 'xlsx'),
+                ),
+                KasaButton(
+                  label: _month == null ? 'Download PDF' : 'PDF of this month',
+                  leading: const Icon(Icons.picture_as_pdf_outlined, size: 20),
+                  isLoading: _downloading == 'pdf',
+                  onTap: _downloading != null ? null : () => _download(id, 'pdf'),
                 ),
               ]),
           ]);

@@ -151,9 +151,14 @@ void main() {
     expect(find.text('Held · moved in 1 Oct 2026'), findsOneWidget);
   });
 
-  testWidgets('it offers the Excel download', (tester) async {
+  testWidgets('it offers a PDF', (tester) async {
     await _open(tester);
-    expect(find.text('Download Excel'), findsOneWidget);
+    expect(find.text('Download PDF'), findsOneWidget);
+  });
+
+  testWidgets('it offers Excel too', (tester) async {
+    await _open(tester);
+    expect(find.text('Excel'), findsOneWidget);
   });
 
   testWidgets('it fits a narrow phone with large text', (tester) async {
