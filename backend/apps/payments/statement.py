@@ -4,6 +4,10 @@ WHY rows come from bills and not payments: a bill is what a month cost each
 house, and its line items say how much of that was rent, water and service
 charge. A payment only knows the bill it cleared, so what it paid towards each
 item is worked out here (see _paid_by_item).
+
+WHY deposits are added on: a deposit handed over on move-in was marked paid on
+the tenancy and never billed, so no bill carries it. It is shown on the
+tenant's first bill, beside (not inside) what the bill was paid.
 """
 from datetime import date
 from decimal import Decimal
@@ -22,26 +26,69 @@ _METHODS = {
 }
 
 
-def statement(prop) -> list[dict]:
+def statement(prop) -> dict:
     """Every month that has a bill for this building, oldest first, each with
-    its rows (one per bill, by house) and totals."""
-    bills = (
+    its rows (one per bill, by house) and totals; and every tenant's deposit."""
+    bills = list(
         Invoice.objects.filter(tenancy__unit__property=prop)
         .exclude(status=Invoice.Status.CANCELLED)
         .select_related("tenancy__unit", "tenancy__tenant")
         .prefetch_related("line_items", "payments__carried_from")
         .order_by("period_start", "tenancy__unit__unit_number")
     )
+    billed_deposit = {b.tenancy_id for b in bills for li in b.line_items.all() if li.charge_type == "deposit"}
+    first_bill = {}
+    for bill in bills:
+        first_bill.setdefault(bill.tenancy_id, bill.pk)
+
     months: dict[date, list[dict]] = {}
     for bill in bills:
-        months.setdefault(bill.period_start.replace(day=1), []).append(_row(bill))
-    return [
-        {"month": month.strftime("%Y-%m"), "label": f"{month:%B %Y}", "rows": rows, "totals": _totals(rows)}
-        for month, rows in months.items()
-    ]
+        tenancy = bill.tenancy
+        on_entry = (
+            tenancy.deposit_amount
+            if tenancy.deposit_paid and first_bill[tenancy.pk] == bill.pk and tenancy.pk not in billed_deposit
+            else ZERO
+        )
+        months.setdefault(bill.period_start.replace(day=1), []).append(_row(bill, on_entry))
+    return {
+        "months": [
+            {"month": month.strftime("%Y-%m"), "label": f"{month:%B %Y}", "rows": rows, "totals": _totals(rows)}
+            for month, rows in months.items()
+        ],
+        "deposits": _deposits(prop),
+    }
 
 
-def _row(bill) -> dict:
+def _deposits(prop) -> list[dict]:
+    from apps.tenants.models import DepositSettlement, Tenancy
+
+    rows = []
+    for tenancy in (Tenancy.objects.filter(unit__property=prop)
+                    .select_related("unit", "tenant").order_by("unit__unit_number", "start_date")):
+        try:
+            settled = tenancy.deposit_settlement
+        except DepositSettlement.DoesNotExist:
+            settled = None
+        if settled is None:
+            status = "Held" if tenancy.deposit_paid else "Not paid"
+        elif settled.forfeited:
+            status = "Forfeited"
+        elif settled.refunded_at:
+            status = f"Refunded {settled.refund_due:,.0f}"
+        else:
+            status = f"Settled, {settled.refund_due:,.0f} to refund"
+        rows.append({
+            "unit": tenancy.unit.unit_number,
+            "tenant": tenancy.tenant.get_full_name(),
+            "moved_in": tenancy.start_date.isoformat() if tenancy.start_date else None,
+            "amount": tenancy.deposit_amount,
+            "status": status,
+            "held": tenancy.deposit_amount if tenancy.deposit_paid and settled is None else ZERO,
+        })
+    return rows
+
+
+def _row(bill, deposit_on_entry=ZERO) -> dict:
     items = list(bill.line_items.all())
     paid = _paid_by_item(bill, items)
     water = [li for li in items if li.charge_type == "water"]
@@ -70,15 +117,17 @@ def _row(bill) -> dict:
         "service_paid": paid_for("service"),
         "other_billed": billed("other"),
         "other_paid": paid_for("other"),
+        "deposit_paid": paid_for("deposit") + deposit_on_entry,
         "billed": bill.amount_due,
         "paid": bill.amount_paid,
         "balance": bill.balance,
+        "received": bill.amount_paid + deposit_on_entry,
         "paid_via": _paid_via(bill),
     }
 
 
 def _kind(item) -> str:
-    return item.charge_type if item.charge_type in ("rent", "water", "service") else "other"
+    return item.charge_type if item.charge_type in ("rent", "water", "service", "deposit") else "other"
 
 
 def _paid_by_item(bill, items) -> dict:
@@ -110,7 +159,7 @@ def _paid_via(bill) -> str:
 
 
 _SUMMED = ("rent_paid", "water_units", "water_billed", "water_paid", "service_paid", "other_paid",
-           "billed", "paid", "balance")
+           "deposit_paid", "billed", "paid", "balance", "received")
 
 
 def _totals(rows) -> dict:
@@ -132,14 +181,16 @@ _COLUMNS = [
     ("Water paid", "water_paid", 11),
     ("Service charge paid", "service_paid", 11),
     ("Other paid", "other_paid", 10),
-    ("Total billed", "billed", 12),
-    ("Total paid", "paid", 12),
+    ("Deposit paid", "deposit_paid", 11),
+    ("Bill total", "billed", 12),
+    ("Bill paid", "paid", 12),
     ("Balance", "balance", 11),
+    ("Received (with deposit)", "received", 13),
     ("Paid via", "paid_via", 26),
 ]
 
 
-def statement_xlsx(prop, months: list[dict]) -> bytes:
+def statement_xlsx(prop, months: list[dict], deposits: list[dict]) -> bytes:
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
@@ -188,6 +239,30 @@ def statement_xlsx(prop, months: list[dict]) -> bytes:
     sheet.append([])
     sheet.append(["A part-paid bill is counted against rent first, then the other charges."])
     sheet.cell(sheet.max_row, 1).font = Font(italic=True, color="666666")
+    sheet.append(["A deposit paid on move-in is shown on the tenant's first bill, outside the bill's own total."])
+    sheet.cell(sheet.max_row, 1).font = Font(italic=True, color="666666")
+
+    held = book.create_sheet("Deposits")
+    held.append([f"{prop.name}: deposits"])
+    held["A1"].font = Font(bold=True, size=13)
+    held.append([])
+    held.append(["House", "Tenant", "Moved in", "Deposit", "Status", "Held now"])
+    for cell in held[3]:
+        cell.font = bold
+        cell.fill = shade
+    for row in deposits:
+        moved_in = date.fromisoformat(row["moved_in"]) if row["moved_in"] else None
+        held.append([row["unit"], row["tenant"], moved_in, row["amount"], row["status"], row["held"]])
+        held.cell(held.max_row, 3).number_format = "d mmm yyyy"
+        for column in (4, 6):
+            held.cell(held.max_row, column).number_format = money
+    held.append(["Total held", "", "", "", "", sum((r["held"] for r in deposits), ZERO)])
+    for cell in held[held.max_row]:
+        cell.font = bold
+        cell.border = rule
+    held.cell(held.max_row, 6).number_format = money
+    for letter, width in zip("ABCDEF", (8, 24, 13, 12, 24, 12)):
+        held.column_dimensions[letter].width = width
 
     buffer = BytesIO()
     book.save(buffer)

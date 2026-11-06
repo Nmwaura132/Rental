@@ -84,6 +84,34 @@ class TestTheStatement:
         assert (totals["billed"], totals["paid"], totals["balance"]) == (
             str(bill.amount_due), "5000.00", str(bill.amount_due - 5000))
 
+    def test_a_deposit_paid_on_entry_shows_on_the_first_bill(self, landlord, property_, bill):
+        bill.tenancy.__class__.objects.filter(pk=bill.tenancy_id).update(deposit_paid=True)
+        assert _row(landlord, property_)["deposit_paid"] == str(bill.tenancy.deposit_amount)
+
+    def test_a_deposit_paid_on_entry_is_counted_as_received(self, landlord, property_, bill):
+        bill.tenancy.__class__.objects.filter(pk=bill.tenancy_id).update(deposit_paid=True)
+        _pay(bill, bill.amount_due)
+        assert _row(landlord, property_)["received"] == str(bill.amount_due + bill.tenancy.deposit_amount)
+
+    def test_a_deposit_on_entry_stays_out_of_the_bill_total(self, landlord, property_, bill):
+        bill.tenancy.__class__.objects.filter(pk=bill.tenancy_id).update(deposit_paid=True)
+        assert _row(landlord, property_)["billed"] == str(bill.amount_due)
+
+    def test_an_unpaid_deposit_is_not_shown_as_paid(self, landlord, property_, bill):
+        assert _row(landlord, property_)["deposit_paid"] == "0"
+
+    def test_a_held_deposit_is_listed(self, landlord, property_, bill):
+        bill.tenancy.__class__.objects.filter(pk=bill.tenancy_id).update(deposit_paid=True)
+        deposit = _get(landlord, property_).data["deposits"][0]
+        assert (deposit["status"], deposit["held"]) == ("Held", str(bill.tenancy.deposit_amount))
+
+    def test_a_billed_deposit_is_counted_once(self, landlord, property_, bill):
+        InvoiceLineItem.objects.create(invoice=bill, charge_type="deposit", description="Security deposit", amount=Decimal("1000"))
+        Invoice.objects.filter(pk=bill.pk).update(amount_due=bill.amount_due + 1000)
+        bill.refresh_from_db()
+        _pay(bill, bill.amount_due)
+        assert _row(landlord, property_)["deposit_paid"] == "1000.00"
+
     def test_a_cancelled_bill_is_left_out(self, landlord, property_, bill):
         Invoice.objects.filter(pk=bill.pk).update(status=Invoice.Status.CANCELLED)
         assert _get(landlord, property_).data["months"] == []
@@ -130,4 +158,10 @@ class TestTheSpreadsheet:
         _pay(bill, bill.amount_due)
         sheet = self._sheet(landlord, property_, uploaded)
         totals = next(r for r in sheet.iter_rows(values_only=True) if r[0] == "All months")
-        assert totals[13] == bill.amount_due
+        assert totals[14] == bill.amount_due
+
+    def test_it_has_a_deposits_sheet(self, landlord, property_, bill, uploaded):
+        bill.tenancy.__class__.objects.filter(pk=bill.tenancy_id).update(deposit_paid=True)
+        _get(landlord, property_, download="xlsx")
+        book = load_workbook(BytesIO(next(iter(uploaded.values()))))
+        assert [c.value for c in book["Deposits"][4]][4:] == ["Held", bill.tenancy.deposit_amount]

@@ -224,16 +224,17 @@ class ReportsView(APIView):
 
         from .statement import statement, statement_xlsx
 
-        months = statement(prop)
+        data = statement(prop)
+        months, deposits = data["months"], data["deposits"]
         only = request.query_params.get("month")
         if only:
             months = [m for m in months if m["month"] == only]
 
         if request.query_params.get("download") != "xlsx":
-            return Response({"property": prop.name, "months": _plain(months)})
+            return Response({"property": prop.name, "months": _plain(months), "deposits": _plain(deposits)})
 
         try:
-            content = statement_xlsx(prop, months)
+            content = statement_xlsx(prop, months, deposits)
         except Exception:
             logger.exception("Statement spreadsheet generation failed")
             return Response({"error": "Spreadsheet generation failed."}, status=500)

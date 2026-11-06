@@ -27,6 +27,8 @@ Map<String, dynamic> _row(String unit, String tenant, {String paid = '27700.00',
       'paid': paid,
       'balance': balance,
       'paid_via': 'M-Pesa UK4S88RZHZ',
+      'deposit_paid': unit == 'G1' ? '25000.00' : '0',
+      'received': unit == 'G1' ? '50700.00' : paid,
     };
 
 Map<String, dynamic> _totals(String billed, String paid, String balance) => {
@@ -39,6 +41,8 @@ Map<String, dynamic> _totals(String billed, String paid, String balance) => {
       'billed': billed,
       'paid': paid,
       'balance': balance,
+      'deposit_paid': billed == paid ? '0' : '25000.00',
+      'received': billed == paid ? paid : '50700.00',
     };
 
 final _months = [
@@ -64,7 +68,13 @@ class _Server implements HttpClientAdapter {
   Future<ResponseBody> fetch(RequestOptions o, Stream<List<int>>? s, Future<void>? c) async {
     final body = o.path.contains('properties')
         ? {'count': 1, 'next': null, 'results': [{'id': 1, 'name': 'Maria Goretti Apartments'}]}
-        : {'property': 'Maria Goretti Apartments', 'months': _months};
+        : {
+            'property': 'Maria Goretti Apartments',
+            'months': _months,
+            'deposits': [
+              {'unit': 'G1', 'tenant': 'Margaret Wanjiru', 'moved_in': '2026-10-01', 'amount': '25000.00', 'status': 'Held', 'held': '25000.00'},
+            ],
+          };
     return ResponseBody.fromString(jsonEncode(body), 200, headers: {
       Headers.contentTypeHeader: ['application/json'],
     });
@@ -124,6 +134,21 @@ void main() {
     await tester.tap(find.text('November 2026').first);
     await tester.pumpAndSettle();
     expect(find.text('KES 0'), findsOneWidget);
+  });
+
+  testWidgets('a deposit paid on moving in shows on that month', (tester) async {
+    await _open(tester);
+    expect(find.text('Deposit 25,000 paid on moving in'), findsOneWidget);
+  });
+
+  testWidgets('deposits are counted in what was received', (tester) async {
+    await _open(tester);
+    expect(find.text('KES 78,400'), findsOneWidget);
+  });
+
+  testWidgets('every deposit held is listed', (tester) async {
+    await _open(tester, size: const Size(390, 1400));
+    expect(find.text('Held · moved in 1 Oct 2026'), findsOneWidget);
   });
 
   testWidgets('it offers the Excel download', (tester) async {

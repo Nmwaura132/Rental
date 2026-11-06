@@ -20,10 +20,14 @@ final _buildingsProvider = FutureProvider.autoDispose<List<Map<String, dynamic>>
   return rows.cast<Map<String, dynamic>>();
 });
 
-final _statementProvider =
-    FutureProvider.autoDispose.family<List<Map<String, dynamic>>, int>((ref, buildingId) async {
+typedef _Statement = ({List<Map<String, dynamic>> months, List<Map<String, dynamic>> deposits});
+
+final _statementProvider = FutureProvider.autoDispose.family<_Statement, int>((ref, buildingId) async {
   final res = await ref.watch(dioProvider).get(_url, queryParameters: {'type': 'statement', 'property': buildingId});
-  return (res.data['months'] as List).cast<Map<String, dynamic>>();
+  return (
+    months: (res.data['months'] as List).cast<Map<String, dynamic>>(),
+    deposits: (res.data['deposits'] as List).cast<Map<String, dynamic>>(),
+  );
 });
 
 final _figures = NumberFormat('#,##0.##');
@@ -34,8 +38,8 @@ String _n(Object? v) => _figures.format(toDouble(v));
 String _houses(int n) => n == 1 ? '1 house' : '$n houses';
 
 /// Every month's bills for a building, house by house: rent, water and
-/// service charge paid, and the water readings behind each charge. The same
-/// figures download as an Excel file.
+/// service charge paid, the water readings behind each charge, and the
+/// deposits held. The same figures download as an Excel file.
 class StatementScreen extends ConsumerStatefulWidget {
   const StatementScreen({super.key});
 
@@ -107,12 +111,12 @@ class _StatementScreenState extends ConsumerState<StatementScreen> {
                   ...statement.when(
                     loading: () => [const KasaSkeletonSummary()],
                     error: (e, _) => [Text(apiError(e))],
-                    data: (months) => _body(context, months),
+                    data: (s) => _body(context, s),
                   ),
                 ]),
               ),
             ),
-            if (statement.valueOrNull?.isNotEmpty ?? false)
+            if (statement.valueOrNull?.months.isNotEmpty ?? false)
               KasaActionBar(children: [
                 KasaButton(
                   label: _month == null ? 'Download Excel' : 'Download this month',
@@ -127,7 +131,8 @@ class _StatementScreenState extends ConsumerState<StatementScreen> {
     );
   }
 
-  List<Widget> _body(BuildContext context, List<Map<String, dynamic>> months) {
+  List<Widget> _body(BuildContext context, _Statement statement) {
+    final months = statement.months;
     if (months.isEmpty) {
       return [
         const KasaNotice(
@@ -157,7 +162,41 @@ class _StatementScreenState extends ConsumerState<StatementScreen> {
           for (final row in (month['rows'] as List).cast<Map<String, dynamic>>()) _HouseRow(row),
         ]),
       ],
+      if (_month == null && statement.deposits.isNotEmpty) ...[
+        const SizedBox(height: 24),
+        _Deposits(statement.deposits),
+      ],
     ];
+  }
+}
+
+/// Every tenant's deposit and what became of it.
+class _Deposits extends StatelessWidget {
+  const _Deposits(this.deposits);
+  final List<Map<String, dynamic>> deposits;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final figure = KasaFont.sans(fontSize: 14, fontWeight: FontWeight.w600, color: cs.onSurface)
+        .copyWith(fontFeatures: kTabularFigures);
+    final held = deposits.fold(0.0, (t, d) => t + toDouble(d['held']));
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      KasaSectionHeader('Deposits',
+          trailing: Text('${formatCurrency(held)} held', style: KasaFont.sans(fontSize: 13, color: cs.kasaTextSub))),
+      const SizedBox(height: 8),
+      KasaListGroup(children: [
+        for (final d in deposits)
+          KasaListRow(
+            tight: true,
+            title: '${d['unit']} · ${d['tenant']}',
+            subtitle: d['moved_in'] == null
+                ? '${d['status']}'
+                : '${d['status']} · moved in ${DateFormat('d MMM yyyy').format(DateTime.parse('${d['moved_in']}'))}',
+            trailing: Text(_n(d['amount']), style: figure),
+          ),
+      ]),
+    ]);
   }
 }
 
@@ -197,7 +236,7 @@ class _Summary extends StatelessWidget {
     return KasaCard(
       child: Column(children: [
         line('Billed', 'billed'),
-        line('Collected', 'paid', strong: true),
+        line('Paid on bills', 'paid'),
         KasaKeyValue('Still owed',
             Text(formatCurrency(owed), style: figure.copyWith(color: owed > 0 ? cs.statusPair(KasaStatusKind.overdue).fg : null))),
         Divider(height: 16, color: cs.kasaStroke),
@@ -205,7 +244,10 @@ class _Summary extends StatelessWidget {
         line('Water paid', 'water_paid'),
         line('Service charge paid', 'service_paid'),
         if (_sum('other_paid') > 0) line('Other paid', 'other_paid'),
+        if (_sum('deposit_paid') > 0) line('Deposits received', 'deposit_paid'),
         KasaKeyValue('Water used', Text('${_n(_sum('water_units'))} units', style: figure)),
+        Divider(height: 16, color: cs.kasaStroke),
+        line('Total received', 'received', strong: true),
       ]),
     );
   }
@@ -223,6 +265,7 @@ class _HouseRow extends StatelessWidget {
     final hasReading = row['water_current'] != null;
     final water = toDouble(row['water_billed']) > 0 || hasReading;
     final other = toDouble(row['other_billed']) > 0;
+    final deposit = toDouble(row['deposit_paid']);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -250,6 +293,7 @@ class _HouseRow extends StatelessWidget {
                 : 'Water ${_n(row['water_billed'])}',
             style: sub,
           ),
+        if (deposit > 0) Text('Deposit ${_n(deposit)} paid on moving in', style: sub),
         const SizedBox(height: 4),
         Text(
           'Paid ${_n(row['paid'])} of ${_n(row['billed'])}'
