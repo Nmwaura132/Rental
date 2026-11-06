@@ -115,12 +115,16 @@ void main() {
   group('MoreScreen', () {
     testWidgets('landlord: tenants, reports, tax, notifications, profile',
         (tester) async {
+      tester.view.physicalSize = const Size(390, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
       await tester.pumpWidget(_moreHost('landlord'));
       await tester.pumpAndSettle();
 
       expect(find.text('More'), findsOneWidget);
       for (final t in [
         'Tenants',
+        'Statement',
         'Reports',
         'Tax statement',
         'Notifications',

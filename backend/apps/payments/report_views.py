@@ -4,6 +4,7 @@ GET /api/v1/payments/reports/?type=<pnl|aged|ledger|rent_roll>&...
 """
 import logging
 from datetime import date
+from decimal import Decimal
 
 from django.utils import timezone
 from rest_framework import permissions
@@ -26,6 +27,17 @@ def _upload_pdf(pdf_bytes: bytes, key: str) -> str:
     return private_file_url(stored_key)
 
 
+def _plain(value):
+    """Money as strings, the way the rest of the API sends it."""
+    if isinstance(value, dict):
+        return {k: _plain(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_plain(v) for v in value]
+    if isinstance(value, Decimal):
+        return str(value)
+    return value
+
+
 @extend_schema(exclude=True)  # WHY: ad-hoc query params; returns PDF URL — document in handoff.md
 class ReportsView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -40,6 +52,7 @@ class ReportsView(APIView):
             "aged": self._aged,
             "ledger": self._ledger,
             "rent_roll": self._rent_roll,
+            "statement": self._statement,
         }
         handler = dispatch.get(report_type)
         if not handler:
@@ -199,6 +212,43 @@ class ReportsView(APIView):
                 "date_to": date_to.isoformat(),
             },
         })
+
+    def _statement(self, request):
+        """Every month's bills for a building, by house. With download=xlsx, a
+        link to the same as an Excel file; with month=YYYY-MM, that month only."""
+        if not request.user.is_landlord:
+            return Response({"error": "Only the landlord can see the statement."}, status=403)
+        prop, err = self._get_property(request)
+        if err:
+            return err
+
+        from .statement import statement, statement_xlsx
+
+        months = statement(prop)
+        only = request.query_params.get("month")
+        if only:
+            months = [m for m in months if m["month"] == only]
+
+        if request.query_params.get("download") != "xlsx":
+            return Response({"property": prop.name, "months": _plain(months)})
+
+        try:
+            content = statement_xlsx(prop, months)
+        except Exception:
+            logger.exception("Statement spreadsheet generation failed")
+            return Response({"error": "Spreadsheet generation failed."}, status=500)
+        name = f"{prop.name} statement {only or 'all months'}.xlsx"
+        key = f"reports/statement/{prop.id}/{timezone.now():%Y%m%d%H%M%S}.xlsx"
+        try:
+            stored = upload_private_file(
+                key, content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                content_disposition=f'attachment; filename="{name}"',
+            )
+            url = private_file_url(stored)
+        except Exception:
+            logger.exception("MinIO upload failed for statement")
+            return Response({"error": "File upload failed."}, status=500)
+        return Response({"file_url": url, "generated_at": timezone.now().isoformat()})
 
     def _rent_roll(self, request):
         prop, err = self._get_property(request)

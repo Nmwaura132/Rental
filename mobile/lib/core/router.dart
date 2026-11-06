@@ -16,6 +16,7 @@ import '../features/payments/invoices_screen.dart';
 import '../features/payments/payment_methods_screen.dart';
 import '../features/notifications/message_tenants_screen.dart';
 import '../features/payments/reports_screen.dart';
+import '../features/payments/statement_screen.dart';
 import '../features/payments/tax_screen.dart';
 import '../features/notifications/notifications_screen.dart';
 import '../features/tenants/tenants_screen.dart';
@@ -71,7 +72,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         // /tax is the landlord's own KRA liability; the API refuses it for
         // anyone else, so routing a tenant there would only show them a 403.
         const tenantRestricted = [
-          '/properties', '/tenants', '/reports', '/tax', '/readings', '/payment-methods', '/message-tenants',
+          '/properties', '/tenants', '/reports', '/statement', '/tax', '/readings', '/payment-methods', '/message-tenants',
         ];
         if (role == 'tenant' &&
             tenantRestricted.any(
@@ -93,6 +94,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/notifications', builder: (_, __) => const NotificationsScreen()),
       GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
       GoRoute(path: '/reports', builder: (_, __) => const ReportsScreen()),
+      GoRoute(path: '/statement', builder: (_, __) => const StatementScreen()),
       GoRoute(path: '/tax', builder: (_, __) => const TaxScreen()),
       GoRoute(path: '/signup', builder: (_, __) => const SignupScreen()),
       GoRoute(path: '/payment-methods', builder: (_, __) => const PaymentMethodsScreen()),

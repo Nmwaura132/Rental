@@ -56,5 +56,10 @@
             <action android:name="android.intent.action.VIEW"/>
             <data android:scheme="tel"/>
         </intent>
+        <!-- So a statement's download link can be handed to the browser. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
+        </intent>
     </queries>
 </manifest>

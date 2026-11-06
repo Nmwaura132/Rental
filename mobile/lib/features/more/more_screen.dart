@@ -51,6 +51,12 @@ class MoreScreen extends ConsumerWidget {
             onTap: () => context.push('/payment-methods'),
           ),
           _Row(
+            icon: Icons.table_chart_outlined,
+            title: 'Statement',
+            subtitle: 'Every month by house, and as Excel',
+            onTap: () => context.push('/statement'),
+          ),
+          _Row(
             icon: Icons.description_outlined,
             title: 'Reports',
             subtitle: 'Rent roll, arrears and collections',

@@ -358,7 +358,7 @@ class _MoneyShortcuts extends StatelessWidget {
         );
     return IntrinsicHeight(
       child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        tile(Icons.description_outlined, 'Reports', '/reports'),
+        tile(Icons.table_chart_outlined, 'Statement', '/statement'),
         const SizedBox(width: 8),
         tile(Icons.receipt_outlined, 'Tax statement', '/tax'),
       ]),
